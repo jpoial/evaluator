@@ -271,19 +271,19 @@ public class SpecList extends LinkedList<Spec> {
       int result = index;
       if (index == -1) { // first pass
          if (!table.containsKey (key)) {
-            table.put (key, new Integer (0)); // first time
+            table.put (key, Integer.valueOf (0)); // first time
          } else {
             if (((Integer)table.get (key)).intValue() == 0) {
-               table.put (key, new Integer (-2)); // second time
+               table.put (key, Integer.valueOf (-2)); // second time
             } else { // third time etc.
-               table.put (key, new Integer (-1));
+               table.put (key, Integer.valueOf (-1));
             }
          }
       } else {  // second pass
          if (table.containsKey (key)) {
             if (((Integer)table.get (key)).intValue() == -1) {
                result++;
-               table.put (key, new Integer (result));
+               table.put (key, Integer.valueOf (result));
             } else { // all other values except -1 remain the same
             }
          } else {

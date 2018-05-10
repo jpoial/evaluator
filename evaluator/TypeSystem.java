@@ -29,20 +29,20 @@ public class TypeSystem {
     */
    TypeSystem (String fileName) {
       typeIndices = new Hashtable<String, Integer>();
-      typeIndices.put ("X", new Integer (0));
-      typeIndices.put ("x", new Integer (0));
-      typeIndices.put ("N", new Integer (1));
-      typeIndices.put ("n", new Integer (1));
-      typeIndices.put ("char", new Integer (2));
-      typeIndices.put ("c", new Integer (2));
-      typeIndices.put ("flag", new Integer (3));
-      typeIndices.put ("f", new Integer (3));
-      typeIndices.put ("addr", new Integer (4));
-      typeIndices.put ("a", new Integer (4));
-      typeIndices.put ("c-addr", new Integer (5));
-      typeIndices.put ("ca", new Integer (5));
-      typeIndices.put ("a-addr", new Integer (6));
-      typeIndices.put ("aa", new Integer (6));
+      typeIndices.put ("X", Integer.valueOf (0));
+      typeIndices.put ("x", Integer.valueOf (0));
+      typeIndices.put ("N", Integer.valueOf (1));
+      typeIndices.put ("n", Integer.valueOf (1));
+      typeIndices.put ("char", Integer.valueOf (2));
+      typeIndices.put ("c", Integer.valueOf (2));
+      typeIndices.put ("flag", Integer.valueOf (3));
+      typeIndices.put ("f", Integer.valueOf (3));
+      typeIndices.put ("addr", Integer.valueOf (4));
+      typeIndices.put ("a", Integer.valueOf (4));
+      typeIndices.put ("c-addr", Integer.valueOf (5));
+      typeIndices.put ("ca", Integer.valueOf (5));
+      typeIndices.put ("a-addr", Integer.valueOf (6));
+      typeIndices.put ("aa", Integer.valueOf (6));
       actSize = 7;
       rel = new int [actSize][actSize];
       for (int i=0; i < actSize; i++) {
