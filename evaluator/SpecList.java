@@ -23,8 +23,26 @@ public class SpecList extends LinkedList<Spec> {
       boolean explicitIndex = false;
    } // end of NormInfo
 
+   static class ConflictInfo {
+      Spec prefixEffect;
+      Spec incomingEffect;
+      TypeSymbol actualType;
+      TypeSymbol expectedType;
+
+      ConflictInfo (Spec prefix, Spec incoming, TypeSymbol actual,
+         TypeSymbol expected) {
+         prefixEffect = prefix;
+         incomingEffect = incoming;
+         actualType = actual;
+         expectedType = expected;
+      } // end of constructor
+   } // end of ConflictInfo
+
    /** workfield to keep current maximal index */
    int cMaxInd = 0;
+
+   /** last composition failure, if any */
+   ConflictInfo lastConflict = null;
 
    /**
     * Creates initial specificationlist for the program.
@@ -36,14 +54,16 @@ public class SpecList extends LinkedList<Spec> {
       Iterator<String> pit = p.iterator();
       String s, key;
       Spec sp;
+      int pos = 0;
       while (pit.hasNext()) {
          s = (String)pit.next();
          // key = (s.trim().split ("[\t \r\n\f]"))[0]; // JDK 1.4!!!
          key = s.trim(); // earlier JDK
          sp = (Spec)ss.get (key);
          if (sp == null)
-            throw new RuntimeException ("no specif. found for " + key);
-         add ((Spec)sp.clone());
+            throw p.missingWord (key, p.wordSpan (pos), "top-level program");
+         add (((Spec)sp.clone()).withOrigin (p.wordSpan (pos), key));
+         pos++;
       }
    } // end of constructor
 
@@ -75,6 +95,7 @@ public class SpecList extends LinkedList<Spec> {
     * @return resulting specification (list itself is also modified!)
     */
    public Spec evaluate (TypeSystem ts, SpecSet ss) {
+      lastConflict = null;
       Iterator<Spec> it = iterator();
       while (it.hasNext()) {
          Spec current = (Spec)it.next();
@@ -93,11 +114,7 @@ public class SpecList extends LinkedList<Spec> {
          second = (Spec)get (i);
          result = multiply (result, second, ts);
          // System.out.println ("Multiply used "+second.toString());
-         if (result == null) {
-            System.out.println
-            // throw new RuntimeException
-               ("Type conflict for " + second.toString() + "!!!");
-         }
+         if (result == null) return null;
          i++;
       }
       if (result != null) result = normalize (result, ts, ss);
@@ -128,9 +145,9 @@ public class SpecList extends LinkedList<Spec> {
             TypeSymbol mnew = null;
             switch (rel) {
                case 0: // type conflict
-                  System.out.println ("Conflict between " +
-                     m1.toString() + " and " + m2.toString() +
-                     " in " + s1.toString() + " x " + s2.toString() );
+                  lastConflict = new ConflictInfo ((Spec)s1.clone(),
+                     (Spec)s2.clone(), (TypeSymbol)m1.clone(),
+                     (TypeSymbol)m2.clone());
                   return null;
                case 1:  // m1 win
                   mnew = new TypeSymbol (m1.ftype, ++cMaxInd,
@@ -163,7 +180,9 @@ public class SpecList extends LinkedList<Spec> {
             r1rs.removeElementAt (r1rs.size()-1);
             r2ls.removeElementAt (r2ls.size()-1);
             Spec r1 = new Spec (rleft, r1rs, ts, "", 0);
+            r1.withOrigin (s1.sourceSpan, s1.originLabel);
             Spec r2 = new Spec (r2ls, rright, ts, "", 0);
+            r2.withOrigin (s2.sourceSpan, s2.originLabel);
             return multiply (r1, r2, ts);
          };
       };
@@ -314,6 +333,46 @@ public class SpecList extends LinkedList<Spec> {
    static boolean needsIndex (NormInfo info) {
       return info.explicitIndex | (info.occurrences > 2);
    } // end of needsIndex()
+
+   /**
+    * Builds a user-friendly type clash diagnostic for the last failure.
+    * @param context structure name for the error message
+    * @return diagnostic exception
+    */
+   ProgramException typeClash (String context, ProgText prog) {
+      if (lastConflict == null)
+         return prog.programError ("type.linear-clash",
+            "Type clash in " + context, "", null);
+      StringBuffer reason = new StringBuffer ("");
+      SourceSpan span = null;
+      if ((lastConflict.incomingEffect != null) &
+          (lastConflict.incomingEffect.sourceSpan != null) &
+          lastConflict.incomingEffect.sourceSpan.hasLocation()) {
+         span = lastConflict.incomingEffect.sourceSpan;
+      }
+      reason.append ("current stack provides ");
+      reason.append (symbolText (lastConflict.actualType));
+      reason.append (" but ");
+      reason.append (lastConflict.incomingEffect.originText());
+      reason.append (" expects a value comparable with ");
+      reason.append (symbolText (lastConflict.expectedType));
+      reason.append (". Prefix effect ");
+      reason.append (lastConflict.prefixEffect.toString().trim());
+      reason.append (", incoming effect ");
+      reason.append (lastConflict.incomingEffect.toString().trim());
+      return prog.programError ("type.linear-clash",
+         "Type clash in " + context, reason.toString(), span);
+   } // end of typeClash()
+
+   /**
+    * Formats a symbol without trailing spaces.
+    * @param symbol type symbol
+    * @return symbol text
+    */
+   static String symbolText (TypeSymbol symbol) {
+      if (symbol == null) return "?";
+      return symbol.ftype;
+   } // end of symbolText()
 
 } // end of SpecList
 

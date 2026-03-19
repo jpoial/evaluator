@@ -46,6 +46,20 @@ public class Evaluator {
     * @param params  command-line parameters (program text)
     */
    public static void main (String[] params) {
+      try {
+         run (params);
+      } catch (ProgramException e) {
+         System.err.println ("Error: " +
+            ProgramDiagnosticRenderer.format (e.diagnostic()));
+         System.exit (1);
+      }
+   } // end of main()
+
+   /**
+    * Executes one evaluator run.
+    * @param params command-line parameters
+    */
+   static void run (String[] params) {
       RunConfig cfg = parseArgs (params);
       String profileInfo = cfg.profile.name;
       if (cfg.customFiles())
@@ -80,6 +94,9 @@ public class Evaluator {
          s2 = (Spec)((Spec)ex1list1.getLast()).clone();
       }
       Spec resultspec = ex1list1.evaluate (ex1types, ex1specs);
+      if (resultspec == null)
+         throw ex1list1.typeClash ("linear part of the top-level program",
+            ex1prog1);
       System.out.println (annotate (ex1prog1, ex1list1, resultspec));
       System.out.println();
       if (s1 != null) {
@@ -117,7 +134,7 @@ public class Evaluator {
          }
       }
 
-   } // end of main()
+   } // end of run()
 
    /**
     * Parses command-line parameters.

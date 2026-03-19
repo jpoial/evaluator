@@ -1,0 +1,3 @@
+: BADLOOP
+  BEGIN DUP AGAIN
+;

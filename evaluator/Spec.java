@@ -24,6 +24,12 @@ public class Spec {
    /** list of output parameter types */
    Tvector rightSide;
 
+   /** source span that produced this effect, when known */
+   SourceSpan sourceSpan;
+
+   /** short human label for diagnostics */
+   String originLabel = "";
+
    Spec (Tvector left, Tvector right, TypeSystem tsys,
      String parse, int np) {
       leftSide = left;
@@ -36,6 +42,34 @@ public class Spec {
    Spec (TypeSystem tsys) {
       this (new Tvector(), new Tvector(), tsys, "", 0);
    } // end of constructor
+
+   /**
+    * Attaches source metadata to this stack effect.
+    * @param span source span
+    * @param label short label for diagnostics
+    * @return this spec
+    */
+   Spec withOrigin (SourceSpan span, String label) {
+      sourceSpan = span;
+      if (label == null) {
+         originLabel = "";
+      } else {
+         originLabel = label;
+      }
+      return this;
+   } // end of withOrigin()
+
+   /**
+    * Returns a short description of the source construct.
+    * @return diagnostic label
+    */
+   String originText() {
+      if ((originLabel != null) & (originLabel.length() > 0))
+         return originLabel;
+      if (sourceSpan != null)
+         return sourceSpan.startText();
+      return "operation";
+   } // end of originText()
 
    /**
     * Finds greatest lower bound of given stack effects.
@@ -234,8 +268,11 @@ public class Spec {
    public Object clone () {
       Tvector newleft = (Tvector)leftSide.clone(); // Vector clone is deep?
       Tvector newright = (Tvector)rightSide.clone();
-      return new Spec (newleft, newright, ts, parseString,
+      Spec result = new Spec (newleft, newright, ts, parseString,
          maxPosIndex);
+      result.sourceSpan = sourceSpan;
+      result.originLabel = originLabel;
+      return result;
    } // end of clone()
 
    /**

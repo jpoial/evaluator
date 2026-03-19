@@ -62,6 +62,11 @@ counted loop body, <code>I</code> is available as the innermost loop index
 with stack effect <code>( -- n )</code>. The loop body must still be
 idempotent under the evaluator's current approximation.
 <br>
+When program text is loaded from a file, user-facing diagnostics now include
+the failing line and column together with the relevant source line and caret
+marker for semantic clashes such as linear type conflicts, non-comparable
+<code>IF ... ELSE ... FI</code> branches, and non-idempotent loop bodies.
+<br>
 The type system is also profile-dependent now. The default <code>real</code>
 profile is more Forth-like: flags are numbers, characters are numbers, and
 the top stack-cell type is also aliased as <code>cell</code>. The

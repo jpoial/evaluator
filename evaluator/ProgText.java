@@ -1,4 +1,3 @@
-
 // file: ProgText.java
 
 package evaluator;
@@ -8,6 +7,8 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Inner representation for the program that is analysed.
@@ -17,21 +18,41 @@ import java.util.LinkedList;
  */
 public class ProgText extends LinkedList<String> {
 
-    static final long serialVersionUID = 0xaabbcc;
+   static final long serialVersionUID = 0xaabbcc;
+
+   static final Pattern WORD_PATTERN = Pattern.compile ("\\S+");
 
    /** original source text before parsing removes definitions */
    String sourceText = "";
 
+   /** original program source split into lines */
+   LinkedList<String> sourceLines = new LinkedList<String>();
+
+   /** source spans of top-level program words */
+   LinkedList<SourceSpan> wordSpans = new LinkedList<SourceSpan>();
+
+   static class SourceWord {
+      String text;
+      SourceSpan span;
+
+      SourceWord (String word, SourceSpan where) {
+         text = word;
+         span = where;
+      } // end of constructor
+   } // end of SourceWord
+
    static class ParseResult {
       Spec effect;
-      String stopWord;
+      SourceWord stopToken;
+      SourceSpan span;
 
-      ParseResult (Spec s, String stop) {
+      ParseResult (Spec s, SourceWord stop, SourceSpan where) {
          effect = s;
-         stopWord = stop;
+         stopToken = stop;
+         span = where;
       } // end of constructor
    } // end of ParseResult
-    
+
    ProgText() {
       super();
    } // end of constructor
@@ -45,7 +66,7 @@ public class ProgText extends LinkedList<String> {
     */
    ProgText (String fileName, TypeSystem ts, SpecSet ss) {
       this();
-      LinkedList<String> tokens = new LinkedList<String>();
+      LinkedList<SourceWord> tokens = new LinkedList<SourceWord>();
       StringBuffer source = new StringBuffer ("");
       String nl = System.getProperty ("line.separator");
       boolean firstLine = true;
@@ -53,15 +74,20 @@ public class ProgText extends LinkedList<String> {
       try {
          reader = new BufferedReader (new FileReader (fileName));
          String line;
+         int lineNo = 0;
          while ((line = reader.readLine()) != null) {
+            lineNo++;
             if (!firstLine) source.append (nl);
             source.append (line);
+            sourceLines.add (line);
             firstLine = false;
-            addWords (TypeSystem.stripComment (line), tokens);
+            addWords (lineBeforeComment (line), tokens, fileName, lineNo);
          }
       } catch (IOException e) {
-         throw new RuntimeException ("Unable to read program text from " +
-            fileName, e);
+         throw new ProgramException (new ProgramDiagnostic (
+            "program.read-failed", ProgramDiagnostic.SEVERITY_ERROR,
+            "Unable to read program text from " + fileName, "", null, null,
+            null), e);
       } finally {
          if (reader != null) {
             try {
@@ -84,14 +110,15 @@ public class ProgText extends LinkedList<String> {
     */
    ProgText (String[] text, TypeSystem ts, SpecSet ss) {
       this();
-      LinkedList<String> tokens = new LinkedList<String>();
+      LinkedList<SourceWord> tokens = new LinkedList<SourceWord>();
       StringBuffer source = new StringBuffer ("");
       for (int i=0; i<text.length; i++) {
          if (i > 0) source.append (" ");
          source.append (text [i]);
-         addWords (text [i], tokens);
+         addWords (text [i], tokens, "<command line>", 0);
       }
       sourceText = source.toString();
+      sourceLines.add (sourceText);
       parseTokens (tokens, ts, ss, "<command line>");
    } // end of constructor
 
@@ -104,18 +131,43 @@ public class ProgText extends LinkedList<String> {
    } // end of sourceText()
 
    /**
+    * Returns the source span of a top-level word.
+    * @param index program word index
+    * @return source span or null
+    */
+   SourceSpan wordSpan (int index) {
+      if ((index < 0) | (index >= wordSpans.size())) return null;
+      return (SourceSpan)wordSpans.get (index);
+   } // end of wordSpan()
+
+   /**
     * Adds all words from the given chunk of text to the target list.
     * @param text whitespace separated words
     * @param target target list for the parsed words
+    * @param sourceName source label
+    * @param lineNo line number in the source, or 0 if unavailable
     */
-   static void addWords (String text, LinkedList<String> target) {
-      String trimmed = text.trim();
-      if (trimmed.length() == 0) return;
-      String[] words = trimmed.split ("\\s+");
-      for (int i = 0; i < words.length; i++) {
-         target.add (words [i]);
+   static void addWords (String text, LinkedList<SourceWord> target,
+      String sourceName, int lineNo) {
+      Matcher matcher = WORD_PATTERN.matcher (text);
+      while (matcher.find()) {
+         int start = matcher.start() + 1;
+         int end = matcher.end();
+         target.add (new SourceWord (matcher.group(), new SourceSpan (
+            sourceName, lineNo, start, lineNo, end)));
       }
    } // end of addWords()
+
+   /**
+    * Removes the trailing comment marker but keeps original indentation.
+    * @param line source line
+    * @return line prefix before comment
+    */
+   static String lineBeforeComment (String line) {
+      int commentPos = line.indexOf ('#');
+      if (commentPos >= 0) return line.substring (0, commentPos);
+      return line;
+   } // end of lineBeforeComment()
 
    /**
     * Parses top-level program tokens and handles linear colon definitions.
@@ -124,46 +176,54 @@ public class ProgText extends LinkedList<String> {
     * @param ss current specification set
     * @param sourceName file name or other source label for diagnostics
     */
-   void parseTokens (LinkedList<String> tokens, TypeSystem ts, SpecSet ss,
+   void parseTokens (LinkedList<SourceWord> tokens, TypeSystem ts, SpecSet ss,
       String sourceName) {
       String currentDef = null;
-      LinkedList<String> defBody = null;
+      SourceWord currentDefToken = null;
+      LinkedList<SourceWord> defBody = null;
       while (tokens.size() > 0) {
-         String word = (String)tokens.removeFirst();
+         SourceWord token = (SourceWord)tokens.removeFirst();
+         String word = token.text;
          if (currentDef == null) {
             if (":".equals (word)) {
                if (tokens.size() == 0)
-                  throw new RuntimeException ("Missing word name after : in " +
-                     sourceName);
-               currentDef = ((String)tokens.removeFirst()).trim();
+                  throw programError ("parse.missing-word-name",
+                     "Missing word name after :", "", token.span);
+               currentDefToken = (SourceWord)tokens.removeFirst();
+               currentDef = currentDefToken.text.trim();
                if (currentDef.length() == 0)
-                  throw new RuntimeException ("Empty word name after : in " +
-                     sourceName);
+                  throw programError ("parse.empty-word-name",
+                     "Empty word name after :", "", currentDefToken.span);
                if (":".equals (currentDef) | ";".equals (currentDef))
-                  throw new RuntimeException ("Illegal word name " + currentDef +
-                     " in " + sourceName);
-               defBody = new LinkedList<String>();
+                  throw programError ("parse.illegal-word-name",
+                     "Illegal word name " + currentDef, "",
+                     currentDefToken.span);
+               defBody = new LinkedList<SourceWord>();
             } else {
                if (";".equals (word))
-                  throw new RuntimeException ("Unexpected ; in " + sourceName);
+                  throw unexpectedToken (";", token.span, sourceName);
                add (word);
+               wordSpans.add (token.span);
             }
          } else {
             if (":".equals (word))
-               throw new RuntimeException ("Nested definitions are not " +
-                  "supported in " + sourceName);
+               throw programError ("parse.nested-definition",
+                  "Nested definitions are not supported in definition of " +
+                  currentDef, "", token.span);
             if (";".equals (word)) {
                defineWord (currentDef, defBody, ts, ss, sourceName);
                currentDef = null;
+               currentDefToken = null;
                defBody = null;
             } else {
-               defBody.add (word);
+               defBody.add (token);
             }
          }
       }
       if (currentDef != null)
-         throw new RuntimeException ("Unterminated definition for " +
-            currentDef + " in " + sourceName);
+         throw programError ("parse.unterminated-definition",
+            "Unterminated definition for " + currentDef, "",
+            currentDefToken.span);
    } // end of parseTokens()
 
    /**
@@ -175,16 +235,15 @@ public class ProgText extends LinkedList<String> {
     * @param ss current specification set
     * @param sourceName file name or other source label for diagnostics
     */
-   void defineWord (String wordName, LinkedList<String> body, TypeSystem ts,
-      SpecSet ss, String sourceName) {
-      LinkedList<String> tokens = new LinkedList<String> (body);
+   void defineWord (String wordName, LinkedList<SourceWord> body,
+      TypeSystem ts, SpecSet ss, String sourceName) {
+      LinkedList<SourceWord> tokens = new LinkedList<SourceWord> (body);
       ParseResult parsed = parseDefinitionSequence (tokens, ts, ss,
          sourceName, wordName, new String [0], 0);
       Spec defSpec = parsed.effect;
-      if (parsed.stopWord != null)
-         throw new RuntimeException ("Unexpected terminator " +
-            parsed.stopWord + " in definition of " + wordName + " in " +
-            sourceName);
+      if (parsed.stopToken != null)
+         throw unexpectedToken (parsed.stopToken.text, parsed.stopToken.span,
+            "definition of " + wordName);
       ss.put (wordName, defSpec);
    } // end of defineWord()
 
@@ -201,70 +260,99 @@ public class ProgText extends LinkedList<String> {
     * @param doDepth number of surrounding DO..LOOP structures
     * @return parsed effect and the delimiter that ended the sequence
     */
-   ParseResult parseDefinitionSequence (LinkedList<String> tokens,
+   ParseResult parseDefinitionSequence (LinkedList<SourceWord> tokens,
       TypeSystem ts, SpecSet ss, String sourceName, String wordName,
       String[] stopWords, int doDepth) {
       SpecList seq = new SpecList();
+      SourceSpan seqSpan = null;
       while (tokens.size() > 0) {
-         String word = (String)tokens.removeFirst();
+         SourceWord token = (SourceWord)tokens.removeFirst();
+         String word = token.text;
          if (isStopWord (word, stopWords))
             return new ParseResult (evaluateSpecList (seq, ts, ss,
-               contextLabel ("sequence", wordName, sourceName)), word);
+               "linear part of definition " + wordName), token, seqSpan);
          if ("IF".equals (word)) {
             ParseResult thenPart = parseDefinitionSequence (tokens, ts, ss,
                sourceName, wordName, new String [] {"ELSE", "FI"}, doDepth);
-            ParseResult elsePart = new ParseResult (new Spec (ts), "FI");
-            if ("ELSE".equals (thenPart.stopWord)) {
-               elsePart = parseDefinitionSequence (tokens, ts, ss,
-                  sourceName, wordName, new String [] {"FI"}, doDepth);
+            boolean hasElse = false;
+            ParseResult elsePart = new ParseResult ((new Spec (ts)).withOrigin
+               (null, "empty branch"), thenPart.stopToken, null);
+            if ((thenPart.stopToken != null) &
+                "ELSE".equals (thenPart.stopToken.text)) {
+               hasElse = true;
+               elsePart = parseDefinitionSequence (tokens, ts, ss, sourceName,
+                  wordName, new String [] {"FI"}, doDepth);
             }
-            if (!"FI".equals (elsePart.stopWord))
-               throw new RuntimeException ("Missing FI for IF in definition " +
-                  "of " + wordName + " in " + sourceName);
-            seq.add (buildIfEffect (thenPart.effect, elsePart.effect, ts, ss,
-               sourceName, wordName));
+            if ((elsePart.stopToken == null) |
+                !"FI".equals (elsePart.stopToken.text))
+               throw missingTerminator ("FI", "IF", token.span, wordName);
+            SourceSpan ifSpan = SourceSpan.covering (token.span,
+               elsePart.stopToken.span);
+            Spec ifEffect = buildIfEffect (thenPart.effect, elsePart.effect,
+               ts, ss, wordName, ifSpan, hasElse);
+            seq.add (ifEffect);
+            seqSpan = SourceSpan.covering (seqSpan, ifSpan);
          } else if ("BEGIN".equals (word)) {
             ParseResult alphaPart = parseDefinitionSequence (tokens, ts, ss,
                sourceName, wordName,
                new String [] {"WHILE", "AGAIN", "UNTIL"}, doDepth);
-            if ("WHILE".equals (alphaPart.stopWord)) {
+            if ((alphaPart.stopToken != null) &
+                "WHILE".equals (alphaPart.stopToken.text)) {
                ParseResult betaPart = parseDefinitionSequence (tokens, ts, ss,
                   sourceName, wordName, new String [] {"REPEAT"}, doDepth);
-               if (!"REPEAT".equals (betaPart.stopWord))
-                  throw new RuntimeException ("Missing REPEAT for BEGIN in " +
-                     "definition of " + wordName + " in " + sourceName);
-               seq.add (buildWhileEffect (alphaPart.effect, betaPart.effect,
-                  ts, ss, sourceName, wordName));
-            } else if ("AGAIN".equals (alphaPart.stopWord)) {
-               seq.add (buildAgainEffect (alphaPart.effect, ts, ss,
-                  sourceName, wordName));
-            } else if ("UNTIL".equals (alphaPart.stopWord)) {
-               seq.add (buildUntilEffect (alphaPart.effect, ts, ss,
-                  sourceName, wordName));
+               if ((betaPart.stopToken == null) |
+                   !"REPEAT".equals (betaPart.stopToken.text))
+                  throw missingTerminator ("REPEAT", "BEGIN", token.span,
+                     wordName);
+               SourceSpan loopSpan = SourceSpan.covering (token.span,
+                  betaPart.stopToken.span);
+               Spec loopEffect = buildWhileEffect (alphaPart.effect,
+                  betaPart.effect, ts, ss, wordName, loopSpan);
+               seq.add (loopEffect);
+               seqSpan = SourceSpan.covering (seqSpan, loopSpan);
+            } else if ((alphaPart.stopToken != null) &
+                "AGAIN".equals (alphaPart.stopToken.text)) {
+               SourceSpan loopSpan = SourceSpan.covering (token.span,
+                  alphaPart.stopToken.span);
+               Spec loopEffect = buildAgainEffect (alphaPart.effect, ts, ss,
+                  wordName, loopSpan);
+               seq.add (loopEffect);
+               seqSpan = SourceSpan.covering (seqSpan, loopSpan);
+            } else if ((alphaPart.stopToken != null) &
+                "UNTIL".equals (alphaPart.stopToken.text)) {
+               SourceSpan loopSpan = SourceSpan.covering (token.span,
+                  alphaPart.stopToken.span);
+               Spec loopEffect = buildUntilEffect (alphaPart.effect, ts, ss,
+                  wordName, loopSpan);
+               seq.add (loopEffect);
+               seqSpan = SourceSpan.covering (seqSpan, loopSpan);
             } else {
-               throw new RuntimeException ("Missing WHILE, AGAIN, or UNTIL " +
-                  "for BEGIN in definition of " + wordName + " in " +
-                  sourceName);
+               throw missingTerminator ("WHILE, AGAIN, or UNTIL", "BEGIN",
+                  token.span, wordName);
             }
          } else if ("DO".equals (word)) {
             ParseResult bodyPart = parseDefinitionSequence (tokens, ts, ss,
                sourceName, wordName, new String [] {"LOOP"}, doDepth + 1);
-            if (!"LOOP".equals (bodyPart.stopWord))
-               throw new RuntimeException ("Missing LOOP for DO in definition "
-                  + "of " + wordName + " in " + sourceName);
-            seq.add (buildDoLoopEffect (bodyPart.effect, ts, ss, sourceName,
-               wordName));
+            if ((bodyPart.stopToken == null) |
+                !"LOOP".equals (bodyPart.stopToken.text))
+               throw missingTerminator ("LOOP", "DO", token.span, wordName);
+            SourceSpan loopSpan = SourceSpan.covering (token.span,
+               bodyPart.stopToken.span);
+            Spec loopEffect = buildDoLoopEffect (bodyPart.effect, ts, ss,
+               wordName, loopSpan);
+            seq.add (loopEffect);
+            seqSpan = SourceSpan.covering (seqSpan, loopSpan);
          } else {
             if (":".equals (word))
-               throw new RuntimeException ("Nested definitions are not " +
-                  "supported in definition of " + wordName + " in " +
-                  sourceName);
+               throw programError ("parse.nested-definition",
+                  "Nested definitions are not supported in definition of " +
+                  wordName, "", token.span);
             if ("ELSE".equals (word) | "FI".equals (word) |
                 "WHILE".equals (word) | "REPEAT".equals (word) |
                 "AGAIN".equals (word) | "UNTIL".equals (word) |
                 "LOOP".equals (word))
-               throw new RuntimeException ("Unexpected " + word +
-                  " in definition of " + wordName + " in " + sourceName);
+               throw unexpectedToken (word, token.span,
+                  "definition of " + wordName);
             Spec sp = null;
             if ("I".equals (word) & (doDepth > 0)) {
                sp = indexSpec (ts, sourceName);
@@ -272,13 +360,14 @@ public class ProgText extends LinkedList<String> {
                sp = (Spec)ss.get (word);
             }
             if (sp == null)
-               throw new RuntimeException ("no specif. found for " + word +
-                  " in definition of " + wordName + " in " + sourceName);
-            seq.add ((Spec)sp.clone());
+               throw missingWord (word, token.span,
+                  "definition of " + wordName);
+            seq.add (((Spec)sp.clone()).withOrigin (token.span, word));
+            seqSpan = SourceSpan.covering (seqSpan, token.span);
          }
       }
       return new ParseResult (evaluateSpecList (seq, ts, ss,
-         contextLabel ("sequence", wordName, sourceName)), null);
+         "linear part of definition " + wordName), null, seqSpan);
    } // end of parseDefinitionSequence()
 
    /**
@@ -293,7 +382,7 @@ public class ProgText extends LinkedList<String> {
       String context) {
       Spec result = seq.evaluate (ts, ss);
       if (result == null)
-         throw new RuntimeException ("Type conflict in " + context);
+         throw seq.typeClash (context, this);
       return result;
    } // end of evaluateSpecList()
 
@@ -304,21 +393,29 @@ public class ProgText extends LinkedList<String> {
     * @param elseEffect effect of the false branch
     * @param ts type system to use
     * @param ss current specification set
-    * @param sourceName file name or other source label for diagnostics
     * @param wordName current definition name
+    * @param structureSpan source span of the full IF structure
+    * @param hasElse true if the source used ELSE explicitly
     * @return resulting IF effect
     */
    Spec buildIfEffect (Spec thenEffect, Spec elseEffect, TypeSystem ts,
-      SpecSet ss, String sourceName, String wordName) {
+      SpecSet ss, String wordName, SourceSpan structureSpan,
+      boolean hasElse) {
+      String label = hasElse ? "IF...ELSE...FI" : "IF...FI";
       Spec merged = thenEffect.glb (elseEffect, ts, ss);
       if (merged == null)
-         throw new RuntimeException ("Incompatible IF branches in definition "
-            + "of " + wordName + " in " + sourceName);
+         throw programError ("type.if-branch-clash",
+            "Non-comparable branches in " + label + " of definition " +
+            wordName, "then branch " + thenEffect.toString().trim() +
+            ", else branch " + elseEffect.toString().trim() +
+            " cannot be merged", structureSpan);
       SpecList seq = new SpecList();
-      seq.add (flagConsumeSpec (ts, sourceName));
-      seq.add ((Spec)merged.clone());
+      seq.add (flagConsumeSpec (ts, structureSpan.sourceName).withOrigin (
+         structureSpan, label));
+      seq.add (((Spec)merged.clone()).withOrigin (structureSpan, label));
       return evaluateSpecList (seq, ts, ss,
-         contextLabel ("IF structure", wordName, sourceName));
+         label + " in definition " + wordName).withOrigin (structureSpan,
+         label);
    } // end of buildIfEffect()
 
    /**
@@ -328,30 +425,38 @@ public class ProgText extends LinkedList<String> {
     * @param betaEffect effect of the sequence after WHILE
     * @param ts type system to use
     * @param ss current specification set
-    * @param sourceName file name or other source label for diagnostics
     * @param wordName current definition name
+    * @param structureSpan source span of the full loop
     * @return resulting loop effect
     */
    Spec buildWhileEffect (Spec alphaEffect, Spec betaEffect, TypeSystem ts,
-      SpecSet ss, String sourceName, String wordName) {
+      SpecSet ss, String wordName, SourceSpan structureSpan) {
       SpecList alphaSeq = new SpecList();
       alphaSeq.add ((Spec)alphaEffect.clone());
-      alphaSeq.add (flagConsumeSpec (ts, sourceName));
+      alphaSeq.add (flagConsumeSpec (ts, structureSpan.sourceName).withOrigin
+         (structureSpan, "WHILE"));
       Spec alphaTest = evaluateSpecList (alphaSeq, ts, ss,
-         contextLabel ("loop test", wordName, sourceName));
+         "WHILE loop test in definition " + wordName);
       Spec alphaLoop = alphaTest.piStar (ts, ss);
       if (alphaLoop == null)
-         throw new RuntimeException ("Loop prefix is not idempotent in " +
-            "definition of " + wordName + " in " + sourceName);
+         throw programError ("type.loop-prefix-non-idempotent",
+            "Non-idempotent loop prefix in BEGIN...WHILE...REPEAT of " +
+            "definition " + wordName, "prefix effect " +
+            alphaTest.toString().trim(), structureSpan);
       Spec betaLoop = betaEffect.piStar (ts, ss);
       if (betaLoop == null)
-         throw new RuntimeException ("Loop suffix is not idempotent in " +
-            "definition of " + wordName + " in " + sourceName);
+         throw programError ("type.loop-body-non-idempotent",
+            "Non-idempotent loop body in BEGIN...WHILE...REPEAT of " +
+            "definition " + wordName, "body effect " +
+            betaEffect.toString().trim(), structureSpan);
       SpecList loopSeq = new SpecList();
-      loopSeq.add ((Spec)alphaLoop.clone());
-      loopSeq.add ((Spec)betaLoop.clone());
+      loopSeq.add (((Spec)alphaLoop.clone()).withOrigin (structureSpan,
+         "BEGIN...WHILE...REPEAT"));
+      loopSeq.add (((Spec)betaLoop.clone()).withOrigin (structureSpan,
+         "BEGIN...WHILE...REPEAT"));
       return evaluateSpecList (loopSeq, ts, ss,
-         contextLabel ("WHILE loop", wordName, sourceName));
+         "BEGIN...WHILE...REPEAT in definition " + wordName).withOrigin (
+         structureSpan, "BEGIN...WHILE...REPEAT");
    } // end of buildWhileEffect()
 
    /**
@@ -360,17 +465,19 @@ public class ProgText extends LinkedList<String> {
     * @param bodyEffect effect of the loop body
     * @param ts type system to use
     * @param ss current specification set
-    * @param sourceName file name or other source label for diagnostics
     * @param wordName current definition name
+    * @param structureSpan source span of the full loop
     * @return resulting loop effect
     */
    Spec buildAgainEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
-      String sourceName, String wordName) {
+      String wordName, SourceSpan structureSpan) {
       Spec bodyLoop = bodyEffect.piStar (ts, ss);
       if (bodyLoop == null)
-         throw new RuntimeException ("BEGIN..AGAIN body is not idempotent " +
-            "in definition of " + wordName + " in " + sourceName);
-      return bodyLoop;
+         throw programError ("type.loop-body-non-idempotent",
+            "Non-idempotent loop body in BEGIN...AGAIN of definition " +
+            wordName, "body effect " + bodyEffect.toString().trim(),
+            structureSpan);
+      return bodyLoop.withOrigin (structureSpan, "BEGIN...AGAIN");
    } // end of buildAgainEffect()
 
    /**
@@ -379,46 +486,54 @@ public class ProgText extends LinkedList<String> {
     * @param bodyEffect effect of the loop body before UNTIL
     * @param ts type system to use
     * @param ss current specification set
-    * @param sourceName file name or other source label for diagnostics
     * @param wordName current definition name
+    * @param structureSpan source span of the full loop
     * @return resulting loop effect
     */
    Spec buildUntilEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
-      String sourceName, String wordName) {
+      String wordName, SourceSpan structureSpan) {
       SpecList testSeq = new SpecList();
       testSeq.add ((Spec)bodyEffect.clone());
-      testSeq.add (flagConsumeSpec (ts, sourceName));
+      testSeq.add (flagConsumeSpec (ts, structureSpan.sourceName).withOrigin
+         (structureSpan, "UNTIL"));
       Spec loopTest = evaluateSpecList (testSeq, ts, ss,
-         contextLabel ("UNTIL test", wordName, sourceName));
+         "UNTIL loop test in definition " + wordName);
       Spec untilLoop = loopTest.piStar (ts, ss);
       if (untilLoop == null)
-         throw new RuntimeException ("BEGIN..UNTIL body is not idempotent " +
-            "in definition of " + wordName + " in " + sourceName);
-      return untilLoop;
+         throw programError ("type.loop-body-non-idempotent",
+            "Non-idempotent loop body in BEGIN...UNTIL of definition " +
+            wordName, "body and flag-test effect " +
+            loopTest.toString().trim(), structureSpan);
+      return untilLoop.withOrigin (structureSpan, "BEGIN...UNTIL");
    } // end of buildUntilEffect()
 
    /**
     * Creates the effect of DO..LOOP using a conservative counted-loop
-     * approximation: the loop body must be idempotent and the structure
+    * approximation: the loop body must be idempotent and the structure
     * consumes Forth-style limit and start parameters.
     * @param bodyEffect effect of the loop body
     * @param ts type system to use
     * @param ss current specification set
-    * @param sourceName file name or other source label for diagnostics
     * @param wordName current definition name
+    * @param structureSpan source span of the full loop
     * @return resulting DO..LOOP effect
     */
    Spec buildDoLoopEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
-      String sourceName, String wordName) {
+      String wordName, SourceSpan structureSpan) {
       Spec bodyLoop = bodyEffect.piStar (ts, ss);
       if (bodyLoop == null)
-         throw new RuntimeException ("DO..LOOP body is not idempotent in " +
-            "definition of " + wordName + " in " + sourceName);
+         throw programError ("type.loop-body-non-idempotent",
+            "Non-idempotent loop body in DO...LOOP of definition " +
+            wordName, "body effect " + bodyEffect.toString().trim(),
+            structureSpan);
       SpecList loopSeq = new SpecList();
-      loopSeq.add (doConsumeSpec (ts, sourceName));
-      loopSeq.add ((Spec)bodyLoop.clone());
+      loopSeq.add (doConsumeSpec (ts, structureSpan.sourceName).withOrigin (
+         structureSpan, "DO...LOOP"));
+      loopSeq.add (((Spec)bodyLoop.clone()).withOrigin (structureSpan,
+         "DO...LOOP"));
       return evaluateSpecList (loopSeq, ts, ss,
-         contextLabel ("DO loop", wordName, sourceName));
+         "DO...LOOP in definition " + wordName).withOrigin (structureSpan,
+         "DO...LOOP");
    } // end of buildDoLoopEffect()
 
    /**
@@ -467,15 +582,109 @@ public class ProgText extends LinkedList<String> {
    } // end of isStopWord()
 
    /**
-    * Creates a short diagnostic label for sequence evaluation errors.
-    * @param what current structure kind
-    * @param wordName current definition name
-    * @param sourceName file name or other source label
-    * @return context label
+    * Creates a missing-terminator diagnostic.
+    * @param terminator required closing token
+    * @param opener opening structure
+    * @param openerSpan opening token span
+    * @param wordName current definition
+    * @return diagnostic exception
     */
-   String contextLabel (String what, String wordName, String sourceName) {
-      return what + " in definition of " + wordName + " in " + sourceName;
-   } // end of contextLabel()
+   ProgramException missingTerminator (String terminator, String opener,
+      SourceSpan openerSpan, String wordName) {
+      return programError ("parse.missing-terminator", "Missing " +
+         terminator + " for " + opener + " in definition of " + wordName,
+         "", openerSpan);
+   } // end of missingTerminator()
+
+   /**
+    * Creates an unknown-word diagnostic.
+    * @param word missing word
+    * @param span token span
+    * @param context surrounding context
+    * @return diagnostic exception
+    */
+   ProgramException missingWord (String word, SourceSpan span, String context) {
+      return programError ("lookup.unknown-word",
+         "No specification found for " + word + " in " + context, "",
+         span);
+   } // end of missingWord()
+
+   /**
+    * Creates an unexpected-token diagnostic.
+    * @param word unexpected token
+    * @param span token span
+    * @param context surrounding context
+    * @return diagnostic exception
+    */
+   ProgramException unexpectedToken (String word, SourceSpan span,
+      String context) {
+      return programError ("parse.unexpected-token", "Unexpected " + word +
+         " in " + context, "", span);
+   } // end of unexpectedToken()
+
+   /**
+    * Creates a program error and appends source context when available.
+    * @param message main diagnostic text
+    * @param span source span of the problem
+    * @return diagnostic exception
+    */
+   ProgramException programError (String code, String message, String reason,
+      SourceSpan span) {
+      return new ProgramException (programDiagnostic (code, message, reason,
+         span));
+   } // end of programError()
+
+   /**
+    * Creates a structured diagnostic.
+    * @param code diagnostic code
+    * @param message summary message
+    * @param reason detailed reason
+    * @param span source span
+    * @return structured diagnostic
+    */
+   ProgramDiagnostic programDiagnostic (String code, String message,
+      String reason, SourceSpan span) {
+      return new ProgramDiagnostic (code, ProgramDiagnostic.SEVERITY_ERROR,
+         message, reason, span, sourceLineText (span), markerLineText (span));
+   } // end of programDiagnostic()
+
+   /**
+    * Returns the raw source line for a span.
+    * @param span source span
+    * @return source line or null
+    */
+   String sourceLineText (SourceSpan span) {
+      if ((span == null) | !span.hasLocation()) return null;
+      if ((span.startLine < 1) | (span.startLine > sourceLines.size()))
+         return null;
+      return (String)sourceLines.get (span.startLine - 1);
+   } // end of sourceLineText()
+
+   /**
+    * Builds a caret marker for one source line.
+    * @param span source span on that line
+    * @return caret marker
+    */
+   String markerLineText (SourceSpan span) {
+      String line = sourceLineText (span);
+      if (line == null) return null;
+      StringBuffer result = new StringBuffer ("");
+      int limit = Math.max (0, span.startColumn - 1);
+      for (int i = 0; (i < limit) & (i < line.length()); i++) {
+         if (line.charAt (i) == '\t') {
+            result.append ('\t');
+         } else {
+            result.append (' ');
+         }
+      }
+      int width = 1;
+      if (span.startLine == span.endLine)
+         width = Math.max (1, span.endColumn - span.startColumn + 1);
+      for (int i = 0; i < width; i++) {
+         result.append ('^');
+      }
+      return result.toString();
+   } // end of markerLineText()
 
    /**
     * Converts inner representation back to string.

@@ -1,0 +1,3 @@
+: BADIF
+  IF DP ELSE KEY FI
+;
