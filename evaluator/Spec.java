@@ -109,13 +109,16 @@ public class Spec {
                case 0: // type conflict
                   return null;
                case 1: // m1 win
-                  mnew = new TypeSymbol (m1.ftype, ++result.maxPosIndex);
+                  mnew = new TypeSymbol (m1.ftype, ++result.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 2: // m2 win
-                  mnew = new TypeSymbol (m2.ftype, ++result.maxPosIndex);
+                  mnew = new TypeSymbol (m2.ftype, ++result.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 3: // equal types
-                  mnew = new TypeSymbol (m1.ftype, ++result.maxPosIndex);
+                  mnew = new TypeSymbol (m1.ftype, ++result.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                default: throw new RuntimeException (" no relation!!!");
             }
@@ -157,13 +160,16 @@ public class Spec {
                case 0: // type conflict
                   return null;
                case 1: // m1 win
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex);
+                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 2: // m2 win
-                  mnew = new TypeSymbol (m2.ftype, ++tc.maxPosIndex);
+                  mnew = new TypeSymbol (m2.ftype, ++tc.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 3: // equal types
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex);
+                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                default: throw new RuntimeException (" no relation!!!");
             }
@@ -183,13 +189,16 @@ public class Spec {
                case 0: // type conflict
                   return null;
                case 1: // m1 win
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex);
+                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 2: // m2 win
-                  mnew = new TypeSymbol (m2.ftype, ++tc.maxPosIndex);
+                  mnew = new TypeSymbol (m2.ftype, ++tc.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 3: // equal types
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex);
+                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                default: throw new RuntimeException (" no relation!!!");
             }

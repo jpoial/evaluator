@@ -1,0 +1,25 @@
+# Real Forth-like demo program loaded by Evaluator when no command-line words are given.
+# Linear colon definitions, IF..FI / IF..ELSE..FI, BEGIN..WHILE..REPEAT,
+# BEGIN..UNTIL / BEGIN..AGAIN, and DO..LOOP are supported.
+
+: PEEK2
+  DUP @ SWAP @
+;
+
+: MAYSWAP
+  IF SWAP FI
+;
+
+: NLOOP
+  BEGIN DUP 0= WHILE REPEAT
+;
+
+: ULOOP
+  BEGIN DUP 0= UNTIL
+;
+
+: KEEPIF
+  IF DUP ELSE DUP FI
+;
+
+DP DP C@ 0= KEEPIF

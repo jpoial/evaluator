@@ -17,6 +17,12 @@ public class SpecList extends LinkedList<Spec> {
     
     static final long serialVersionUID = 0xaabbcc;
 
+   static class NormInfo {
+      int occurrences = 0;
+      int assignedIndex = 0;
+      boolean explicitIndex = false;
+   } // end of NormInfo
+
    /** workfield to keep current maximal index */
    int cMaxInd = 0;
 
@@ -127,13 +133,16 @@ public class SpecList extends LinkedList<Spec> {
                      " in " + s1.toString() + " x " + s2.toString() );
                   return null;
                case 1:  // m1 win
-                  mnew = new TypeSymbol (m1.ftype, ++cMaxInd);
+                  mnew = new TypeSymbol (m1.ftype, ++cMaxInd,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 2:  // m2 win
-                  mnew = new TypeSymbol (m2.ftype, ++cMaxInd);
+                  mnew = new TypeSymbol (m2.ftype, ++cMaxInd,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                case 3:  // equal types
-                  mnew = new TypeSymbol (m1.ftype, ++cMaxInd);
+                  mnew = new TypeSymbol (m1.ftype, ++cMaxInd,
+                     m1.explicitIndex | m2.explicitIndex);
                   break;
                default: throw new RuntimeException ("no relation!!!");
             }
@@ -185,8 +194,8 @@ public class SpecList extends LinkedList<Spec> {
       result.incrementWild (max);
       // now everything is bigger than possible new indices
       int newInd = 0;
-      Hashtable<TypeSymbol, Integer> subst = 
-          new Hashtable<TypeSymbol, Integer>();
+      Hashtable<TypeSymbol, NormInfo> subst =
+          new Hashtable<TypeSymbol, NormInfo>();
       TypeSymbol t = null;
       Spec sp = null;
       Tvector tv = null;
@@ -250,8 +259,10 @@ public class SpecList extends LinkedList<Spec> {
       Iterator<TypeSymbol>it3 = subst.keySet().iterator();
       while (it3.hasNext()) {
          t = (TypeSymbol)it3.next(); // key
-         TypeSymbol newt = new TypeSymbol (t.ftype, 
-            ((Integer)subst.get (t)).intValue());
+         NormInfo info = (NormInfo)subst.get (t);
+         int pos = 0;
+         if (needsIndex (info)) pos = info.assignedIndex;
+         TypeSymbol newt = new TypeSymbol (t.ftype, pos, info.explicitIndex);
          result.substitute (t, newt);
          substitute (t, newt);
       }
@@ -261,30 +272,30 @@ public class SpecList extends LinkedList<Spec> {
    /**
     * Manages hashtable of substitutions for typesymbols (inner
     * function of normalize() method).
-    * @param table hashtable with typesymbols as keys and Integer values
+    * @param table hashtable with typesymbols as keys and metadata values
     * @param key typesymbol to add/replace in table
-    * @param index index value before possible adding, 
-    *   -1 means "needs indexing later"
+    * @param index index value before possible adding,
+    *   -1 means first pass and non-negative means second pass
     * @return new index value
     */
-   static int addts (Hashtable<TypeSymbol, Integer> table, TypeSymbol key, int index) {
+   static int addts (Hashtable<TypeSymbol, NormInfo> table, TypeSymbol key,
+      int index) {
       int result = index;
       if (index == -1) { // first pass
-         if (!table.containsKey (key)) {
-            table.put (key, Integer.valueOf (0)); // first time
-         } else {
-            if (((Integer)table.get (key)).intValue() == 0) {
-               table.put (key, Integer.valueOf (-2)); // second time
-            } else { // third time etc.
-               table.put (key, Integer.valueOf (-1));
-            }
+         NormInfo info = (NormInfo)table.get (key);
+         if (info == null) {
+            info = new NormInfo();
+            table.put (key, info);
          }
+         info.occurrences++;
+         info.explicitIndex = info.explicitIndex | key.explicitIndex;
       } else {  // second pass
-         if (table.containsKey (key)) {
-            if (((Integer)table.get (key)).intValue() == -1) {
+         NormInfo info = (NormInfo)table.get (key);
+         if (info != null) {
+            if (needsIndex (info) & (info.assignedIndex == 0)) {
                result++;
-               table.put (key, Integer.valueOf (result));
-            } else { // all other values except -1 remain the same
+               info.assignedIndex = result;
+            } else { // keep already assigned or hidden indices
             }
          } else {
             throw new RuntimeException ("Key " + key.toString() 
@@ -293,6 +304,16 @@ public class SpecList extends LinkedList<Spec> {
       }
       return result;
    } // end of addts()
+
+   /**
+    * Tells whether a symbol should keep a visible wildcard index after
+    * normalization.
+    * @param info accumulated metadata for one symbol
+    * @return true if the wildcard index should stay visible
+    */
+   static boolean needsIndex (NormInfo info) {
+      return info.explicitIndex | (info.occurrences > 2);
+   } // end of needsIndex()
 
 } // end of SpecList
 

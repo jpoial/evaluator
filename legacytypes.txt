@@ -1,0 +1,19 @@
+# Legacy strict demo type system for the evaluator.
+# Format:
+#   type <canonical-name> [alias...]
+#   rel <subtype> < <supertype>
+
+type X x
+type n N
+type char c
+type flag f
+type addr a
+type c-addr ca
+type a-addr aa
+
+rel n < X
+rel flag < X
+rel addr < X
+rel char < n
+rel c-addr < addr
+rel a-addr < c-addr

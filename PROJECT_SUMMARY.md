@@ -102,6 +102,8 @@ The main shift here is from a **single stack effect** to a **set of stack effect
 - `IF ... THEN`
 - `IF ... ELSE ... THEN`
 - `BEGIN ... WHILE ... REPEAT`
+- `BEGIN ... UNTIL`
+- `BEGIN ... AGAIN`
 - counted loops
 
 Those constructs can have more than one possible local stack behavior, so the paper defines:
@@ -112,11 +114,11 @@ Those constructs can have more than one possible local stack behavior, so the pa
 
 This is an important evolutionary step: it recognizes that linear composition alone is not enough for real programs.
 
-However, the current Java repo only carries a **trace** of this stage:
+However, the current Java repo still carries only a **partial** version of this stage:
 
 - `SpecSet` exists, but it is a dictionary from words to single `Spec` values, not sets of alternative effects,
 - `Spec.glb(...)`, `idemp(...)`, and `piStar(...)` preserve the later branch/loop reasoning ideas,
-- but there is no parser or evaluator for actual `IF`, `ELSE`, `THEN`, `BEGIN`, `WHILE`, or `REPEAT`.
+- and the parser now supports linear colon definitions containing `IF ... ELSE ... FI`, `BEGIN ... WHILE ... REPEAT`, `BEGIN ... UNTIL`, `BEGIN ... AGAIN`, and counted loops, but it still does not implement the fuller multiple-stack-effects framework described in the papers.
 
 In other words, the 1991 paper points toward the larger intended system, but the code in this repo implements only the simpler linear kernel.
 
@@ -140,12 +142,11 @@ This step adds the features that make the calculus useful rather than merely for
 - **symbolic identity tracking**
 - **polymorphic words**
 
-The slides also distinguish between:
-
-- `+` as a loose generic operator `(x x -- x)`,
-- and `PLUS` as a stricter same-type operator `(x[1] x[1] -- x[1])`.
-
-That distinction is encoded directly in `SpecSet.java`.
+The slides also distinguish between a loose generic `+` and a stricter
+same-type operator. The current bundled demo vocabulary has since been made
+more Forth-like, so the shipped `+` is numeric `( n n -- n )`, while the
+non-standard helper `PLUS` is retained as a same-type demo word
+`( x[1] x[1] -- x[1] )`.
 
 The 2002 slides are the clearest conceptual match for:
 
@@ -222,23 +223,31 @@ inside the `Spec` class.
 
 ## Types and Subtypes
 
-The implementation uses a small hard-coded type hierarchy:
+The shipped demo now includes two type-system profiles:
+
+- `real` in `ex1types.txt`
+- `legacy` in `legacytypes.txt`
+
+The default `real` profile is more Forth-like:
+
+- `a-addr < c-addr < addr < X`
+- `char < n < X`
+- `flag < n < X`
+- `xt < X`
+
+with aliases such as `cell = X`, `aa = a-addr`, `ca = c-addr`, `a = addr`,
+`c = char`, `x = X`, `N = n`, and `f = flag`.
+
+The preserved `legacy` profile keeps the earlier stricter separation:
 
 - `a-addr < c-addr < addr < X`
 - `char < n < X`
 - `flag < X`
 
-with synonyms such as:
-
-- `aa = a-addr`
-- `ca = c-addr`
-- `a = addr`
-- `c = char`
-- `x = X`
-- `N = n`
-- `f = flag`
-
-This is intentionally small, but it demonstrates the main idea: when two symbolic items are matched, the analyzer tries to keep the **most exact compatible type**.
+This is still intentionally small, but it demonstrates the main idea: when
+two symbolic items are matched, the analyzer tries to keep the **most exact
+compatible type**. The new `real` profile simply makes the default lattice
+closer to ordinary Forth practice.
 
 ## Wildcards and Positional Identity
 
@@ -386,7 +395,28 @@ If `TypeSymbol` is the atom, `Spec` is the molecule.
 
 `SpecSet` maps Forth words to their stack-effect specs.
 
-In the paper this mapping is meant to be dynamic and extensible. In this repo it is **hard-coded** in the constructor.
+In the paper this mapping is meant to be dynamic and extensible. In the current repo it can now:
+
+- load specs from a file,
+- define or replace specs programmatically,
+- and save the current set back to disk in the same text format.
+
+The bundled example vocabulary now includes a more Forth-like core:
+
+- stack shuffles such as `OVER`, `SWAP`, `DUP`, `DROP`, `ROT`,
+- arithmetic and comparison words such as `+`, `-`, `*`, `/`, `MOD`,
+  `1+`, `1-`, `2*`, `2/`, `NEGATE`, `ABS`, `0=`, `0<`, `0>`, `=`, `<`, `>`,
+- memory and address words such as `@`, `C@`, `!`, `C!`, `HERE`, `DP`,
+  `ALLOT`, `CELL+`, `CHAR+`, `CELLS`, `CHARS`,
+- and I/O-style words such as `.`, `KEY`, `EMIT`, `CR`, `SPACE`,
+  `SPACES`, `TYPE`.
+
+Dot is modeled with stack effect `( X -- )`, so the evaluator can treat it as
+printing and consuming an arbitrary symbolic value.
+
+The evaluator now ships matching `real` and `legacy` file-backed demo
+profiles. The default run uses the `real` profile, and
+`java evaluator.Evaluator --system legacy` switches back to the older one.
 
 Built-in words include:
 
@@ -397,12 +427,46 @@ Built-in words include:
 - `ROT`
 - `PLUS`
 - `+`
+- `-`
+- `*`
+- `/`
+- `MOD`
+- `1+`
+- `1-`
+- `2*`
+- `2/`
+- `NEGATE`
+- `ABS`
 - `0=`
+- `0<`
+- `0>`
+- `0<>`
+- `=`
+- `<>`
+- `<`
+- `>`
+- `AND`
+- `OR`
+- `XOR`
+- `INVERT`
 - `@`
+- `HERE`
 - `DP`
 - `C@`
 - `!`
 - `C!`
+- `ALLOT`
+- `CELL+`
+- `CHAR+`
+- `CELLS`
+- `CHARS`
+- `KEY`
+- `EMIT`
+- `CR`
+- `SPACE`
+- `SPACES`
+- `TYPE`
+- `.`
 
 This is enough to demonstrate:
 
@@ -419,8 +483,8 @@ Right now it is just a `LinkedList<String>` of words.
 
 Two details matter:
 
-1. `ProgText(String[] text, SpecSet ss)` simply copies CLI tokens.
-2. `ProgText(String fileName, SpecSet ss)` is only a stub and inserts the fixed sequence `@ OVER @`.
+1. `ProgText(String[] text, TypeSystem ts, SpecSet ss)` tokenizes CLI input, parses linear colon definitions, and registers any defined words before evaluating the remaining top-level program.
+2. `ProgText(String fileName, TypeSystem ts, SpecSet ss)` does the same for a text file, including support for `IF ... FI`, `IF ... ELSE ... FI`, `BEGIN ... WHILE ... REPEAT`, `BEGIN ... UNTIL`, `BEGIN ... AGAIN`, and `DO ... LOOP` inside definitions. `BEGIN ... UNTIL` models the terminating flag test as a consumed `flag`, while `BEGIN ... AGAIN` uses the same fixed-point approximation as the other loop forms. The current `DO ... LOOP` approximation consumes two numeric loop parameters as `( n[2] n[1] -- )`, in standard Forth order `limit start`. With implicit step `1`, the loop runs for `I = start, start+1, ... , limit-1`; for example, `7 0 DO I . LOOP` prints `0 1 2 3 4 5 6`. Inside the loop body, `I` is now recognized as the innermost loop index with stack effect `( -- n )`.
 
 So the class exists as a placeholder for a richer parser, but the real supported entry point is the command-line token array.
 
@@ -428,7 +492,7 @@ So the class exists as a placeholder for a richer parser, but the real supported
 
 `SpecList` is the operational engine.
 
-It represents a linear sequence of `Spec` objects and performs the actual evaluation.
+It represents the linear top-level sequence of `Spec` objects that remains after parsing any colon definitions in the source text, and performs the actual evaluation.
 
 Its core jobs are:
 
@@ -594,14 +658,18 @@ For example:
 
 That is exactly the kind of strong-stack-discipline failure the papers are targeting.
 
-## Precision Differences Between Generic and Same-Type Operators
+## Precision Differences Between Standard and Demo Operators
 
-The distinction between `+` and `PLUS` is instructive:
+The distinction between standard `+` and non-standard `PLUS` is still
+instructive:
 
-- `+` is generic and can allow coarse compositions like `0= + 0=` to continue symbolically, though the result is imprecise.
-- `PLUS` requires both arguments to be the same symbolic type and therefore rejects certain dubious paths earlier.
+- `+` is now modeled more like Forth, as numeric `( n n -- n )`,
+- `PLUS` remains as a stricter same-type helper `( X[1] X[1] -- X[1] )`
+  for stack-effect experiments.
 
-This mirrors the point made in the 2002 slides about polymorphic vs more constrained operators.
+So the shipped vocabulary is closer to ordinary Forth, while the repo still
+preserves one extra demo word that is useful for illustrating wildcard-based
+type equality.
 
 ## Observed Runtime Behavior
 
@@ -619,17 +687,16 @@ This is a good demonstration of:
 - backward propagation of address precision,
 - and stack-shuffle awareness.
 
-### Generic operator example: `0= + 0=`
+### Conflict example: `0= + 0=`
 
-This sequence evaluates, but only with a coarse intermediate interpretation:
-
-`( X n -- flag )`
-
-It shows that loose generic specs permit analysis to continue, but not always with satisfying precision.
+This now fails in the more Forth-like bundled vocabulary, because `+` expects
+numeric inputs and `0=` produces a `flag`.
 
 ### Conflict example: `0= PLUS 0=`
 
-This fails because the symbolic `flag` produced by `0=` cannot satisfy the `n` expected by the later `0=`.
+This also fails, but for a different reason: `PLUS` is the retained demo helper
+that requires both inputs to be the same symbolic type, and the later `0=`
+still requires an `n`.
 
 That is useful: the prototype is catching a semantic misuse, not just a stack-depth mismatch.
 
@@ -641,18 +708,20 @@ This also fails, because the value produced by `C@` is a `char`, while `!` expec
 
 This repository is very informative, but it is visibly unfinished.
 
-## 1. File-Based APIs Are Mostly Placeholders
+## 1. File-Based APIs Are Now Real, But Still Minimal
 
 Both of these constructors take filenames:
 
 - `new TypeSystem("ex1types.txt")`
 - `new SpecSet("ex1specs.txt", ex1types)`
 
-But neither class actually reads a file. The filenames are ignored; the data is hard-coded in Java.
+These now read real example files from disk, and `ProgText(String fileName, TypeSystem ts, SpecSet ss)` likewise loads a program text file. The repo also now keeps two bundled demo environments side by side: the default `real` profile and the preserved `legacy` profile.
 
-Likewise, `ProgText(String fileName, SpecSet ss)` is a stub.
+That is a meaningful step forward, but the loaders are still deliberately simple:
 
-So the public shape suggests configurable input, but the implementation is fixed.
+- the formats are example-oriented rather than full Forth source formats,
+- the demo still ships with a tiny fixed vocabulary,
+- and the surrounding evaluator remains prototype-level.
 
 ## 2. Only Linear Programs Are Implemented
 
@@ -668,11 +737,11 @@ The code currently supports only a flat sequence of known words.
 
 That makes the implementation a **core engine**, not a full Forth analyzer.
 
-## 3. `SpecSet` Is Static, Not Extensible Yet
+## 3. `SpecSet` Is Less Static, But Still Limited
 
-The papers describe adding new word definitions dynamically as programs are analyzed. The current implementation does not do that.
+`SpecSet` can now load, define, and save single stack-effect specs, so it is no longer just a fixed constructor-time table.
 
-So there is not yet any support for:
+But there is still no support for:
 
 - user-defined words,
 - dictionary growth,
@@ -682,11 +751,9 @@ So there is not yet any support for:
 
 ## 4. Error Handling Is Prototype-Level
 
-If evaluation fails, `SpecList.evaluate(...)` returns `null`, but `Evaluator.main(...)` still dereferences the result to call `idemp(...)` and `piStar(...)`.
+The most obvious demo-shell crash has been fixed: if evaluation fails, `Evaluator.main(...)` now prints an unknown-state result for `idemp` and `piStar` instead of throwing `NullPointerException`.
 
-That means a type conflict can lead to a `NullPointerException` after the useful diagnostic has already been printed.
-
-So the semantic core is stronger than the demo shell around it.
+The semantic core is still stronger than the demo shell around it, but the user-facing behavior is now safer than the original prototype.
 
 ## 5. Output Is Verbose and Not Tool-Oriented Yet
 

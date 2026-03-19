@@ -17,16 +17,24 @@ public class TypeSymbol {
    /** position index for wildcards */
    int position = 0;
 
+   /** true if the wildcard index was explicitly written in the spec */
+   boolean explicitIndex = false;
+
    TypeSymbol (String s, int i) {
+      this (s, i, false);
+   } // end of constructor
+
+   TypeSymbol (String s, int i, boolean explicit) {
       ftype = s;
       position = i;
+      explicitIndex = explicit;
    } // end of constructor
 
    /**
     * Clones this symbol.
     */
    public Object clone() {
-      return new TypeSymbol (ftype, position);
+      return new TypeSymbol (ftype, position, explicitIndex);
    } // end of clone()
 
    /**

@@ -1,0 +1,21 @@
+# Real Forth-like demo type system for the evaluator.
+# Format:
+#   type <canonical-name> [alias...]
+#   rel <subtype> < <supertype>
+
+type X cell x
+type n number N
+type char c
+type flag boolean f
+type addr a
+type c-addr ca
+type a-addr aa
+type xt
+
+rel n < X
+rel flag < n
+rel addr < X
+rel char < n
+rel c-addr < addr
+rel a-addr < c-addr
+rel xt < X
