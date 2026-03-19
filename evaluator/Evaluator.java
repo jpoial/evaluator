@@ -87,52 +87,11 @@ public class Evaluator {
       System.out.println ("Program: " + ex1prog1.toString());
       SpecList ex1list1 = new SpecList (ex1prog1, ex1types, ex1specs);
       // System.out.println ("Sp.sequence: " + ex1list1.toString());
-      Spec s1 = null;
-      Spec s2 = null;
-      if (ex1list1.size() > 0) {
-         s1 = (Spec)((Spec)ex1list1.getFirst()).clone();
-         s2 = (Spec)((Spec)ex1list1.getLast()).clone();
-      }
       Spec resultspec = ex1list1.evaluate (ex1types, ex1specs);
       if (resultspec == null)
          throw ex1list1.typeClash ("linear part of the top-level program",
             ex1prog1);
       System.out.println (annotate (ex1prog1, ex1list1, resultspec));
-      System.out.println();
-      if (s1 != null) {
-         Spec r = s1.glb (s2, ex1types, ex1specs);
-         System.out.println ("GLB ( " + s1.toString() + ", " + s2.toString() +
-            ") = ");
-         if (r==null) {
-            System.out.println (" null ");
-         }  else {
-            System.out.println (r.toString());
-         }
-      } else {
-         System.out.println ("GLB skipped for empty program.");
-      }
-      System.out.println();
-      if (resultspec == null) {
-         System.out.println ("Idempotent: unknown state -> null");
-         System.out.println();
-         System.out.println ("Pi-star: unknown state -> null");
-      } else {
-         Spec ide = resultspec.idemp (ex1types, ex1specs);
-         System.out.print ("Idempotent: " + resultspec.toString() + " -> ");
-         if (ide==null) {
-            System.out.println (" null");
-         } else {
-            System.out.println (ide.toString());
-         }
-         System.out.println();
-         ide = resultspec.piStar (ex1types, ex1specs);
-         System.out.print ("Pi-star: " + resultspec.toString() + " -> ");
-         if (ide==null) {
-            System.out.println (" null");
-         } else {
-            System.out.println (ide.toString());
-         }
-      }
 
    } // end of run()
 
