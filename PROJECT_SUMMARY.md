@@ -1,0 +1,739 @@
+# Project Summary: `evaluator`
+
+## What This Repository Is
+
+This repository is a compact Java prototype for **symbolic stack-effect analysis of Forth programs**. Its purpose is not to execute Forth code, but to reason about how a sequence of Forth words transforms the stack:
+
+- what types must be present before execution,
+- what types are produced after execution,
+- which stack items are "the same item moved around",
+- and where type conflicts make a program suspicious or invalid.
+
+The project sits at the intersection of:
+
+- Forth stack-effect notation,
+- static typing for originally typeless stack languages,
+- abstract interpretation / must-analysis,
+- and algebraic models of stack behavior.
+
+In practical terms, the repository contains:
+
+- a small Java package `evaluator/` that implements the symbolic core,
+- five PDF papers/slides that show the theory and its evolution,
+- and a minimal `README.md` showing how to compile and run the demo.
+
+## Materials Reviewed
+
+I reviewed:
+
+- `README.md`
+- `EuroForth90_Algebraic.pdf`
+- `EuroForth91_Multiple.pdf`
+- `euro02.pdf`
+- `ef06poial2.pdf`
+- `ef08poial.pdf`
+- all Java files in `evaluator/`
+
+Note: the 1990 and 1991 EuroForth papers are scanned/image-heavy PDFs, so their text had to be inspected from rendered pages rather than clean text extraction. The later papers/slides were text-extractable and align closely with the current Java code.
+
+## Executive Summary
+
+The repository is best understood as a **research prototype** that implements the core of a typed stack-effect calculus for linear Forth code.
+
+The theory evolves across the papers like this:
+
+1. **1990**: define stack-effects algebraically as an abstract structure for reasoning about Forth-generated programs.
+2. **1991**: extend the model from a single effect to **sets of effects**, so control structures and multiple possible behaviors can be represented.
+3. **2002**: refine the model with **typed wildcards**, **subtyping**, and **polymorphism**, so symbolic effects can preserve both type precision and item identity.
+4. **2006**: frame the work explicitly as **must-analysis** for typeless stack languages, emphasizing `glb`, idempotents, and loop reasoning.
+5. **2008**: package the core ideas as a Java framework with classes that mirror the formal objects: types, symbols, effects, sets of effects, sequences of effects, and a small evaluator/demo.
+
+The Java code in this repo implements mainly the **linear-sequence core** of that theory. It does a solid job of:
+
+- representing typed stack effects,
+- composing them symbolically,
+- propagating more specific types through a program,
+- preserving wildcard identities across stack manipulation,
+- and detecting mismatches.
+
+It does **not** yet implement the full vision described in the papers:
+
+- no real parser for control structures,
+- no full multiple-stack-effects engine for branches,
+- no actual file-based spec/type loading despite the constructor signatures,
+- no toolchain or IDE integration,
+- and only a small built-in vocabulary of Forth words.
+
+So the repository is less "finished analyzer" and more "well-focused computational kernel for a larger analyzer."
+
+## Historical Arc Across the PDFs
+
+## 1. `EuroForth90_Algebraic.pdf`
+
+This is the earliest layer of the project. Its title is **"Algebraic Specifications of Stack-Effects for Forth Programs."**
+
+The paper introduces the main idea that each Forth word can be described by a stack effect of the form:
+
+`input-types --- output-types`
+
+or, in the paper's algebraic notation, `(s1, s2)` over lists of types.
+
+The key contribution is an algebra for composing such effects:
+
+- stack effects form a structure related to the **polycyclic monoid**,
+- there is an empty effect / identity,
+- there is a null or clash effect for errors,
+- and composition models parameter passing through the stack.
+
+The focus here is still fairly algebraic and language-agnostic. The paper is concerned with:
+
+- checking whether stack usage is consistent,
+- describing correctness/closure properties of programs,
+- and providing a formal basis for reasoning about Forth-like generated code.
+
+This paper is the conceptual ancestor of the `SpecList.multiply(...)` logic in the Java code.
+
+## 2. `EuroForth91_Multiple.pdf`
+
+This paper is titled **"Multiple Stack-effects of Forth-programs."**
+
+The main shift here is from a **single stack effect** to a **set of stack effects**. That matters because real Forth programs contain control structures:
+
+- `IF ... THEN`
+- `IF ... ELSE ... THEN`
+- `BEGIN ... WHILE ... REPEAT`
+- counted loops
+
+Those constructs can have more than one possible local stack behavior, so the paper defines:
+
+- specifications as sets of stack effects,
+- closure operators over those sets,
+- and formulas for control constructs in terms of products and closures.
+
+This is an important evolutionary step: it recognizes that linear composition alone is not enough for real programs.
+
+However, the current Java repo only carries a **trace** of this stage:
+
+- `SpecSet` exists, but it is a dictionary from words to single `Spec` values, not sets of alternative effects,
+- `Spec.glb(...)`, `idemp(...)`, and `piStar(...)` preserve the later branch/loop reasoning ideas,
+- but there is no parser or evaluator for actual `IF`, `ELSE`, `THEN`, `BEGIN`, `WHILE`, or `REPEAT`.
+
+In other words, the 1991 paper points toward the larger intended system, but the code in this repo implements only the simpler linear kernel.
+
+## 3. `euro02.pdf`
+
+These slides are especially important because they line up directly with the Java implementation.
+
+The title is **"Stack effect calculus with typed wildcards, polymorphism and inheritance."**
+
+This is where the modern version of the idea becomes clear:
+
+- types form a hierarchy,
+- the more exact type wins during matching,
+- wildcarded symbols are numbered uniquely,
+- and wildcard identity means "same symbolic stack item" rather than just "some arbitrary variable."
+
+This step adds the features that make the calculus useful rather than merely formal:
+
+- **subtyping**
+- **typed wildcards**
+- **symbolic identity tracking**
+- **polymorphic words**
+
+The slides also distinguish between:
+
+- `+` as a loose generic operator `(x x -- x)`,
+- and `PLUS` as a stricter same-type operator `(x[1] x[1] -- x[1])`.
+
+That distinction is encoded directly in `SpecSet.java`.
+
+The 2002 slides are the clearest conceptual match for:
+
+- `TypeSystem.relation(...)`
+- `TypeSymbol.position`
+- wildcard renaming via `incrementWild(...)` / `normalize(...)`
+- and sequence-wide substitution during composition.
+
+## 4. `ef06poial2.pdf`
+
+This paper, **"Typing Tools for Typeless Stack Languages,"** repositions the work in program-analysis terms.
+
+The important shift is that the project is now explicitly described as **must-analysis**:
+
+- composition models a linear program segment,
+- `glb` models merging of alternative branches,
+- and an **idempotent** effect models a loop whose net stack state is preserved.
+
+The paper also makes a mathematically important point:
+
+- the full set of stack effects forms a semilattice with greatest lower bounds,
+- but only the subset of idempotents forms a lattice suitable for the loop reasoning being used.
+
+This paper explains the intended meaning of several methods that appear in the Java code:
+
+- `Spec.glb(...)`
+- `Spec.idemp(...)`
+- `Spec.piStar(...)`
+
+It also frames the practical goal clearly: validate legacy Forth or other stack-machine code statically, especially where runtime typing is unavailable or too expensive.
+
+## 5. `ef08poial.pdf`
+
+This paper, **"Java Framework for Static Analysis of Forth Programs,"** is the direct map from theory to code.
+
+It explains the package almost class-for-class:
+
+- `TypeSymbol`
+- `TypeSystem`
+- `Tvector`
+- `Spec`
+- `SpecSet`
+- `SpecList`
+- `ProgText`
+- `Evaluator`
+
+It also says explicitly that:
+
+- only a **linear sequence of words** is implemented,
+- the package is still a **prototype**,
+- and real tooling would require a larger parser, extensibility, and support for real Forth syntax and control structures.
+
+This matches the repository exactly.
+
+## Core Theory Behind the Project
+
+## Stack Effect Notation
+
+The project uses the familiar Forth stack comment style:
+
+`( before -- after )`
+
+The stack top is on the **right**, so:
+
+- `( a b -- c )` means `b` is the topmost input,
+- and `c` becomes the topmost output.
+
+The code models these sides as:
+
+- `leftSide`: symbolic input stack
+- `rightSide`: symbolic output stack
+
+inside the `Spec` class.
+
+## Types and Subtypes
+
+The implementation uses a small hard-coded type hierarchy:
+
+- `a-addr < c-addr < addr < X`
+- `char < n < X`
+- `flag < X`
+
+with synonyms such as:
+
+- `aa = a-addr`
+- `ca = c-addr`
+- `a = addr`
+- `c = char`
+- `x = X`
+- `N = n`
+- `f = flag`
+
+This is intentionally small, but it demonstrates the main idea: when two symbolic items are matched, the analyzer tries to keep the **most exact compatible type**.
+
+## Wildcards and Positional Identity
+
+The most distinctive idea in the project is that a stack item is represented not only by a type, but also by a **wildcard index**.
+
+For example:
+
+- `SWAP` is not just `(X X -- X X)`
+- it is `(X[2] X[1] -- X[1] X[2])`
+
+That means:
+
+- there are two distinct stack items,
+- and the operation swaps their positions without forgetting which is which.
+
+This is why the analyzer can preserve identity through stack shuffling words such as:
+
+- `SWAP`
+- `DUP`
+- `OVER`
+- `ROT`
+
+Without indexed wildcards, the analyzer would know only coarse types, not the flow of symbolic items.
+
+## Composition
+
+Composition is the operation that evaluates a sequence of Forth words.
+
+Conceptually:
+
+- the output stack of one effect meets the input stack of the next,
+- matching symbols are unified,
+- the more exact compatible type wins,
+- fresh wildcard identities are introduced when two local symbols become one shared symbol,
+- and substitutions are propagated through the whole sequence under analysis.
+
+This last point matters: composition is **context-sensitive across the current analysis scope**, not a purely local concatenation of two isolated signatures.
+
+That matches the 2002 slides and is implemented in `SpecList.multiply(...)`.
+
+## Greatest Lower Bound (`glb`)
+
+`glb` is used in the papers to merge different alternative branches conservatively.
+
+In must-analysis terms, the result is the strongest guarantee that is still valid for all branches.
+
+In the code, `Spec.glb(...)`:
+
+- checks whether the two effects have compatible net stack shape,
+- aligns longer and shorter effects,
+- unifies corresponding symbols,
+- and normalizes the result.
+
+Even though the current repo does not parse real branch syntax, the operation is implemented as a reusable building block.
+
+## Idempotence and `piStar`
+
+Loops are treated in the theory as effects that should preserve stack state overall:
+
+- an idempotent effect satisfies `e = e * e`
+- intuitively, applying the loop body again does not change the abstract stack shape
+
+The code provides two related operations:
+
+- `idemp(...)`: try to derive the nearest idempotent by matching left and right sides
+- `piStar(...)`: evaluate two copies of the effect and then compute a `glb` with the original, corresponding to the paper's loop approximation idea `glb(e, ee)`
+
+Again, the actual loop syntax is not implemented in this repo, but the mathematical primitives are present.
+
+## Java Architecture
+
+## `TypeSymbol`
+
+`TypeSymbol` is the atom of the whole system.
+
+It stores:
+
+- a symbolic type name such as `X`, `n`, `flag`, `a-addr`
+- a wildcard/position index such as `1`, `2`, `3`
+
+Its role is simple but fundamental:
+
+- type says what kind of value this is,
+- position says which symbolic stack item it is.
+
+## `Tvector`
+
+`Tvector` is a mutable list of `TypeSymbol` values representing one side of a stack effect.
+
+It provides:
+
+- deep cloning
+- string formatting
+- substitution of one symbol by another
+
+This class is small, but it is heavily used by all higher-level transformations.
+
+## `TypeSystem`
+
+`TypeSystem` implements the subtype relation.
+
+It does this with:
+
+- a mapping from type names to integer indices,
+- a relation matrix,
+- and a normalization pass that fills implied inverse/synonym/transitive relationships.
+
+The transitive closure is computed using a Floyd-Warshall-like triple loop.
+
+This means the Java implementation does not encode type rules procedurally one case at a time. Instead, it turns subtype reasoning into a matrix query:
+
+- `0` = incompatible
+- `1` = first is subtype of second
+- `2` = first is supertype of second
+- `3` = equal/synonym
+
+That relation is the decision procedure used everywhere else.
+
+## `Spec`
+
+`Spec` is the central semantic object: one symbolic stack effect.
+
+It contains:
+
+- `leftSide`
+- `rightSide`
+- a `TypeSystem` reference
+- a `parseString` work field
+- `maxPosIndex` for fresh wildcard generation
+
+The most important methods are:
+
+- `glb(...)`
+- `idemp(...)`
+- `piStar(...)`
+- `cprefix(...)`
+- `unify(...)`
+- `incrementWild(...)`
+- `substitute(...)`
+- `maxPos()`
+
+If `TypeSymbol` is the atom, `Spec` is the molecule.
+
+## `SpecSet`
+
+`SpecSet` maps Forth words to their stack-effect specs.
+
+In the paper this mapping is meant to be dynamic and extensible. In this repo it is **hard-coded** in the constructor.
+
+Built-in words include:
+
+- `OVER`
+- `SWAP`
+- `DUP`
+- `DROP`
+- `ROT`
+- `PLUS`
+- `+`
+- `0=`
+- `@`
+- `DP`
+- `C@`
+- `!`
+- `C!`
+
+This is enough to demonstrate:
+
+- stack shuffling,
+- generic vs same-type operators,
+- address/character distinctions,
+- and type refinement through composition.
+
+## `ProgText`
+
+`ProgText` is the internal representation of the program being analyzed.
+
+Right now it is just a `LinkedList<String>` of words.
+
+Two details matter:
+
+1. `ProgText(String[] text, SpecSet ss)` simply copies CLI tokens.
+2. `ProgText(String fileName, SpecSet ss)` is only a stub and inserts the fixed sequence `@ OVER @`.
+
+So the class exists as a placeholder for a richer parser, but the real supported entry point is the command-line token array.
+
+## `SpecList`
+
+`SpecList` is the operational engine.
+
+It represents a linear sequence of `Spec` objects and performs the actual evaluation.
+
+Its core jobs are:
+
+- clone the word specs for a program,
+- globally freshen wildcard indices to avoid collisions,
+- compose the sequence with recursive symbolic unification,
+- propagate substitutions through the full list,
+- and normalize the printed wildcard indices afterward.
+
+This class is the best candidate to view as "the evaluator proper."
+
+## `Evaluator`
+
+`Evaluator` is the demo-oriented entry point.
+
+It does four things:
+
+1. create a `TypeSystem`
+2. create a `SpecSet`
+3. wrap the command-line words in `ProgText`
+4. build `SpecList`, evaluate it, and print:
+   - the full type system
+   - the full spec set
+   - the program
+   - an annotated program listing
+   - a `glb` of first and last spec
+   - the result's idempotent and `piStar`
+
+This is useful for experimentation, but it is clearly a research/demo shell rather than a polished CLI tool.
+
+## End-to-End Evaluation Flow
+
+For a command such as:
+
+`java evaluator.Evaluator SWAP DUP @`
+
+the flow is:
+
+1. `TypeSystem` is constructed with the built-in subtype graph.
+2. `SpecSet` is constructed with the built-in word signatures.
+3. `ProgText` stores the token list `["SWAP", "DUP", "@"]`.
+4. `SpecList` looks up each word in `SpecSet` and clones its `Spec`.
+5. `evaluate(...)` freshens wildcard indices to make all local placeholders unique.
+6. The list is reduced left-to-right by repeated `multiply(...)`.
+7. Each boundary match compares top output of the left effect to top input of the right effect.
+8. If types are compatible, a fresh merged symbol is created with the most exact type.
+9. That fresh symbol is substituted across the current result, the remaining effect being composed, and the `SpecList` itself.
+10. After the whole list is composed, `normalize(...)` renumbers wildcard identities for readability.
+11. `annotate(...)` prints the per-word symbolic effects between an inferred input and output stack state.
+
+That is the essence of the project.
+
+## The Key Algorithms in More Detail
+
+## 1. Freshening Wildcards
+
+Different word specs reuse local indices like `X[1]`, `X[2]`, etc. Those indices only make sense locally.
+
+Before evaluating a whole program, `SpecList.evaluate(...)` calls `incrementWild(...)` on each spec so that:
+
+- existing positive indices are shifted upward,
+- zero indices are turned into fresh unique indices,
+- and collisions between different words are avoided.
+
+This gives the analyzer a clean global namespace of symbolic items for the current run.
+
+## 2. Recursive Multiplication
+
+`SpecList.multiply(...)` implements symbolic composition recursively.
+
+The algorithm:
+
+- starts with accumulator effect `1`, represented as empty left and right vectors,
+- compares the top of the current right side with the top of the next left side,
+- merges them using subtype information,
+- removes the matched boundary pair,
+- then recurses on the shortened intermediate effects.
+
+If a boundary pair is incompatible, the result is `null` and the evaluator reports a type conflict.
+
+This is the operational heart of the analyzer.
+
+## 3. Sequence-Wide Substitution
+
+One subtle but important design choice is that when a new merged symbol is created, the substitution is applied not only locally but also across the whole `SpecList`.
+
+This is what allows information to flow:
+
+- forward,
+- backward,
+- and through stack-manipulation words.
+
+That behavior is exactly why examples like `SWAP DUP @` become more informative than a naive local type checker would allow.
+
+## 4. Normalization
+
+During evaluation, wildcard indices become large and messy.
+
+`SpecList.normalize(...)` performs a cleanup pass so that the final output uses smaller, human-readable indices.
+
+Conceptually, normalization:
+
+- makes all current indices safely large,
+- records which symbolic items remain shared,
+- assigns fresh compact indices to the symbols that still matter globally,
+- and rewrites both the final result and the per-word list.
+
+This is mostly for readability, but it is essential if the tool is meant to support human understanding.
+
+## 5. `glb`, `cprefix`, and `unify`
+
+`glb(...)` is not simple pairwise intersection.
+
+The implementation first compares the left/right lengths of the two effects. If one effect is longer, it uses `cprefix(...)` to reconcile the extra prefix while preserving type compatibility. Then `unify(...)` merges corresponding symbols across both sides.
+
+This is a concrete implementation of the paper idea that branch merging should preserve the strongest guaranteed common structure.
+
+## 6. `idemp` and `piStar`
+
+`idemp(...)` succeeds only when the effect has equal numbers of inputs and outputs. It then tries to unify corresponding positions so the effect becomes stack-preserving.
+
+`piStar(...)` duplicates the effect, evaluates the sequence `e e`, and then computes a `glb` with `e`.
+
+This is a neat example of the code carrying paper mathematics almost directly.
+
+## What the Current Prototype Can Demonstrate
+
+The repo is small, but it can already demonstrate several meaningful properties.
+
+## Stronger Than Plain Stack Comments
+
+It can distinguish:
+
+- generic values,
+- numbers,
+- flags,
+- character addresses,
+- address addresses,
+
+and can refine types based on use.
+
+That is more powerful than informal Forth stack comments, which often collapse everything to `x`.
+
+## Identity Through Stack Shuffling
+
+Because indexed wildcards are preserved, the analyzer does not lose track of which stack item is which after:
+
+- `SWAP`
+- `DUP`
+- `OVER`
+- `ROT`
+
+This is one of the most valuable aspects of the design.
+
+## Conservative Error Detection
+
+The analyzer can reject suspicious programs when incompatible symbolic types meet.
+
+For example:
+
+- `C@ !` produces a conflict because a `char` is not an `a-addr`.
+- `0= PLUS 0=` also conflicts: `0=` yields a `flag`, but the final `0=` expects an `n`.
+
+That is exactly the kind of strong-stack-discipline failure the papers are targeting.
+
+## Precision Differences Between Generic and Same-Type Operators
+
+The distinction between `+` and `PLUS` is instructive:
+
+- `+` is generic and can allow coarse compositions like `0= + 0=` to continue symbolically, though the result is imprecise.
+- `PLUS` requires both arguments to be the same symbolic type and therefore rejects certain dubious paths earlier.
+
+This mirrors the point made in the 2002 slides about polymorphic vs more constrained operators.
+
+## Observed Runtime Behavior
+
+Running the current demo confirms the conceptual design.
+
+### Successful example: `SWAP DUP @`
+
+The evaluator produces an annotated result equivalent to:
+
+`( a-addr[2] X[1] -- X[1] a-addr[2] X )`
+
+This is a good demonstration of:
+
+- identity preservation,
+- backward propagation of address precision,
+- and stack-shuffle awareness.
+
+### Generic operator example: `0= + 0=`
+
+This sequence evaluates, but only with a coarse intermediate interpretation:
+
+`( X n -- flag )`
+
+It shows that loose generic specs permit analysis to continue, but not always with satisfying precision.
+
+### Conflict example: `0= PLUS 0=`
+
+This fails because the symbolic `flag` produced by `0=` cannot satisfy the `n` expected by the later `0=`.
+
+That is useful: the prototype is catching a semantic misuse, not just a stack-depth mismatch.
+
+### Conflict example: `C@ !`
+
+This also fails, because the value produced by `C@` is a `char`, while `!` expects an `a-addr` as its second argument pattern.
+
+## Important Gaps and Limitations
+
+This repository is very informative, but it is visibly unfinished.
+
+## 1. File-Based APIs Are Mostly Placeholders
+
+Both of these constructors take filenames:
+
+- `new TypeSystem("ex1types.txt")`
+- `new SpecSet("ex1specs.txt", ex1types)`
+
+But neither class actually reads a file. The filenames are ignored; the data is hard-coded in Java.
+
+Likewise, `ProgText(String fileName, SpecSet ss)` is a stub.
+
+So the public shape suggests configurable input, but the implementation is fixed.
+
+## 2. Only Linear Programs Are Implemented
+
+The papers discuss:
+
+- branches,
+- loops,
+- closures,
+- multiple stack-effects,
+- and a larger Forth grammar.
+
+The code currently supports only a flat sequence of known words.
+
+That makes the implementation a **core engine**, not a full Forth analyzer.
+
+## 3. `SpecSet` Is Static, Not Extensible Yet
+
+The papers describe adding new word definitions dynamically as programs are analyzed. The current implementation does not do that.
+
+So there is not yet any support for:
+
+- user-defined words,
+- dictionary growth,
+- compile-time stack effects,
+- parser words,
+- or separate runtime/compile-time effect universes.
+
+## 4. Error Handling Is Prototype-Level
+
+If evaluation fails, `SpecList.evaluate(...)` returns `null`, but `Evaluator.main(...)` still dereferences the result to call `idemp(...)` and `piStar(...)`.
+
+That means a type conflict can lead to a `NullPointerException` after the useful diagnostic has already been printed.
+
+So the semantic core is stronger than the demo shell around it.
+
+## 5. Output Is Verbose and Not Tool-Oriented Yet
+
+The demo always prints:
+
+- the full type system,
+- the full spec set,
+- and extra exploratory calculations.
+
+That is appropriate for a research prototype but not yet for a normal CLI or editor backend.
+
+## 6. Scope Is Intentionally Small
+
+The type lattice is tiny, the word set is tiny, and the parser is minimal.
+
+That is not a flaw by itself; it is consistent with the repo being a compact proof of concept. But it means the project should be judged as an analysis kernel, not as a production Forth validator.
+
+## Overall Assessment
+
+This project is a **tight, faithful prototype of a typed symbolic stack-effect calculus**.
+
+Its main strengths are:
+
+- a clear research lineage,
+- a direct code-to-theory mapping,
+- a smart treatment of symbolic identity through wildcard indices,
+- subtype-aware composition,
+- and enough implementation to demonstrate real static-analysis behavior on small Forth fragments.
+
+Its main weakness is not conceptual but developmental:
+
+- the surrounding infrastructure never caught up with the theory.
+
+So the most accurate summary is:
+
+> `evaluator` is the semantic core of a much bigger static-analysis idea for Forth, captured in a small Java package that successfully demonstrates linear typed stack-effect reasoning, but stops well before a full parser, full control-flow analysis, or a production-quality tool.
+
+## If Someone Continues This Project
+
+The most natural next steps would be:
+
+1. make `TypeSystem` and `SpecSet` genuinely file-backed,
+2. replace `ProgText` with a real parser,
+3. represent control structures explicitly,
+4. lift the evaluator from single effects to branch-aware program constructs,
+5. harden error handling around `null` results,
+6. add tests using the examples already present in the papers,
+7. and turn the demo into a stable CLI or editor-facing library.
+
+That would extend the current code in the same direction the papers have already laid out.
