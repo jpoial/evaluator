@@ -1,0 +1,2 @@
+: BADOPEN
+  DUP

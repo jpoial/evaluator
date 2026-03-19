@@ -1,12 +1,14 @@
 # Legacy strict demo specification set for the evaluator.
 # Format:
-#   WORD ( inputs -- outputs )
+#   WORD ["<delimiter>"] ( inputs -- outputs )
 
 OVER ( X[2] X[1] -- X[2] X[1] X[2] )
 SWAP ( X[2] X[1] -- X[1] X[2] )
 DUP ( X[1] -- X[1] X[1] )
 DROP ( X -- )
 ROT ( X[3] X[2] X[1] -- X[2] X[1] X[3] )
+"(" ")" ( -- )
+." "\"" ( -- )
 # Non-standard helper kept for stack-effect experiments.
 PLUS ( X[1] X[1] -- X[1] )
 + ( n n -- n )

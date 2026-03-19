@@ -1,0 +1,3 @@
+: BADDO
+  DO DUP LOOP
+;

@@ -2,13 +2,9 @@
 
 package evaluator;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Inner representation for the program that is analysed.
@@ -20,8 +16,6 @@ public class ProgText extends LinkedList<String> {
 
    static final long serialVersionUID = 0xaabbcc;
 
-   static final Pattern WORD_PATTERN = Pattern.compile ("\\S+");
-
    /** original source text before parsing removes definitions */
    String sourceText = "";
 
@@ -30,16 +24,6 @@ public class ProgText extends LinkedList<String> {
 
    /** source spans of top-level program words */
    LinkedList<SourceSpan> wordSpans = new LinkedList<SourceSpan>();
-
-   static class SourceWord {
-      String text;
-      SourceSpan span;
-
-      SourceWord (String word, SourceSpan where) {
-         text = word;
-         span = where;
-      } // end of constructor
-   } // end of SourceWord
 
    static class ParseResult {
       Spec effect;
@@ -66,39 +50,17 @@ public class ProgText extends LinkedList<String> {
     */
    ProgText (String fileName, TypeSystem ts, SpecSet ss) {
       this();
-      LinkedList<SourceWord> tokens = new LinkedList<SourceWord>();
-      StringBuffer source = new StringBuffer ("");
-      String nl = System.getProperty ("line.separator");
-      boolean firstLine = true;
-      BufferedReader reader = null;
       try {
-         reader = new BufferedReader (new FileReader (fileName));
-         String line;
-         int lineNo = 0;
-         while ((line = reader.readLine()) != null) {
-            lineNo++;
-            if (!firstLine) source.append (nl);
-            source.append (line);
-            sourceLines.add (line);
-            firstLine = false;
-            addWords (lineBeforeComment (line), tokens, fileName, lineNo);
-         }
+         TextScanner scanner = TextScanner.fromFile (fileName);
+         sourceText = scanner.sourceText();
+         sourceLines = scanner.sourceLines();
+         parseTokens (scanProgramWords (scanner, ss), ts, ss, fileName);
       } catch (IOException e) {
          throw new ProgramException (new ProgramDiagnostic (
             "program.read-failed", ProgramDiagnostic.SEVERITY_ERROR,
             "Unable to read program text from " + fileName, "", null, null,
             null), e);
-      } finally {
-         if (reader != null) {
-            try {
-               reader.close();
-            } catch (IOException e) {
-               // ignore close failure in demo code
-            }
-         }
       }
-      sourceText = source.toString();
-      parseTokens (tokens, ts, ss, fileName);
    } // end of constructor
 
    /**
@@ -110,16 +72,16 @@ public class ProgText extends LinkedList<String> {
     */
    ProgText (String[] text, TypeSystem ts, SpecSet ss) {
       this();
-      LinkedList<SourceWord> tokens = new LinkedList<SourceWord>();
       StringBuffer source = new StringBuffer ("");
       for (int i=0; i<text.length; i++) {
          if (i > 0) source.append (" ");
          source.append (text [i]);
-         addWords (text [i], tokens, "<command line>", 0);
       }
-      sourceText = source.toString();
-      sourceLines.add (sourceText);
-      parseTokens (tokens, ts, ss, "<command line>");
+      TextScanner scanner = new TextScanner ("<command line>",
+         source.toString());
+      sourceText = scanner.sourceText();
+      sourceLines = scanner.sourceLines();
+      parseTokens (scanProgramWords (scanner, ss), ts, ss, "<command line>");
    } // end of constructor
 
    /**
@@ -141,33 +103,67 @@ public class ProgText extends LinkedList<String> {
    } // end of wordSpan()
 
    /**
-    * Adds all words from the given chunk of text to the target list.
-    * @param text whitespace separated words
-    * @param target target list for the parsed words
-    * @param sourceName source label
-    * @param lineNo line number in the source, or 0 if unavailable
+    * Resolves one source token as either a known word or a decimal integer
+    * literal.
+    * @param word source token text
+    * @param span source location of the token
+    * @param context surrounding context for diagnostics
+    * @param ts current type system
+    * @param ss current specification set
+    * @return stack effect of the token
     */
-   static void addWords (String text, LinkedList<SourceWord> target,
-      String sourceName, int lineNo) {
-      Matcher matcher = WORD_PATTERN.matcher (text);
-      while (matcher.find()) {
-         int start = matcher.start() + 1;
-         int end = matcher.end();
-         target.add (new SourceWord (matcher.group(), new SourceSpan (
-            sourceName, lineNo, start, lineNo, end)));
+   Spec resolveWordSpec (String word, SourceSpan span, String context,
+      TypeSystem ts, SpecSet ss) {
+      Spec spec = (Spec)ss.get (word);
+      if (spec != null) return spec;
+      if (SpecSet.isDecimalIntegerLiteral (word)) {
+         if (!ts.containsType ("n"))
+            throw programError ("lookup.literal-type-unavailable",
+               "Numeric literal " + word + " is not supported in " + context,
+               "type n is not defined in the current type system", span);
+         return SpecSet.integerLiteralSpec (ts, span);
       }
-   } // end of addWords()
+      throw missingWord (word, span, context);
+   } // end of resolveWordSpec()
 
    /**
-    * Removes the trailing comment marker but keeps original indentation.
-    * @param line source line
-    * @return line prefix before comment
+    * Scans program words sequentially, letting parser words consume their
+    * following source text according to the loaded specification set.
+    * @param scanner source scanner
+    * @param ss current specification set
+    * @return tokenized program words
     */
-   static String lineBeforeComment (String line) {
-      int commentPos = line.indexOf ('#');
-      if (commentPos >= 0) return line.substring (0, commentPos);
-      return line;
-   } // end of lineBeforeComment()
+   LinkedList<SourceWord> scanProgramWords (TextScanner scanner, SpecSet ss) {
+      LinkedList<SourceWord> result = new LinkedList<SourceWord>();
+      SourceWord token = null;
+      while ((token = scanner.nextWord()) != null) {
+         result.add (consumeScannerTail (token, scanner, ss));
+      }
+      return result;
+   } // end of scanProgramWords()
+
+   /**
+    * Lets one parser word consume its following raw source text.
+    * @param token already scanned word token
+    * @param scanner source scanner
+    * @param ss current specification set
+    * @return original token or token widened to cover the consumed text
+    */
+   SourceWord consumeScannerTail (SourceWord token, TextScanner scanner,
+      SpecSet ss) {
+      Spec spec = (Spec)ss.get (token.text);
+      if ((spec == null) || (spec.parseString == null) ||
+          (spec.parseString.length() == 0))
+         return token;
+      scanner.skipWhitespace();
+      SourceWord parsed = scanner.parseUntil (spec.parseString);
+      if (parsed == null)
+         throw programError ("parse.missing-scanner-end",
+            "Missing closing " + TextScanner.quotedText (spec.parseString) +
+            " for scanner word " + token.text, "", token.span);
+      return new SourceWord (token.text, SourceSpan.covering (token.span,
+         scanner.lastConsumedSpan()));
+   } // end of consumeScannerTail()
 
    /**
     * Parses top-level program tokens and handles linear colon definitions.
@@ -183,7 +179,7 @@ public class ProgText extends LinkedList<String> {
       LinkedList<SourceWord> defBody = null;
       while (tokens.size() > 0) {
          SourceWord token = (SourceWord)tokens.removeFirst();
-         String word = token.text;
+         String word = canonicalWord (token.text);
          if (currentDef == null) {
             if (":".equals (word)) {
                if (tokens.size() == 0)
@@ -202,7 +198,7 @@ public class ProgText extends LinkedList<String> {
             } else {
                if (";".equals (word))
                   throw unexpectedToken (";", token.span, sourceName);
-               add (word);
+               add (token.text);
                wordSpans.add (token.span);
             }
          } else {
@@ -267,7 +263,7 @@ public class ProgText extends LinkedList<String> {
       SourceSpan seqSpan = null;
       while (tokens.size() > 0) {
          SourceWord token = (SourceWord)tokens.removeFirst();
-         String word = token.text;
+         String word = canonicalWord (token.text);
          if (isStopWord (word, stopWords))
             return new ParseResult (evaluateSpecList (seq, ts, ss,
                "linear part of definition " + wordName), token, seqSpan);
@@ -277,14 +273,12 @@ public class ProgText extends LinkedList<String> {
             boolean hasElse = false;
             ParseResult elsePart = new ParseResult ((new Spec (ts)).withOrigin
                (null, "empty branch"), thenPart.stopToken, null);
-            if ((thenPart.stopToken != null) &
-                "ELSE".equals (thenPart.stopToken.text)) {
+            if (tokenEquals (thenPart.stopToken, "ELSE")) {
                hasElse = true;
                elsePart = parseDefinitionSequence (tokens, ts, ss, sourceName,
                   wordName, new String [] {"FI"}, doDepth);
             }
-            if ((elsePart.stopToken == null) |
-                !"FI".equals (elsePart.stopToken.text))
+            if (!tokenEquals (elsePart.stopToken, "FI"))
                throw missingTerminator ("FI", "IF", token.span, wordName);
             SourceSpan ifSpan = SourceSpan.covering (token.span,
                elsePart.stopToken.span);
@@ -296,12 +290,10 @@ public class ProgText extends LinkedList<String> {
             ParseResult alphaPart = parseDefinitionSequence (tokens, ts, ss,
                sourceName, wordName,
                new String [] {"WHILE", "AGAIN", "UNTIL"}, doDepth);
-            if ((alphaPart.stopToken != null) &
-                "WHILE".equals (alphaPart.stopToken.text)) {
+            if (tokenEquals (alphaPart.stopToken, "WHILE")) {
                ParseResult betaPart = parseDefinitionSequence (tokens, ts, ss,
                   sourceName, wordName, new String [] {"REPEAT"}, doDepth);
-               if ((betaPart.stopToken == null) |
-                   !"REPEAT".equals (betaPart.stopToken.text))
+               if (!tokenEquals (betaPart.stopToken, "REPEAT"))
                   throw missingTerminator ("REPEAT", "BEGIN", token.span,
                      wordName);
                SourceSpan loopSpan = SourceSpan.covering (token.span,
@@ -310,16 +302,14 @@ public class ProgText extends LinkedList<String> {
                   betaPart.effect, ts, ss, wordName, loopSpan);
                seq.add (loopEffect);
                seqSpan = SourceSpan.covering (seqSpan, loopSpan);
-            } else if ((alphaPart.stopToken != null) &
-                "AGAIN".equals (alphaPart.stopToken.text)) {
+            } else if (tokenEquals (alphaPart.stopToken, "AGAIN")) {
                SourceSpan loopSpan = SourceSpan.covering (token.span,
                   alphaPart.stopToken.span);
                Spec loopEffect = buildAgainEffect (alphaPart.effect, ts, ss,
                   wordName, loopSpan);
                seq.add (loopEffect);
                seqSpan = SourceSpan.covering (seqSpan, loopSpan);
-            } else if ((alphaPart.stopToken != null) &
-                "UNTIL".equals (alphaPart.stopToken.text)) {
+            } else if (tokenEquals (alphaPart.stopToken, "UNTIL")) {
                SourceSpan loopSpan = SourceSpan.covering (token.span,
                   alphaPart.stopToken.span);
                Spec loopEffect = buildUntilEffect (alphaPart.effect, ts, ss,
@@ -333,8 +323,7 @@ public class ProgText extends LinkedList<String> {
          } else if ("DO".equals (word)) {
             ParseResult bodyPart = parseDefinitionSequence (tokens, ts, ss,
                sourceName, wordName, new String [] {"LOOP"}, doDepth + 1);
-            if ((bodyPart.stopToken == null) |
-                !"LOOP".equals (bodyPart.stopToken.text))
+            if (!tokenEquals (bodyPart.stopToken, "LOOP"))
                throw missingTerminator ("LOOP", "DO", token.span, wordName);
             SourceSpan loopSpan = SourceSpan.covering (token.span,
                bodyPart.stopToken.span);
@@ -351,18 +340,16 @@ public class ProgText extends LinkedList<String> {
                 "WHILE".equals (word) | "REPEAT".equals (word) |
                 "AGAIN".equals (word) | "UNTIL".equals (word) |
                 "LOOP".equals (word))
-               throw unexpectedToken (word, token.span,
+               throw unexpectedToken (token.text, token.span,
                   "definition of " + wordName);
             Spec sp = null;
             if ("I".equals (word) & (doDepth > 0)) {
                sp = indexSpec (ts, sourceName);
             } else {
-               sp = (Spec)ss.get (word);
+               sp = resolveWordSpec (token.text, token.span,
+                  "definition of " + wordName, ts, ss);
             }
-            if (sp == null)
-               throw missingWord (word, token.span,
-                  "definition of " + wordName);
-            seq.add (((Spec)sp.clone()).withOrigin (token.span, word));
+            seq.add (((Spec)sp.clone()).withOrigin (token.span, token.text));
             seqSpan = SourceSpan.covering (seqSpan, token.span);
          }
       }
@@ -580,6 +567,26 @@ public class ProgText extends LinkedList<String> {
       }
       return false;
    } // end of isStopWord()
+
+   /**
+    * Canonicalizes one program word for case-insensitive Forth parsing.
+    * @param word original token text
+    * @return canonical uppercase form
+    */
+   static String canonicalWord (String word) {
+      return SpecSet.canonicalWord (word);
+   } // end of canonicalWord()
+
+   /**
+    * Tells whether a parsed token matches the given keyword.
+    * @param token parsed token
+    * @param expected canonical keyword
+    * @return true if token matches keyword case-insensitively
+    */
+   static boolean tokenEquals (SourceWord token, String expected) {
+      if (token == null) return false;
+      return expected.equals (canonicalWord (token.text));
+   } // end of tokenEquals()
 
    /**
     * Creates a missing-terminator diagnostic.

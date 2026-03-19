@@ -1,0 +1,3 @@
+: OUTER
+  : INNER DUP ;
+;

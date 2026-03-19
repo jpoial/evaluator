@@ -60,6 +60,20 @@ public class Spec {
    } // end of withOrigin()
 
    /**
+    * Attaches parser/scanner delimiter text to this spec.
+    * @param parse delimiter text consumed after the word
+    * @return this spec
+    */
+   Spec withParseString (String parse) {
+      if (parse == null) {
+         parseString = "";
+      } else {
+         parseString = parse;
+      }
+      return this;
+   } // end of withParseString()
+
+   /**
     * Returns a short description of the source construct.
     * @return diagnostic label
     */

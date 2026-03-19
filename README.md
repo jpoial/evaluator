@@ -37,7 +37,21 @@ effect <code>( X -- )</code>, so it can print any one symbolic value.
 The non-standard word <code>PLUS</code> is retained only as a same-type demo
 helper for stack-effect experiments.
 <br>
+Spec files may now define parser words by placing the closing delimiter
+directly between the word name and its stack effect, for example
+<code>"(" ")" ( -- )</code> and <code>." "\"" ( -- )</code>. The evaluator
+also still accepts the older explicit <code>scan</code> form, and type files
+may still define named scanner delimiters when needed.
+<br>
 Program text now supports linear colon definitions: <code>: NAME ... ;</code>
+<br>
+Decimal integer literals such as <code>0</code>, <code>17</code>,
+<code>-1</code>, and <code>+42</code> are also recognized directly in program
+text and are modeled as stack effect <code>( -- n )</code>.
+<br>
+Forth word lookup is case-insensitive throughout the evaluator; source text is
+left as written, but word names are treated internally as if all letters were
+uppercase.
 <br>
 Inside colon definitions, conditionals are supported as
 <code>IF ... FI</code> and <code>IF ... ELSE ... FI</code>;

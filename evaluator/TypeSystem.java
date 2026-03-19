@@ -3,8 +3,6 @@
 
 package evaluator;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.IOException;
 import java.util.Hashtable;
 import java.util.Iterator;
@@ -27,6 +25,12 @@ public class TypeSystem {
    /** original relation declarations in file order */
    LinkedList<String[]> relDefs;
 
+   /** named scanner delimiters in file order */
+   LinkedList<String[]> scannerDefs;
+
+   /** scanner name to delimiter mapping */
+   Hashtable<String, String> scanners;
+
    /** actual number of types in use */
    int actSize = 0;
 
@@ -41,46 +45,48 @@ public class TypeSystem {
       typeIndices = new Hashtable<String, Integer>();
       typeDefs = new LinkedList<String[]>();
       relDefs = new LinkedList<String[]>();
-      BufferedReader reader = null;
+      scannerDefs = new LinkedList<String[]>();
+      scanners = new Hashtable<String, String>();
       try {
-         reader = new BufferedReader (new FileReader (fileName));
-         String line;
-         int lineNo = 0;
-         while ((line = reader.readLine()) != null) {
-            lineNo++;
-            line = stripComment (line);
-            if (line.length() == 0) continue;
-            String[] tokens = line.split ("\\s+");
-            if (tokens.length == 0) continue;
-            if ("type".equals (tokens [0])) {
-               if (tokens.length < 2)
+         TextScanner scanner = TextScanner.fromFile (fileName);
+         LinkedList<SourceWord> tokens = null;
+         while ((tokens = scanner.nextLineAtoms()) != null) {
+            if (tokens.size() == 0) continue;
+            SourceWord directive = (SourceWord)tokens.removeFirst();
+            if ("type".equals (directive.text)) {
+               if (tokens.size() == 0)
                   throw new RuntimeException ("Type definition is too short " +
-                     "in " + fileName + ":" + String.valueOf (lineNo));
-               typeDefs.add (tokens);
+                     "in " + directive.span.startText());
+               String[] def = new String [tokens.size() + 1];
+               def [0] = directive.text;
+               for (int i = 0; i < tokens.size(); i++) {
+                  def [i + 1] = ((SourceWord)tokens.get (i)).text;
+               }
+               typeDefs.add (def);
             } else {
-               if ("rel".equals (tokens [0])) {
-                  if ((tokens.length != 4) | (!"<".equals (tokens [2])))
+               if ("rel".equals (directive.text)) {
+                  if ((tokens.size() != 3) |
+                      (!"<".equals (((SourceWord)tokens.get (1)).text)))
                      throw new RuntimeException ("Malformed relation in " +
-                        fileName + ":" + String.valueOf (lineNo));
-                  relDefs.add (new String[] {tokens [1], tokens [3]});
+                        directive.span.startText());
+                  relDefs.add (new String[] {((SourceWord)tokens.get (0)).text,
+                     ((SourceWord)tokens.get (2)).text});
+               } else if ("scanner".equals (directive.text)) {
+                  if (tokens.size() != 2)
+                     throw new RuntimeException ("Malformed scanner " +
+                        "definition in " + directive.span.startText());
+                  scannerDefs.add (new String[] {
+                     ((SourceWord)tokens.get (0)).text,
+                     ((SourceWord)tokens.get (1)).text});
                } else {
                   throw new RuntimeException ("Unknown directive " +
-                     tokens [0] + " in " + fileName + ":" +
-                     String.valueOf (lineNo));
+                     directive.text + " in " + directive.span.startText());
                }
             }
          }
       } catch (IOException e) {
          throw new RuntimeException ("Unable to read type system from " +
             fileName, e);
-      } finally {
-         if (reader != null) {
-            try {
-               reader.close();
-            } catch (IOException e) {
-               // ignore close failure in demo code
-            }
-         }
       }
       actSize = typeDefs.size();
       rel = new int [actSize][actSize];
@@ -105,6 +111,11 @@ public class TypeSystem {
          String[] def = (String[])relIt.next();
          addRelation (def [0], def [1], fileName);
       }
+      Iterator<String[]> scannerIt = scannerDefs.iterator();
+      while (scannerIt.hasNext()) {
+         String[] def = (String[])scannerIt.next();
+         addScanner (def [0], def [1], fileName);
+      }
       normalize();
    } // end of constructor
 
@@ -116,6 +127,24 @@ public class TypeSystem {
    boolean containsType (String t) {
       return typeIndices.get (t) != null;
    } // end of containsType()
+
+   /**
+    * Tells whether a named scanner delimiter is present.
+    * @param name scanner name
+    * @return true if name is known
+    */
+   boolean containsScanner (String name) {
+      return scanners.get (canonicalScannerName (name)) != null;
+   } // end of containsScanner()
+
+   /**
+    * Returns the delimiter string of a named scanner.
+    * @param name scanner name
+    * @return delimiter string or null
+    */
+   String scannerDelimiter (String name) {
+      return (String)scanners.get (canonicalScannerName (name));
+   } // end of scannerDelimiter()
 
    /**
     * Returns relationship between given (sub)types.
@@ -189,16 +218,31 @@ public class TypeSystem {
    } // end of addRelation()
 
    /**
-    * Removes trailing comment and trims the line.
-    * @param line source text line
-    * @return cleaned line
+    * Adds one named scanner delimiter.
+    * @param name scanner name
+    * @param delimiter terminating delimiter
+    * @param fileName source file name for diagnostics
     */
-   static String stripComment (String line) {
-      int commentPos = line.indexOf ('#');
-      String result = line;
-      if (commentPos >= 0) result = line.substring (0, commentPos);
-      return result.trim();
-   } // end of stripComment()
+   void addScanner (String name, String delimiter, String fileName) {
+      String key = canonicalScannerName (name);
+      if ((key == null) | (key.length() == 0))
+         throw new RuntimeException ("Empty scanner name in " + fileName);
+      if ((delimiter == null) | (delimiter.length() == 0))
+         throw new RuntimeException ("Empty scanner delimiter for " + name +
+            " in " + fileName);
+      if (scanners.put (key, delimiter) != null)
+         throw new RuntimeException ("Duplicate scanner name " + name +
+            " in " + fileName);
+   } // end of addScanner()
+
+   /**
+    * Canonicalizes one scanner name for case-insensitive lookup.
+    * @param name original scanner name
+    * @return canonical uppercase name
+    */
+   static String canonicalScannerName (String name) {
+      return SpecSet.canonicalWord (name);
+   } // end of canonicalScannerName()
 
    /**
     * Converts typesystem to string.
@@ -219,6 +263,12 @@ public class TypeSystem {
       while (relIt.hasNext()) {
          String[] def = (String[])relIt.next();
          result.append (nl + "rel " + def [0] + " < " + def [1]);
+      }
+      Iterator<String[]> scannerIt = scannerDefs.iterator();
+      while (scannerIt.hasNext()) {
+         String[] def = (String[])scannerIt.next();
+         result.append (nl + "scanner " + def [0] + " " +
+            TextScanner.quotedText (def [1]));
       }
       return result.toString();
    } // end of toString()

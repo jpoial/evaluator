@@ -62,8 +62,8 @@ public class ProgramDiagnostic {
     * @return true if source line and marker are present
     */
    public boolean hasSourceContext() {
-      return (sourceLine != null) & (markerLine != null) &
-         (sourceLine.length() > 0) & (markerLine.length() > 0);
+      return (sourceLine != null) && (markerLine != null) &&
+         (sourceLine.length() > 0) && (markerLine.length() > 0);
    } // end of hasSourceContext()
 
    /**

@@ -73,7 +73,7 @@ public class Evaluator {
          System.out.println ("Program file: " + cfg.progFile);
       }
       TypeSystem ex1types = new TypeSystem (cfg.typesFile);
-      System.out.println ("TypeSystem: " + ex1types.toString());
+      // System.out.println ("TypeSystem: " + ex1types.toString());
       SpecSet ex1specs = new SpecSet (cfg.specsFile, ex1types);
       ProgText ex1prog1;
       if (cfg.programParams.length > 0) {
@@ -81,7 +81,7 @@ public class Evaluator {
       } else {
          ex1prog1 = new ProgText (cfg.progFile, ex1types, ex1specs);
       }
-      System.out.println ("SpecSet:" + ex1specs.toString());
+      // System.out.println ("SpecSet:" + ex1specs.toString());
       System.out.println ("Program text:");
       System.out.println (ex1prog1.sourceText());
       System.out.println ("Program: " + ex1prog1.toString());

@@ -1,0 +1,3 @@
+: BADMISSINGLOOP
+  DO DUP
+;
