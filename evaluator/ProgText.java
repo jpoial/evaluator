@@ -117,11 +117,14 @@ public class ProgText extends LinkedList<String> {
       Spec spec = (Spec)ss.get (word);
       if (spec != null) return spec;
       if (SpecSet.isDecimalIntegerLiteral (word)) {
-         if (!ts.containsType ("n"))
-            throw programError ("lookup.literal-type-unavailable",
-               "Numeric literal " + word + " is not supported in " + context,
-               "type n is not defined in the current type system", span);
-         return SpecSet.integerLiteralSpec (ts, span);
+         Spec literalSpec = ss.getLiteral (SpecSet.INTEGER_LITERAL_KIND);
+         if (literalSpec == null)
+            throw programError ("lookup.literal-spec-missing",
+               "No literal specification found for integer literal " + word +
+               " in " + context,
+               "define LITERAL INTEGER ( -- <type> ) in the current specs file",
+               span);
+         return literalSpec;
       }
       throw missingWord (word, span, context);
    } // end of resolveWordSpec()

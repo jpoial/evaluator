@@ -21,9 +21,13 @@ import java.util.TreeSet;
 public class SpecSet extends Hashtable<String, Spec> {
     
     static final long serialVersionUID = 0xaabbcc;
+    static final String INTEGER_LITERAL_KIND = "INTEGER";
+
+   Hashtable<String, Spec> literalSpecs;
 
    SpecSet() {
       super();
+      literalSpecs = new Hashtable<String, Spec>();
    } // end of constructor
 
    /**
@@ -93,6 +97,46 @@ public class SpecSet extends Hashtable<String, Spec> {
    } // end of containsKey()
 
    /**
+    * Adds or replaces one literal specification in a safe way.
+    * @param kind literal kind name
+    * @param spec stack effect for the literal
+    * @return previous specification or null
+    */
+   public synchronized Spec putLiteral (String kind, Spec spec) {
+      if (kind == null)
+         throw new RuntimeException ("Literal kind must not be null.");
+      String key = canonicalWord (kind);
+      if (key.length() == 0)
+         throw new RuntimeException ("Literal kind must not be empty.");
+      if (spec == null)
+         throw new RuntimeException ("Specification for literal " + key +
+            " must not be null.");
+      return (Spec)literalSpecs.put (key, (Spec)spec.clone());
+   } // end of putLiteral()
+
+   /**
+    * Returns the specification associated with the given literal kind.
+    * @param kind literal kind name
+    * @return specification or null
+    */
+   public synchronized Spec getLiteral (String kind) {
+      if (kind == null) return null;
+      Spec result = (Spec)literalSpecs.get (canonicalWord (kind));
+      if (result == null) return null;
+      return (Spec)result.clone();
+   } // end of getLiteral()
+
+   /**
+    * Tells whether the given literal kind is present.
+    * @param kind lookup key
+    * @return true if the literal kind is present
+    */
+   public synchronized boolean containsLiteral (String kind) {
+      if (kind == null) return false;
+      return literalSpecs.containsKey (canonicalWord (kind));
+   } // end of containsLiteral()
+
+   /**
     * Loads more specifications from a file into this set.
     * @param fileName local file name
     * @param ts type system used for validation
@@ -110,6 +154,39 @@ public class SpecSet extends Hashtable<String, Spec> {
             if (word.text.length() == 0)
                throw new RuntimeException ("Missing word name in " +
                   word.span.startText());
+            if (!word.quoted && "LITERAL".equals (canonicalWord (word.text))) {
+               SourceWord kind = scanner.nextAtom ("(");
+               if (kind == null)
+                  throw new RuntimeException ("Missing literal kind after " +
+                     "LITERAL in " + word.span.startText());
+               if (kind.text.length() == 0)
+                  throw new RuntimeException ("Missing literal kind after " +
+                     "LITERAL in " + kind.span.startText());
+               if (containsLiteral (kind.text))
+                  throw new RuntimeException ("Duplicate literal " +
+                     "specification for " + kind.text + " in " +
+                     kind.span.startText());
+               SourceWord extra = scanner.nextAtom ("(");
+               if (extra != null)
+                  throw new RuntimeException ("Unexpected text " +
+                     extra.text + " before stack effect in " +
+                     extra.span.startText());
+               SourceSpan openSpan = scanner.consumeChar ('(');
+               if (openSpan == null)
+                  throw new RuntimeException ("Malformed literal " +
+                     "specification in " + kind.span.startText());
+               SourceWord body = scanner.parseUntil (')');
+               if (body == null)
+                  throw new RuntimeException ("Malformed literal " +
+                     "specification in " + openSpan.startText());
+               LinkedList<SourceWord> trailing = scanner.nextLineAtoms();
+               if ((trailing != null) && (trailing.size() > 0))
+                  throw new RuntimeException ("Unexpected trailing text in " +
+                     ((SourceWord)trailing.getFirst()).span.startText());
+               putLiteral (kind.text, parseSpec (body.text.trim(), ts,
+                  body.span));
+               continue;
+            }
             if (containsKey (word.text))
                throw new RuntimeException ("Duplicate specification for " +
                   word.text + " in " + word.span.startText());
@@ -165,6 +242,15 @@ public class SpecSet extends Hashtable<String, Spec> {
       String nl = System.getProperty ("line.separator");
       try {
          writer = new BufferedWriter (new FileWriter (fileName));
+         Iterator<String> literalIt = sortedLiteralKinds().iterator();
+         while (literalIt.hasNext()) {
+            String kind = (String)literalIt.next();
+            Spec spec = getLiteral (kind);
+            writer.write ("LITERAL ");
+            writer.write (formatWordForFile (kind));
+            writer.write (" " + spec.toString().trim());
+            writer.write (nl);
+         }
          Iterator<String> it = sortedWords().iterator();
          while (it.hasNext()) {
             String word = (String)it.next();
@@ -352,16 +438,6 @@ public class SpecSet extends Hashtable<String, Spec> {
    } // end of isDecimalIntegerLiteral()
 
    /**
-    * Returns the stack effect of one decimal integer literal.
-    * @param ts current type system
-    * @param span source location for diagnostics
-    * @return literal stack effect ( -- n )
-    */
-   static Spec integerLiteralSpec (TypeSystem ts, SourceSpan span) {
-      return parseSpec ("-- n", ts, span);
-   } // end of integerLiteralSpec()
-
-   /**
     * Tells whether one optional token can denote a scanner delimiter.
     * @param token optional token between word and stack effect
     * @param ts current type system
@@ -406,6 +482,13 @@ public class SpecSet extends Hashtable<String, Spec> {
    public String toString() {
       StringBuffer result = new StringBuffer ("");
       String nl = System.getProperty ("line.separator");
+      Iterator<String> literalKinds = sortedLiteralKinds().iterator();
+      while (literalKinds.hasNext()) {
+         String kind = (String)literalKinds.next();
+         Spec spec = getLiteral (kind);
+         result.append (nl + "LITERAL " + formatWordForFile (kind));
+         result.append ("\t" + spec.toString());
+      }
       Iterator<String> words = sortedWords().iterator();
       while (words.hasNext()) {
          String word = (String)words.next();
@@ -426,6 +509,14 @@ public class SpecSet extends Hashtable<String, Spec> {
    TreeSet<String> sortedWords() {
       return new TreeSet<String> (keySet());
    } // end of sortedWords()
+
+   /**
+    * Returns literal kind names in stable sorted order.
+    * @return sorted set of literal keys
+    */
+   TreeSet<String> sortedLiteralKinds() {
+      return new TreeSet<String> (literalSpecs.keySet());
+   } // end of sortedLiteralKinds()
 
    /**
     * Canonicalizes a Forth word name for case-insensitive storage.

@@ -43,11 +43,14 @@ directly between the word name and its stack effect, for example
 also still accepts the older explicit <code>scan</code> form, and type files
 may still define named scanner delimiters when needed.
 <br>
-Program text now supports linear colon definitions: <code>: NAME ... ;</code>
+Spec files may also define literal classes, for example
+<code>LITERAL INTEGER ( -- n )</code>. Decimal integer tokens such as
+<code>0</code>, <code>17</code>, <code>-1</code>, and <code>+42</code> are
+recognized directly in program text, and their stack effect comes from that
+literal specification so different type systems can choose a different result
+type name when needed.
 <br>
-Decimal integer literals such as <code>0</code>, <code>17</code>,
-<code>-1</code>, and <code>+42</code> are also recognized directly in program
-text and are modeled as stack effect <code>( -- n )</code>.
+Program text now supports linear colon definitions: <code>: NAME ... ;</code>
 <br>
 Forth word lookup is case-insensitive throughout the evaluator; source text is
 left as written, but word names are treated internally as if all letters were

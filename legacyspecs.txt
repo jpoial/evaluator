@@ -1,6 +1,7 @@
 # Legacy strict demo specification set for the evaluator.
 # Format:
 #   WORD ["<delimiter>"] ( inputs -- outputs )
+#   LITERAL KIND ( inputs -- outputs )
 
 OVER ( X[2] X[1] -- X[2] X[1] X[2] )
 SWAP ( X[2] X[1] -- X[1] X[2] )
@@ -9,6 +10,7 @@ DROP ( X -- )
 ROT ( X[3] X[2] X[1] -- X[2] X[1] X[3] )
 "(" ")" ( -- )
 ." "\"" ( -- )
+LITERAL INTEGER ( -- n )
 # Non-standard helper kept for stack-effect experiments.
 PLUS ( X[1] X[1] -- X[1] )
 + ( n n -- n )
