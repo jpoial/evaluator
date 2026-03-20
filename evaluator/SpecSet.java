@@ -190,27 +190,102 @@ public class SpecSet extends Hashtable<String, Spec> {
             if (containsKey (word.text))
                throw new RuntimeException ("Duplicate specification for " +
                   word.text + " in " + word.span.startText());
+            String parseMode = Spec.PARSE_NONE;
             String parseString = "";
-            SourceWord option = scanner.nextAtom ("(");
-            if (option != null) {
-               if ("SCAN".equals (canonicalWord (option.text))) {
+            String defineMode = Spec.DEFINE_NONE;
+            String controlMode = Spec.CONTROL_NONE;
+            String stateMode = Spec.STATE_ANY;
+            while (true) {
+               SourceWord option = scanner.nextAtom ("(");
+               if (option == null) break;
+               String optionKey = canonicalWord (option.text);
+               if ("PARSE".equals (optionKey)) {
+                  if (parseMode.length() > 0)
+                     throw new RuntimeException ("Duplicate PARSE clause in " +
+                        option.span.startText());
+                  SourceWord modeToken = scanner.nextAtom ("(");
+                  if (modeToken == null)
+                     throw new RuntimeException ("Missing parser mode after " +
+                        "PARSE in " + option.span.startText());
+                  parseMode = canonicalParseMode (modeToken.text);
+                  if (parseMode == null)
+                     throw new RuntimeException ("Unknown parser mode " +
+                        modeToken.text + " in " + modeToken.span.startText());
+                  if (parseModeNeedsArgument (parseMode)) {
+                     SourceWord delimiter = scanner.nextAtom ("(");
+                     if (delimiter == null)
+                        throw new RuntimeException ("Missing parser " +
+                           "delimiter after PARSE " + modeToken.text + " in " +
+                           modeToken.span.startText());
+                     parseString = resolveParseString (delimiter, ts);
+                  }
+                  continue;
+               }
+               if ("DEFINE".equals (optionKey)) {
+                  if (defineMode.length() > 0)
+                     throw new RuntimeException ("Duplicate DEFINE clause in " +
+                        option.span.startText());
+                  SourceWord modeToken = scanner.nextAtom ("(");
+                  if (modeToken == null)
+                     throw new RuntimeException ("Missing defining mode " +
+                        "after DEFINE in " + option.span.startText());
+                  defineMode = canonicalDefineMode (modeToken.text);
+                  if (defineMode == null)
+                     throw new RuntimeException ("Unknown defining mode " +
+                        modeToken.text + " in " + modeToken.span.startText());
+                  continue;
+               }
+               if ("CONTROL".equals (optionKey)) {
+                  if (controlMode.length() > 0)
+                     throw new RuntimeException ("Duplicate CONTROL clause in " +
+                        option.span.startText());
+                  SourceWord modeToken = scanner.nextAtom ("(");
+                  if (modeToken == null)
+                     throw new RuntimeException ("Missing control mode after " +
+                        "CONTROL in " + option.span.startText());
+                  controlMode = canonicalControlMode (modeToken.text);
+                  if (controlMode == null)
+                     throw new RuntimeException ("Unknown control mode " +
+                        modeToken.text + " in " + modeToken.span.startText());
+                  continue;
+               }
+               if ("STATE".equals (optionKey) | "CONTEXT".equals (optionKey)) {
+                  if (stateMode.length() > 0)
+                     throw new RuntimeException ("Duplicate STATE clause in " +
+                        option.span.startText());
+                  SourceWord modeToken = scanner.nextAtom ("(");
+                  if (modeToken == null)
+                     throw new RuntimeException ("Missing state mode after " +
+                        option.text + " in " + option.span.startText());
+                  stateMode = canonicalStateMode (modeToken.text);
+                  if (stateMode == null)
+                     throw new RuntimeException ("Unknown state mode " +
+                        modeToken.text + " in " + modeToken.span.startText());
+                  continue;
+               }
+               if ("SCAN".equals (optionKey)) {
+                  if (parseMode.length() > 0)
+                     throw new RuntimeException ("Duplicate scanner clause in " +
+                        option.span.startText());
                   SourceWord delimiter = scanner.nextAtom ("(");
                   if (delimiter == null)
                      throw new RuntimeException ("Missing scanner delimiter " +
                         "after SCAN in " + option.span.startText());
+                  parseMode = Spec.PARSE_UNTIL;
                   parseString = resolveParseString (delimiter, ts);
-                  SourceWord extra = scanner.nextAtom ("(");
-                  if (extra != null)
-                     throw new RuntimeException ("Unexpected text " +
-                        extra.text + " before stack effect in " +
-                        extra.span.startText());
-               } else if (looksLikeScannerDelimiter (option, ts)) {
-                  parseString = resolveParseString (option, ts);
-               } else {
-                  throw new RuntimeException ("Unexpected text " +
-                     option.text + " before stack effect in " +
-                     option.span.startText());
+                  continue;
                }
+               if (looksLikeScannerDelimiter (option, ts)) {
+                  if (parseMode.length() > 0)
+                     throw new RuntimeException ("Duplicate scanner clause in " +
+                        option.span.startText());
+                  parseMode = Spec.PARSE_UNTIL;
+                  parseString = resolveParseString (option, ts);
+                  continue;
+               }
+               throw new RuntimeException ("Unexpected text " +
+                  option.text + " before stack effect in " +
+                  option.span.startText());
             }
             SourceSpan openSpan = scanner.consumeChar ('(');
             if (openSpan == null)
@@ -224,8 +299,14 @@ public class SpecSet extends Hashtable<String, Spec> {
             if ((trailing != null) && (trailing.size() > 0))
                throw new RuntimeException ("Unexpected trailing text in " +
                   ((SourceWord)trailing.getFirst()).span.startText());
+            validateParserMetadata (word.text, parseMode, parseString,
+               defineMode, controlMode, stateMode, body.span);
             put (word.text, parseSpec (body.text.trim(), ts, body.span)
-               .withParseString (parseString));
+               .withParseMode (parseMode)
+               .withParseString (parseString)
+               .withDefineMode (defineMode)
+               .withControlMode (controlMode)
+               .withStateMode (stateMode));
          }
       } catch (IOException e) {
          throw new RuntimeException ("Unable to read specification set from "
@@ -256,10 +337,7 @@ public class SpecSet extends Hashtable<String, Spec> {
             String word = (String)it.next();
             Spec spec = (Spec)get (word);
             writer.write (formatWordForFile (word));
-            if ((spec.parseString != null) & (spec.parseString.length() > 0)) {
-               writer.write (" ");
-               writer.write (TextScanner.quotedText (spec.parseString));
-            }
+            appendSpecMetadata (writer, spec);
             writer.write (" " + spec.toString().trim());
             writer.write (nl);
          }
@@ -450,6 +528,153 @@ public class SpecSet extends Hashtable<String, Spec> {
    } // end of looksLikeScannerDelimiter()
 
    /**
+    * Canonicalizes one parser mode keyword.
+    * @param mode mode text from the spec file
+    * @return canonical parser mode or null when unknown
+    */
+   static String canonicalParseMode (String mode) {
+      String key = canonicalWord (mode);
+      if ("UNTIL".equals (key)) return Spec.PARSE_UNTIL;
+      if ("WORD".equals (key)) return Spec.PARSE_WORD;
+      if ("DEFINITION".equals (key)) return Spec.PARSE_DEFINITION;
+      return null;
+   } // end of canonicalParseMode()
+
+   /**
+    * Canonicalizes one defining mode keyword.
+    * @param mode mode text from the spec file
+    * @return canonical define mode or null when unknown
+    */
+   static String canonicalDefineMode (String mode) {
+      String key = canonicalWord (mode);
+      if ("COLON".equals (key)) return Spec.DEFINE_COLON;
+      if ("CONSTANT".equals (key)) return Spec.DEFINE_CONSTANT;
+      if ("VARIABLE".equals (key)) return Spec.DEFINE_VARIABLE;
+      return null;
+   } // end of canonicalDefineMode()
+
+   /**
+    * Canonicalizes one control mode keyword.
+    * @param mode mode text from the spec file
+    * @return canonical control mode or null when unknown
+    */
+   static String canonicalControlMode (String mode) {
+      String key = canonicalWord (mode);
+      if (Spec.CONTROL_IF.equals (key)) return Spec.CONTROL_IF;
+      if (Spec.CONTROL_ELSE.equals (key)) return Spec.CONTROL_ELSE;
+      if (Spec.CONTROL_FI.equals (key)) return Spec.CONTROL_FI;
+      if (Spec.CONTROL_BEGIN.equals (key)) return Spec.CONTROL_BEGIN;
+      if (Spec.CONTROL_WHILE.equals (key)) return Spec.CONTROL_WHILE;
+      if (Spec.CONTROL_REPEAT.equals (key)) return Spec.CONTROL_REPEAT;
+      if (Spec.CONTROL_AGAIN.equals (key)) return Spec.CONTROL_AGAIN;
+      if (Spec.CONTROL_UNTIL.equals (key)) return Spec.CONTROL_UNTIL;
+      if (Spec.CONTROL_DO.equals (key)) return Spec.CONTROL_DO;
+      if (Spec.CONTROL_LOOP.equals (key)) return Spec.CONTROL_LOOP;
+      if (Spec.CONTROL_INDEX.equals (key)) return Spec.CONTROL_INDEX;
+      return null;
+   } // end of canonicalControlMode()
+
+   /**
+    * Canonicalizes one usage-context keyword.
+    * @param mode mode text from the spec file
+    * @return canonical context mode or null when unknown
+    */
+   static String canonicalStateMode (String mode) {
+      String key = canonicalWord (mode);
+      if (Spec.STATE_INTERPRET.equals (key)) return Spec.STATE_INTERPRET;
+      if (Spec.STATE_COMPILE.equals (key)) return Spec.STATE_COMPILE;
+      if ("OUTER".equals (key)) return Spec.STATE_INTERPRET;
+      if ("DEFINITION".equals (key)) return Spec.STATE_COMPILE;
+      return null;
+   } // end of canonicalStateMode()
+
+   /**
+    * Tells whether the given parser mode needs a delimiter argument.
+    * @param mode parser mode
+    * @return true when the mode requires one extra argument
+    */
+   static boolean parseModeNeedsArgument (String mode) {
+      return Spec.PARSE_UNTIL.equals (mode) ||
+         Spec.PARSE_DEFINITION.equals (mode);
+   } // end of parseModeNeedsArgument()
+
+   /**
+    * Validates parser-word metadata combinations.
+    * @param word word being defined
+    * @param parseMode parser mode
+    * @param parseString parser delimiter
+    * @param defineMode defining mode
+    * @param span source span for diagnostics
+    */
+   static void validateParserMetadata (String word, String parseMode,
+      String parseString, String defineMode, String controlMode,
+      String stateMode,
+      SourceSpan span) {
+      if (Spec.PARSE_UNTIL.equals (parseMode) &&
+          ((parseString == null) | (parseString.length() == 0)))
+         throw new RuntimeException ("Missing parser delimiter for " + word +
+            " in " + sourceLocationText (span));
+      if (Spec.PARSE_DEFINITION.equals (parseMode) &&
+          ((parseString == null) | (parseString.length() == 0)))
+         throw new RuntimeException ("Missing definition terminator for " +
+            word + " in " + sourceLocationText (span));
+      if (Spec.DEFINE_COLON.equals (defineMode) &&
+          !Spec.PARSE_DEFINITION.equals (parseMode))
+         throw new RuntimeException ("DEFINE COLON requires PARSE " +
+            "DEFINITION for " + word + " in " + sourceLocationText (span));
+      if ((Spec.DEFINE_CONSTANT.equals (defineMode) |
+           Spec.DEFINE_VARIABLE.equals (defineMode)) &&
+          !Spec.PARSE_WORD.equals (parseMode))
+         throw new RuntimeException ("DEFINE " + defineMode + " requires " +
+            "PARSE WORD for " + word + " in " + sourceLocationText (span));
+      if (Spec.PARSE_DEFINITION.equals (parseMode) &&
+          !Spec.DEFINE_COLON.equals (defineMode))
+         throw new RuntimeException ("PARSE DEFINITION currently requires " +
+            "DEFINE COLON for " + word + " in " + sourceLocationText (span));
+      if (((controlMode != null) && (controlMode.length() > 0)) &&
+          (((defineMode != null) && (defineMode.length() > 0)) ||
+           ((parseMode != null) && (parseMode.length() > 0))))
+         throw new RuntimeException ("CONTROL currently cannot be combined " +
+            "with PARSE or DEFINE for " + word + " in " +
+            sourceLocationText (span));
+      if (((stateMode != null) && (stateMode.length() > 0)) &&
+          Spec.DEFINE_COLON.equals (defineMode))
+         throw new RuntimeException ("STATE is not supported for " + word +
+            " together with DEFINE COLON in " + sourceLocationText (span));
+   } // end of validateParserMetadata()
+
+   /**
+    * Writes parser metadata of one specification in a stable textual form.
+    * @param writer destination
+    * @param spec specification to render
+    * @throws IOException when the destination write fails
+    */
+   static void appendSpecMetadata (BufferedWriter writer, Spec spec)
+      throws IOException {
+      if (spec == null) return;
+      if ((spec.parseMode != null) && (spec.parseMode.length() > 0)) {
+         writer.write (" PARSE ");
+         writer.write (spec.parseMode);
+         if (parseModeNeedsArgument (spec.parseMode)) {
+            writer.write (" ");
+            writer.write (TextScanner.quotedText (spec.parseString));
+         }
+      }
+      if ((spec.defineMode != null) && (spec.defineMode.length() > 0)) {
+         writer.write (" DEFINE ");
+         writer.write (spec.defineMode);
+      }
+      if ((spec.controlMode != null) && (spec.controlMode.length() > 0)) {
+         writer.write (" CONTROL ");
+         writer.write (spec.controlMode);
+      }
+      if ((spec.stateMode != null) && (spec.stateMode.length() > 0)) {
+         writer.write (" STATE ");
+         writer.write (spec.stateMode);
+      }
+   } // end of appendSpecMetadata()
+
+   /**
     * Formats a word name for saving or display in spec files.
     * @param word original word name
     * @return word text or quoted word text when required
@@ -494,8 +719,17 @@ public class SpecSet extends Hashtable<String, Spec> {
          String word = (String)words.next();
          Spec spec = (Spec)get (word);
          result.append (nl + formatWordForFile (word));
-         if ((spec.parseString != null) & (spec.parseString.length() > 0))
-            result.append (" " + TextScanner.quotedText (spec.parseString));
+         if ((spec.parseMode != null) && (spec.parseMode.length() > 0)) {
+            result.append (" PARSE " + spec.parseMode);
+            if (parseModeNeedsArgument (spec.parseMode))
+               result.append (" " + TextScanner.quotedText (spec.parseString));
+         }
+         if ((spec.defineMode != null) && (spec.defineMode.length() > 0))
+            result.append (" DEFINE " + spec.defineMode);
+         if ((spec.controlMode != null) && (spec.controlMode.length() > 0))
+            result.append (" CONTROL " + spec.controlMode);
+         if ((spec.stateMode != null) && (spec.stateMode.length() > 0))
+            result.append (" STATE " + spec.stateMode);
          result.append ("\t" + spec.toString());
       }
       result.append (nl);

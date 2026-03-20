@@ -16,6 +16,9 @@ type addr
 type c-addr ca
 type a-addr aa
 type ior
+type fam
+type fileid
+type wid
 type xd cell-pair
 type d
 type +d
@@ -32,6 +35,9 @@ rel addr < u
 rel c-addr < addr
 rel a-addr < c-addr
 rel ior < n
+rel fam < x
+rel fileid < x
+rel wid < x
 rel +d < d
 rel +d < ud
 rel d < xd

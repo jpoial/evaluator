@@ -43,11 +43,28 @@ effect <code>( X -- )</code>, so it can print any one symbolic value.
 The non-standard word <code>PLUS</code> is retained only as a same-type demo
 helper for stack-effect experiments.
 <br>
-Spec files may now define parser words by placing the closing delimiter
-directly between the word name and its stack effect, for example
-<code>"(" ")" ( -- )</code> and <code>." "\"" ( -- )</code>. The evaluator
-also still accepts the older explicit <code>scan</code> form, and type files
-may still define named scanner delimiters when needed.
+Spec files may now describe parser words explicitly with metadata such as
+<code>PARSE UNTIL</code>, <code>PARSE WORD</code>,
+<code>PARSE DEFINITION</code>, <code>DEFINE</code>,
+<code>CONTROL</code>, and <code>STATE</code>. For example,
+<code>"(" PARSE UNTIL ")" ( -- )</code>,
+<code>".(" PARSE UNTIL ")" STATE INTERPRET ( -- )</code>,
+<code>CONSTANT PARSE WORD DEFINE CONSTANT ( X -- )</code>, and
+<code>: PARSE DEFINITION ";" DEFINE COLON ( -- )</code>. Structured words
+inside definitions can also be declared there, for example
+<code>IF CONTROL IF ( flag -- )</code> and
+<code>DO CONTROL DO ( n[2] n[1] -- )</code>. This lets scanner words,
+defining words, and control-word vocabulary live in the spec file rather than
+being special only in Java. The evaluator still accepts the older delimiter
+shorthand such as <code>"(" ")" ( -- )</code> and the older explicit
+<code>scan</code> form, and type files may still define named scanner
+delimiters when needed.
+This matches the current bundled behavior where <code>."</code> is allowed in
+compilation state, while <code>.(</code> is treated as an interpretation-state
+string-printing word with closing <code>)</code> as delimiter. For
+compatibility, the older <code>CONTEXT OUTER</code> and
+<code>CONTEXT DEFINITION</code> spellings are still accepted when loading spec
+files.
 <br>
 Spec files may also define literal classes, for example
 <code>LITERAL INTEGER ( -- n )</code>. Decimal integer tokens such as
@@ -56,7 +73,9 @@ recognized directly in program text, and their stack effect comes from that
 literal specification so different type systems can choose a different result
 type name when needed.
 <br>
-Program text now supports linear colon definitions: <code>: NAME ... ;</code>
+Program text now supports linear colon definitions: <code>: NAME ... ;</code>,
+and the bundled profiles also declare <code>CONSTANT</code> and
+<code>VARIABLE</code> as defining parser words.
 <br>
 Forth word lookup is case-insensitive throughout the evaluator; source text is
 left as written, but word names are treated internally as if all letters were

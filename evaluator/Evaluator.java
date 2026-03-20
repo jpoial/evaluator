@@ -203,9 +203,14 @@ public class Evaluator {
          Iterator<String> pit = p.iterator();
          Iterator<Spec> lit = l.iterator();
          while (pit.hasNext()) {
-            result.append ("    " + (String)pit.next());
+            String word = (String)pit.next();
+            Spec current = lit.hasNext() ? (Spec)lit.next() : null;
+            if (word.trim().length() == 0) continue;
+            result.append ("    " + word);
             if (lit.hasNext()) {
-              result.append (" \t" + ((Spec)lit.next()).toString() + nl);
+              result.append (" \t" + current.toString() + nl);
+            } else if (current != null) {
+              result.append (" \t" + current.toString() + nl);
             } else { throw new RuntimeException ("trouble!!..."); };
          }
       } else {result.append (nl);};

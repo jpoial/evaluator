@@ -59,8 +59,10 @@ public class SpecList extends LinkedList<Spec> {
          s = (String)pit.next();
          // key = (s.trim().split ("[\t \r\n\f]"))[0]; // JDK 1.4!!!
          key = s.trim(); // earlier JDK
-         sp = p.resolveWordSpec (key, p.wordSpan (pos), "top-level program",
-            ts, ss);
+         sp = p.wordSpec (pos);
+         if (sp == null)
+            sp = p.resolveWordSpec (key, p.wordSpan (pos),
+               "top-level program", ts, ss);
          add (((Spec)sp.clone()).withOrigin (p.wordSpan (pos), key));
          pos++;
       }

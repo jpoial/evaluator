@@ -5,6 +5,7 @@ package evaluator;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.Map;
 
 /**
  * Inner representation for the program that is analysed.
@@ -24,6 +25,9 @@ public class ProgText extends LinkedList<String> {
 
    /** source spans of top-level program words */
    LinkedList<SourceSpan> wordSpans = new LinkedList<SourceSpan>();
+
+   /** already resolved stack effects for top-level program words */
+   LinkedList<Spec> wordSpecs = new LinkedList<Spec>();
 
    static class ParseResult {
       Spec effect;
@@ -103,6 +107,16 @@ public class ProgText extends LinkedList<String> {
    } // end of wordSpan()
 
    /**
+    * Returns the resolved stack effect of a top-level word.
+    * @param index program word index
+    * @return stack effect or null
+    */
+   Spec wordSpec (int index) {
+      if ((index < 0) | (index >= wordSpecs.size())) return null;
+      return (Spec)wordSpecs.get (index);
+   } // end of wordSpec()
+
+   /**
     * Resolves one source token as either a known word or a decimal integer
     * literal.
     * @param word source token text
@@ -155,8 +169,7 @@ public class ProgText extends LinkedList<String> {
    SourceWord consumeScannerTail (SourceWord token, TextScanner scanner,
       SpecSet ss) {
       Spec spec = (Spec)ss.get (token.text);
-      if ((spec == null) || (spec.parseString == null) ||
-          (spec.parseString.length() == 0))
+      if ((spec == null) || !spec.consumesUntil())
          return token;
       scanner.skipWhitespace();
       SourceWord parsed = scanner.parseUntil (spec.parseString);
@@ -179,40 +192,70 @@ public class ProgText extends LinkedList<String> {
       String sourceName) {
       String currentDef = null;
       SourceWord currentDefToken = null;
+      String currentDefTerminator = null;
       LinkedList<SourceWord> defBody = null;
       while (tokens.size() > 0) {
          SourceWord token = (SourceWord)tokens.removeFirst();
          String word = canonicalWord (token.text);
+         Spec parserSpec = parserWordSpec (token.text, ss);
+         Spec controlSpec = controlWordSpec (token.text, ss);
          if (currentDef == null) {
-            if (":".equals (word)) {
-               if (tokens.size() == 0)
-                  throw programError ("parse.missing-word-name",
-                     "Missing word name after :", "", token.span);
-               currentDefToken = (SourceWord)tokens.removeFirst();
-               currentDef = currentDefToken.text.trim();
-               if (currentDef.length() == 0)
-                  throw programError ("parse.empty-word-name",
-                     "Empty word name after :", "", currentDefToken.span);
-               if (":".equals (currentDef) | ";".equals (currentDef))
-                  throw programError ("parse.illegal-word-name",
-                     "Illegal word name " + currentDef, "",
-                     currentDefToken.span);
-               defBody = new LinkedList<SourceWord>();
+            if ((parserSpec != null) && parserSpec.definesWord()) {
+               if (!parserSpec.allowedInInterpretState())
+                  throw programError ("parse.unsupported-interpret-word",
+                     token.text + " is not supported in interpretation state",
+                     "",
+                     token.span);
+               if (Spec.DEFINE_COLON.equals (parserSpec.defineMode)) {
+                  currentDefToken = nextDefinedName (tokens, token, token.text,
+                     ss);
+                  currentDef = currentDefToken.text.trim();
+                  currentDefTerminator = definitionTerminator (parserSpec);
+                  defBody = new LinkedList<SourceWord>();
+               } else if (Spec.DEFINE_CONSTANT.equals
+                     (parserSpec.defineMode)) {
+                  defineConstant (tokens, token, parserSpec, ts, ss);
+               } else if (Spec.DEFINE_VARIABLE.equals
+                     (parserSpec.defineMode)) {
+                  defineVariable (tokens, token, parserSpec, ts, ss);
+               } else {
+                  throw programError ("parse.unsupported-defining-word",
+                     token.text + " is not a supported defining word", "",
+                     token.span);
+               }
             } else {
-               if (";".equals (word))
-                  throw unexpectedToken (";", token.span, sourceName);
-               add (token.text);
-               wordSpans.add (token.span);
+               if ((parserSpec != null) && !parserSpec.allowedInInterpretState())
+                  throw programError ("parse.unsupported-interpret-word",
+                     token.text + " is not supported in interpretation state",
+                     "",
+                     token.span);
+               if (controlSpec != null)
+                  throw unexpectedToken (token.text, token.span, sourceName);
+               if (isDefinitionTerminatorWord (word, ss))
+                  throw unexpectedToken (token.text, token.span, sourceName);
+               addTopLevelWord (token.text, token.span,
+                  resolveWordSpec (token.text, token.span,
+                     "top-level program", ts, ss));
             }
          } else {
-            if (":".equals (word))
-               throw programError ("parse.nested-definition",
-                  "Nested definitions are not supported in definition of " +
+            if ((parserSpec != null) && !parserSpec.allowedInCompileState())
+               throw programError ("parse.unsupported-compile-word",
+                  token.text + " is not supported in compilation state of " +
                   currentDef, "", token.span);
-            if (";".equals (word)) {
+            if ((parserSpec != null) && parserSpec.definesWord()) {
+               if (Spec.DEFINE_COLON.equals (parserSpec.defineMode))
+                  throw programError ("parse.nested-definition",
+                     "Nested definitions are not supported in definition of " +
+                     currentDef, "", token.span);
+               throw programError ("parse.unsupported-defining-word",
+                  token.text + " is not supported inside definition of " +
+                  currentDef, "", token.span);
+            }
+            if (word.equals (currentDefTerminator)) {
                defineWord (currentDef, defBody, ts, ss, sourceName);
                currentDef = null;
                currentDefToken = null;
+               currentDefTerminator = null;
                defBody = null;
             } else {
                defBody.add (token);
@@ -224,6 +267,223 @@ public class ProgText extends LinkedList<String> {
             "Unterminated definition for " + currentDef, "",
             currentDefToken.span);
    } // end of parseTokens()
+
+   /**
+    * Adds one top-level runtime word together with its resolved stack effect.
+    * Hidden bookkeeping operations may use an empty display word.
+    * @param word display text
+    * @param span source span
+    * @param spec resolved stack effect
+    */
+   void addTopLevelWord (String word, SourceSpan span, Spec spec) {
+      add (word == null ? "" : word);
+      wordSpans.add (span);
+      if (spec == null) {
+         wordSpecs.add (null);
+      } else {
+         wordSpecs.add (((Spec)spec.clone()).withOrigin (span, word));
+      }
+   } // end of addTopLevelWord()
+
+   /**
+    * Evaluates the already parsed top-level runtime sequence so far.
+    * @param ts type system to use
+    * @param ss current specification set
+    * @return current cumulative effect
+    */
+   Spec currentTopLevelEffect (TypeSystem ts, SpecSet ss) {
+      SpecList prefix = new SpecList();
+      Iterator<Spec> it = wordSpecs.iterator();
+      while (it.hasNext()) {
+         Spec sp = (Spec)it.next();
+         if (sp != null) prefix.add ((Spec)sp.clone());
+      }
+      Spec result = prefix.evaluate (ts, ss);
+      if (result == null)
+         throw prefix.typeClash ("linear part of the top-level program", this);
+      return result;
+   } // end of currentTopLevelEffect()
+
+   /**
+    * Reads the next definition name after a defining word.
+    * @param tokens remaining top-level tokens
+    * @param definingToken defining word token
+    * @param definingWord text such as CONSTANT or VARIABLE
+    * @return parsed name token
+    */
+   SourceWord nextDefinedName (LinkedList<SourceWord> tokens,
+      SourceWord definingToken, String definingWord, SpecSet ss) {
+      if (tokens.size() == 0)
+         throw programError ("parse.missing-word-name",
+            "Missing word name after " + definingWord, "",
+            definingToken.span);
+      SourceWord result = (SourceWord)tokens.removeFirst();
+      String name = result.text == null ? "" : result.text.trim();
+      if (name.length() == 0)
+         throw programError ("parse.empty-word-name",
+            "Empty word name after " + definingWord, "", result.span);
+      if (isDefinitionStarterOrTerminatorWord (canonicalWord (name), ss))
+         throw programError ("parse.illegal-word-name",
+            "Illegal word name " + name, "", result.span);
+      return result;
+   } // end of nextDefinedName()
+
+   /**
+    * Handles top-level CONSTANT by consuming one runtime value and defining a
+    * new zero-argument word that returns a value of the consumed type.
+    * @param tokens remaining top-level tokens
+    * @param constantToken CONSTANT token
+    * @param ts type system to use
+    * @param ss current specification set
+    * @param sourceName file name or other source label for diagnostics
+    */
+   void defineConstant (LinkedList<SourceWord> tokens, SourceWord constantToken,
+      Spec definerSpec, TypeSystem ts, SpecSet ss) {
+      SourceWord nameToken = nextDefinedName (tokens, constantToken,
+         constantToken.text, ss);
+      SourceSpan definerSpan = SourceSpan.covering (constantToken.span,
+         nameToken.span);
+      if ((definerSpec.leftSide.size() != 1) |
+          (definerSpec.rightSide.size() != 0))
+         throw programError ("define.constant-shape",
+            constantToken.text + " must have defining shape ( x -- )", "",
+            definerSpan);
+      Spec prefixEffect = currentTopLevelEffect (ts, ss);
+      if (prefixEffect.rightSide.size() == 0)
+         throw programError ("define.constant-underflow",
+            constantToken.text + " " + nameToken.text +
+            " requires one value on the stack",
+            "", definerSpan);
+      TypeSymbol top = (TypeSymbol)prefixEffect.rightSide.lastElement();
+      TypeSymbol expected = (TypeSymbol)definerSpec.leftSide.firstElement();
+      if (ts.relation (top.ftype, expected.ftype) == 0)
+         throw programError ("define.constant-type",
+            constantToken.text + " " + nameToken.text +
+            " expects a value comparable with " + expected.ftype +
+            " but the current stack provides " + top.ftype,
+            "", definerSpan);
+      Spec constSpec = SpecSet.parseSpec ("-- " + top.ftype, ts,
+         nameToken.span);
+      ss.put (nameToken.text, constSpec);
+      Spec consumeSpec = SpecSet.parseSpec (top.ftype + " --", ts,
+         definerSpan);
+      addTopLevelWord ("", constantToken.span,
+         consumeSpec.withOrigin (constantToken.span,
+            constantToken.text + " " + nameToken.text));
+   } // end of defineConstant()
+
+   /**
+    * Handles top-level VARIABLE by defining a new word that returns an
+    * aligned data-space address.
+    * @param tokens remaining top-level tokens
+    * @param variableToken VARIABLE token
+    * @param ts type system to use
+    * @param ss current specification set
+    */
+   void defineVariable (LinkedList<SourceWord> tokens,
+      SourceWord variableToken, Spec definerSpec, TypeSystem ts, SpecSet ss) {
+      SourceWord nameToken = nextDefinedName (tokens, variableToken,
+         variableToken.text, ss);
+      ss.put (nameToken.text, runtimeSpecClone (definerSpec, ts)
+         .withOrigin (nameToken.span, nameToken.text));
+   } // end of defineVariable()
+
+   /**
+    * Returns parser metadata for the given word, when present.
+    * @param word word text
+    * @param ss current specification set
+    * @return parser spec or null
+    */
+   Spec parserWordSpec (String word, SpecSet ss) {
+      Spec spec = (Spec)ss.get (word);
+      if ((spec == null) || !spec.isParserWord()) return null;
+      return spec;
+   } // end of parserWordSpec()
+
+   /**
+    * Returns structured-control metadata for the given word, when present.
+    * @param word word text
+    * @param ss current specification set
+    * @return control spec or null
+    */
+   Spec controlWordSpec (String word, SpecSet ss) {
+      Spec spec = (Spec)ss.get (word);
+      if ((spec == null) || !spec.isControlWord()) return null;
+      return spec;
+   } // end of controlWordSpec()
+
+   /**
+    * Creates a plain runtime clone of a parser-word specification.
+    * @param spec source specification
+    * @param ts type system to use
+    * @return clone without parser metadata
+    */
+   Spec runtimeSpecClone (Spec spec, TypeSystem ts) {
+      Spec result = new Spec ((Tvector)spec.leftSide.clone(),
+         (Tvector)spec.rightSide.clone(), ts, "", 0);
+      result.maxPos();
+      return result;
+   } // end of runtimeSpecClone()
+
+   /**
+    * Returns the terminator word of a definition-starting parser word.
+    * @param spec definition parser spec
+    * @return canonical terminating word
+    */
+   String definitionTerminator (Spec spec) {
+      if ((spec == null) || (spec.parseString == null) ||
+          (spec.parseString.length() == 0))
+         return ";";
+      return canonicalWord (spec.parseString);
+   } // end of definitionTerminator()
+
+   /**
+    * Tells whether the given word opens a named definition.
+    * @param word canonical word text
+    * @param ss current specification set
+    * @return true for definition starters
+    */
+   boolean isDefinitionStarterWord (String word, SpecSet ss) {
+      if (word == null) return false;
+      Iterator<Map.Entry<String, Spec>> it = ss.entrySet().iterator();
+      while (it.hasNext()) {
+         Map.Entry<String, Spec> entry = (Map.Entry<String, Spec>)it.next();
+         Spec spec = (Spec)entry.getValue();
+         if ((spec != null) && Spec.DEFINE_COLON.equals (spec.defineMode) &&
+             word.equals (canonicalWord ((String)entry.getKey())))
+            return true;
+      }
+      return false;
+   } // end of isDefinitionStarterWord()
+
+   /**
+    * Tells whether the given word is a known definition terminator.
+    * @param word canonical word text
+    * @param ss current specification set
+    * @return true when the word closes a definition
+    */
+   boolean isDefinitionTerminatorWord (String word, SpecSet ss) {
+      if (word == null) return false;
+      Iterator<Spec> it = ss.values().iterator();
+      while (it.hasNext()) {
+         Spec spec = (Spec)it.next();
+         if ((spec != null) && Spec.DEFINE_COLON.equals (spec.defineMode) &&
+             word.equals (definitionTerminator (spec)))
+            return true;
+      }
+      return false;
+   } // end of isDefinitionTerminatorWord()
+
+   /**
+    * Tells whether the word is reserved as a definition opener or terminator.
+    * @param word canonical word text
+    * @param ss current specification set
+    * @return true if the word is reserved
+    */
+   boolean isDefinitionStarterOrTerminatorWord (String word, SpecSet ss) {
+      return isDefinitionStarterWord (word, ss) ||
+         isDefinitionTerminatorWord (word, ss);
+   } // end of isDefinitionStarterOrTerminatorWord()
 
    /**
     * Evaluates one colon definition and stores its effect in the current
@@ -261,58 +521,69 @@ public class ProgText extends LinkedList<String> {
     */
    ParseResult parseDefinitionSequence (LinkedList<SourceWord> tokens,
       TypeSystem ts, SpecSet ss, String sourceName, String wordName,
-      String[] stopWords, int doDepth) {
+      String[] stopModes, int doDepth) {
       SpecList seq = new SpecList();
       SourceSpan seqSpan = null;
       while (tokens.size() > 0) {
          SourceWord token = (SourceWord)tokens.removeFirst();
-         String word = canonicalWord (token.text);
-         if (isStopWord (word, stopWords))
+         Spec controlSpec = controlWordSpec (token.text, ss);
+         String controlMode = controlSpec == null ? "" : controlSpec.controlMode;
+         if (isStopControlMode (controlMode, stopModes))
             return new ParseResult (evaluateSpecList (seq, ts, ss,
                "linear part of definition " + wordName), token, seqSpan);
-         if ("IF".equals (word)) {
+         if (Spec.CONTROL_IF.equals (controlMode)) {
             ParseResult thenPart = parseDefinitionSequence (tokens, ts, ss,
-               sourceName, wordName, new String [] {"ELSE", "FI"}, doDepth);
+               sourceName, wordName, new String [] {
+               Spec.CONTROL_ELSE, Spec.CONTROL_FI}, doDepth);
             boolean hasElse = false;
             ParseResult elsePart = new ParseResult ((new Spec (ts)).withOrigin
                (null, "empty branch"), thenPart.stopToken, null);
-            if (tokenEquals (thenPart.stopToken, "ELSE")) {
+            if (tokenHasControlMode (thenPart.stopToken, ss,
+                  Spec.CONTROL_ELSE)) {
                hasElse = true;
                elsePart = parseDefinitionSequence (tokens, ts, ss, sourceName,
-                  wordName, new String [] {"FI"}, doDepth);
+                  wordName, new String [] {Spec.CONTROL_FI}, doDepth);
             }
-            if (!tokenEquals (elsePart.stopToken, "FI"))
-               throw missingTerminator ("FI", "IF", token.span, wordName);
+            if (!tokenHasControlMode (elsePart.stopToken, ss,
+                  Spec.CONTROL_FI))
+               throw missingTerminator (Spec.CONTROL_FI, Spec.CONTROL_IF,
+                  token.span, wordName, ss);
             SourceSpan ifSpan = SourceSpan.covering (token.span,
                elsePart.stopToken.span);
             Spec ifEffect = buildIfEffect (thenPart.effect, elsePart.effect,
                ts, ss, wordName, ifSpan, hasElse);
             seq.add (ifEffect);
             seqSpan = SourceSpan.covering (seqSpan, ifSpan);
-         } else if ("BEGIN".equals (word)) {
+         } else if (Spec.CONTROL_BEGIN.equals (controlMode)) {
             ParseResult alphaPart = parseDefinitionSequence (tokens, ts, ss,
                sourceName, wordName,
-               new String [] {"WHILE", "AGAIN", "UNTIL"}, doDepth);
-            if (tokenEquals (alphaPart.stopToken, "WHILE")) {
+               new String [] {Spec.CONTROL_WHILE, Spec.CONTROL_AGAIN,
+               Spec.CONTROL_UNTIL}, doDepth);
+            if (tokenHasControlMode (alphaPart.stopToken, ss,
+                  Spec.CONTROL_WHILE)) {
                ParseResult betaPart = parseDefinitionSequence (tokens, ts, ss,
-                  sourceName, wordName, new String [] {"REPEAT"}, doDepth);
-               if (!tokenEquals (betaPart.stopToken, "REPEAT"))
-                  throw missingTerminator ("REPEAT", "BEGIN", token.span,
-                     wordName);
+                  sourceName, wordName, new String [] {Spec.CONTROL_REPEAT},
+                  doDepth);
+               if (!tokenHasControlMode (betaPart.stopToken, ss,
+                     Spec.CONTROL_REPEAT))
+                  throw missingTerminator (Spec.CONTROL_REPEAT,
+                     Spec.CONTROL_BEGIN, token.span, wordName, ss);
                SourceSpan loopSpan = SourceSpan.covering (token.span,
                   betaPart.stopToken.span);
                Spec loopEffect = buildWhileEffect (alphaPart.effect,
                   betaPart.effect, ts, ss, wordName, loopSpan);
                seq.add (loopEffect);
                seqSpan = SourceSpan.covering (seqSpan, loopSpan);
-            } else if (tokenEquals (alphaPart.stopToken, "AGAIN")) {
+            } else if (tokenHasControlMode (alphaPart.stopToken, ss,
+                  Spec.CONTROL_AGAIN)) {
                SourceSpan loopSpan = SourceSpan.covering (token.span,
                   alphaPart.stopToken.span);
                Spec loopEffect = buildAgainEffect (alphaPart.effect, ts, ss,
                   wordName, loopSpan);
                seq.add (loopEffect);
                seqSpan = SourceSpan.covering (seqSpan, loopSpan);
-            } else if (tokenEquals (alphaPart.stopToken, "UNTIL")) {
+            } else if (tokenHasControlMode (alphaPart.stopToken, ss,
+                  Spec.CONTROL_UNTIL)) {
                SourceSpan loopSpan = SourceSpan.covering (token.span,
                   alphaPart.stopToken.span);
                Spec loopEffect = buildUntilEffect (alphaPart.effect, ts, ss,
@@ -320,14 +591,18 @@ public class ProgText extends LinkedList<String> {
                seq.add (loopEffect);
                seqSpan = SourceSpan.covering (seqSpan, loopSpan);
             } else {
-               throw missingTerminator ("WHILE, AGAIN, or UNTIL", "BEGIN",
-                  token.span, wordName);
+               throw missingTerminator (new String [] {Spec.CONTROL_WHILE,
+                  Spec.CONTROL_AGAIN, Spec.CONTROL_UNTIL},
+                  Spec.CONTROL_BEGIN, token.span, wordName, ss);
             }
-         } else if ("DO".equals (word)) {
+         } else if (Spec.CONTROL_DO.equals (controlMode)) {
             ParseResult bodyPart = parseDefinitionSequence (tokens, ts, ss,
-               sourceName, wordName, new String [] {"LOOP"}, doDepth + 1);
-            if (!tokenEquals (bodyPart.stopToken, "LOOP"))
-               throw missingTerminator ("LOOP", "DO", token.span, wordName);
+               sourceName, wordName, new String [] {Spec.CONTROL_LOOP},
+               doDepth + 1);
+            if (!tokenHasControlMode (bodyPart.stopToken, ss,
+                  Spec.CONTROL_LOOP))
+               throw missingTerminator (Spec.CONTROL_LOOP, Spec.CONTROL_DO,
+                  token.span, wordName, ss);
             SourceSpan loopSpan = SourceSpan.covering (token.span,
                bodyPart.stopToken.span);
             Spec loopEffect = buildDoLoopEffect (bodyPart.effect, ts, ss,
@@ -335,19 +610,31 @@ public class ProgText extends LinkedList<String> {
             seq.add (loopEffect);
             seqSpan = SourceSpan.covering (seqSpan, loopSpan);
          } else {
-            if (":".equals (word))
-               throw programError ("parse.nested-definition",
-                  "Nested definitions are not supported in definition of " +
+            Spec parserSpec = parserWordSpec (token.text, ss);
+            if ((parserSpec != null) && !parserSpec.allowedInCompileState())
+               throw programError ("parse.unsupported-compile-word",
+                  token.text + " is not supported in compilation state of " +
                   wordName, "", token.span);
-            if ("ELSE".equals (word) | "FI".equals (word) |
-                "WHILE".equals (word) | "REPEAT".equals (word) |
-                "AGAIN".equals (word) | "UNTIL".equals (word) |
-                "LOOP".equals (word))
+            if ((parserSpec != null) && parserSpec.definesWord()) {
+               if (Spec.DEFINE_COLON.equals (parserSpec.defineMode))
+                  throw programError ("parse.nested-definition",
+                     "Nested definitions are not supported in definition of " +
+                     wordName, "", token.span);
+               throw programError ("parse.unsupported-defining-word",
+                  token.text + " is not supported inside definition of " +
+                  wordName, "", token.span);
+            }
+            if ((controlSpec != null) &&
+                !Spec.CONTROL_INDEX.equals (controlMode))
                throw unexpectedToken (token.text, token.span,
                   "definition of " + wordName);
             Spec sp = null;
-            if ("I".equals (word) & (doDepth > 0)) {
-               sp = indexSpec (ts, sourceName);
+            if (Spec.CONTROL_INDEX.equals (controlMode)) {
+               if (doDepth <= 0)
+                  throw unexpectedToken (token.text, token.span,
+                     "definition of " + wordName);
+               sp = controlRuntimeSpec (Spec.CONTROL_INDEX, ts, ss,
+                  token.span);
             } else {
                sp = resolveWordSpec (token.text, token.span,
                   "definition of " + wordName, ts, ss);
@@ -391,7 +678,10 @@ public class ProgText extends LinkedList<String> {
    Spec buildIfEffect (Spec thenEffect, Spec elseEffect, TypeSystem ts,
       SpecSet ss, String wordName, SourceSpan structureSpan,
       boolean hasElse) {
-      String label = hasElse ? "IF...ELSE...FI" : "IF...FI";
+      String label = hasElse ? structureLabel (ss, new String [] {
+         Spec.CONTROL_IF, Spec.CONTROL_ELSE, Spec.CONTROL_FI}) :
+         structureLabel (ss, new String [] {Spec.CONTROL_IF,
+         Spec.CONTROL_FI});
       Spec merged = thenEffect.glb (elseEffect, ts, ss);
       if (merged == null)
          throw programError ("type.if-branch-clash",
@@ -400,8 +690,8 @@ public class ProgText extends LinkedList<String> {
             ", else branch " + elseEffect.toString().trim() +
             " cannot be merged", structureSpan);
       SpecList seq = new SpecList();
-      seq.add (flagConsumeSpec (ts, structureSpan.sourceName).withOrigin (
-         structureSpan, label));
+      seq.add (controlRuntimeSpec (Spec.CONTROL_IF, ts, ss, structureSpan)
+         .withOrigin (structureSpan, label));
       seq.add (((Spec)merged.clone()).withOrigin (structureSpan, label));
       return evaluateSpecList (seq, ts, ss,
          label + " in definition " + wordName).withOrigin (structureSpan,
@@ -421,32 +711,35 @@ public class ProgText extends LinkedList<String> {
     */
    Spec buildWhileEffect (Spec alphaEffect, Spec betaEffect, TypeSystem ts,
       SpecSet ss, String wordName, SourceSpan structureSpan) {
+      String whileWord = controlWordName (Spec.CONTROL_WHILE, ss);
+      String label = structureLabel (ss, new String [] {Spec.CONTROL_BEGIN,
+         Spec.CONTROL_WHILE, Spec.CONTROL_REPEAT});
       SpecList alphaSeq = new SpecList();
       alphaSeq.add ((Spec)alphaEffect.clone());
-      alphaSeq.add (flagConsumeSpec (ts, structureSpan.sourceName).withOrigin
-         (structureSpan, "WHILE"));
+      alphaSeq.add (controlRuntimeSpec (Spec.CONTROL_WHILE, ts, ss,
+         structureSpan).withOrigin (structureSpan, whileWord));
       Spec alphaTest = evaluateSpecList (alphaSeq, ts, ss,
-         "WHILE loop test in definition " + wordName);
+         whileWord + " loop test in definition " + wordName);
       Spec alphaLoop = alphaTest.piStar (ts, ss);
       if (alphaLoop == null)
          throw programError ("type.loop-prefix-non-idempotent",
-            "Non-idempotent loop prefix in BEGIN...WHILE...REPEAT of " +
-            "definition " + wordName, "prefix effect " +
+            "Non-idempotent loop prefix in " + label + " of definition " +
+            wordName, "prefix effect " +
             alphaTest.toString().trim(), structureSpan);
       Spec betaLoop = betaEffect.piStar (ts, ss);
       if (betaLoop == null)
          throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in BEGIN...WHILE...REPEAT of " +
-            "definition " + wordName, "body effect " +
+            "Non-idempotent loop body in " + label + " of definition " +
+            wordName, "body effect " +
             betaEffect.toString().trim(), structureSpan);
       SpecList loopSeq = new SpecList();
       loopSeq.add (((Spec)alphaLoop.clone()).withOrigin (structureSpan,
-         "BEGIN...WHILE...REPEAT"));
+         label));
       loopSeq.add (((Spec)betaLoop.clone()).withOrigin (structureSpan,
-         "BEGIN...WHILE...REPEAT"));
+         label));
       return evaluateSpecList (loopSeq, ts, ss,
-         "BEGIN...WHILE...REPEAT in definition " + wordName).withOrigin (
-         structureSpan, "BEGIN...WHILE...REPEAT");
+         label + " in definition " + wordName).withOrigin (
+         structureSpan, label);
    } // end of buildWhileEffect()
 
    /**
@@ -461,13 +754,15 @@ public class ProgText extends LinkedList<String> {
     */
    Spec buildAgainEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
       String wordName, SourceSpan structureSpan) {
+      String label = structureLabel (ss, new String [] {Spec.CONTROL_BEGIN,
+         Spec.CONTROL_AGAIN});
       Spec bodyLoop = bodyEffect.piStar (ts, ss);
       if (bodyLoop == null)
          throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in BEGIN...AGAIN of definition " +
+            "Non-idempotent loop body in " + label + " of definition " +
             wordName, "body effect " + bodyEffect.toString().trim(),
             structureSpan);
-      return bodyLoop.withOrigin (structureSpan, "BEGIN...AGAIN");
+      return bodyLoop.withOrigin (structureSpan, label);
    } // end of buildAgainEffect()
 
    /**
@@ -482,19 +777,22 @@ public class ProgText extends LinkedList<String> {
     */
    Spec buildUntilEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
       String wordName, SourceSpan structureSpan) {
+      String untilWord = controlWordName (Spec.CONTROL_UNTIL, ss);
+      String label = structureLabel (ss, new String [] {Spec.CONTROL_BEGIN,
+         Spec.CONTROL_UNTIL});
       SpecList testSeq = new SpecList();
       testSeq.add ((Spec)bodyEffect.clone());
-      testSeq.add (flagConsumeSpec (ts, structureSpan.sourceName).withOrigin
-         (structureSpan, "UNTIL"));
+      testSeq.add (controlRuntimeSpec (Spec.CONTROL_UNTIL, ts, ss,
+         structureSpan).withOrigin (structureSpan, untilWord));
       Spec loopTest = evaluateSpecList (testSeq, ts, ss,
-         "UNTIL loop test in definition " + wordName);
+         untilWord + " loop test in definition " + wordName);
       Spec untilLoop = loopTest.piStar (ts, ss);
       if (untilLoop == null)
          throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in BEGIN...UNTIL of definition " +
+            "Non-idempotent loop body in " + label + " of definition " +
             wordName, "body and flag-test effect " +
             loopTest.toString().trim(), structureSpan);
-      return untilLoop.withOrigin (structureSpan, "BEGIN...UNTIL");
+      return untilLoop.withOrigin (structureSpan, label);
    } // end of buildUntilEffect()
 
    /**
@@ -510,66 +808,122 @@ public class ProgText extends LinkedList<String> {
     */
    Spec buildDoLoopEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
       String wordName, SourceSpan structureSpan) {
+      String label = structureLabel (ss, new String [] {Spec.CONTROL_DO,
+         Spec.CONTROL_LOOP});
       Spec bodyLoop = bodyEffect.piStar (ts, ss);
       if (bodyLoop == null)
          throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in DO...LOOP of definition " +
+            "Non-idempotent loop body in " + label + " of definition " +
             wordName, "body effect " + bodyEffect.toString().trim(),
             structureSpan);
       SpecList loopSeq = new SpecList();
-      loopSeq.add (doConsumeSpec (ts, structureSpan.sourceName).withOrigin (
-         structureSpan, "DO...LOOP"));
-      loopSeq.add (((Spec)bodyLoop.clone()).withOrigin (structureSpan,
-         "DO...LOOP"));
+      loopSeq.add (controlRuntimeSpec (Spec.CONTROL_DO, ts, ss,
+         structureSpan).withOrigin (structureSpan, label));
+      loopSeq.add (((Spec)bodyLoop.clone()).withOrigin (structureSpan, label));
       return evaluateSpecList (loopSeq, ts, ss,
-         "DO...LOOP in definition " + wordName).withOrigin (structureSpan,
-         "DO...LOOP");
+         label + " in definition " + wordName).withOrigin (structureSpan,
+         label);
    } // end of buildDoLoopEffect()
 
    /**
-    * Returns the specification that consumes one flag.
+    * Returns the runtime specification associated with one control role.
+    * @param role control role
     * @param ts type system to use
-    * @param sourceName file name or other source label for diagnostics
-    * @return spec ( flag -- )
+    * @param ss current specification set
+    * @param span source span for fallback diagnostics
+    * @return runtime effect
     */
-   Spec flagConsumeSpec (TypeSystem ts, String sourceName) {
-      return SpecSet.parseSpec ("flag --", ts, sourceName, 0);
-   } // end of flagConsumeSpec()
+   Spec controlRuntimeSpec (String role, TypeSystem ts, SpecSet ss,
+      SourceSpan span) {
+      Spec spec = controlWordSpecByRole (role, ss);
+      if (spec != null) return runtimeSpecClone (spec, ts);
+      if (Spec.CONTROL_DO.equals (role))
+         return SpecSet.parseSpec ("n[2] n[1] --", ts, span);
+      if (Spec.CONTROL_INDEX.equals (role))
+         return SpecSet.parseSpec ("-- n", ts, span);
+      return SpecSet.parseSpec ("flag --", ts, span);
+   } // end of controlRuntimeSpec()
 
    /**
-    * Returns the specification that consumes loop limit and start values.
-    * @param ts type system to use
-    * @param sourceName file name or other source label for diagnostics
-    * @return spec ( n[2] n[1] -- ) where n[2] is the exclusive loop limit
-    *   and n[1] is the start index; with step 1 the last executed index is
-    *   limit-1, as in 7 0 DO I . LOOP -> 0 1 2 3 4 5 6
+    * Returns the specification that declares the requested control role.
+    * @param role control role
+    * @param ss current specification set
+    * @return control spec or null
     */
-   Spec doConsumeSpec (TypeSystem ts, String sourceName) {
-      return SpecSet.parseSpec ("n[2] n[1] --", ts, sourceName, 0);
-   } // end of doConsumeSpec()
+   Spec controlWordSpecByRole (String role, SpecSet ss) {
+      Iterator<Spec> it = ss.values().iterator();
+      while (it.hasNext()) {
+         Spec spec = (Spec)it.next();
+         if ((spec != null) && spec.hasControlMode (role)) return spec;
+      }
+      return null;
+   } // end of controlWordSpecByRole()
 
    /**
-    * Returns the specification of the innermost DO..LOOP index.
-    * @param ts type system to use
-    * @param sourceName file name or other source label for diagnostics
-    * @return spec ( -- n )
+    * Returns one configured surface word for the requested control role.
+    * @param role control role
+    * @param ss current specification set
+    * @return configured word text or the role itself
     */
-   Spec indexSpec (TypeSystem ts, String sourceName) {
-      return SpecSet.parseSpec ("-- n", ts, sourceName, 0);
-   } // end of indexSpec()
+   String controlWordName (String role, SpecSet ss) {
+      Iterator<Map.Entry<String, Spec>> it = ss.entrySet().iterator();
+      while (it.hasNext()) {
+         Map.Entry<String, Spec> entry = (Map.Entry<String, Spec>)it.next();
+         Spec spec = (Spec)entry.getValue();
+         if ((spec != null) && spec.hasControlMode (role))
+            return (String)entry.getKey();
+      }
+      return role;
+   } // end of controlWordName()
 
    /**
-    * Tells whether the given token ends the current parsed sequence.
-    * @param word current token
-    * @param stopWords active delimiters
-    * @return true if the token is a delimiter
+    * Builds a readable label for one control structure.
+    * @param ss current specification set
+    * @param roles control roles in structural order
+    * @return label such as IF...ELSE...FI
     */
-   boolean isStopWord (String word, String[] stopWords) {
-      for (int i = 0; i < stopWords.length; i++) {
-         if (stopWords [i].equals (word)) return true;
+   String structureLabel (SpecSet ss, String[] roles) {
+      StringBuffer result = new StringBuffer ("");
+      for (int i = 0; i < roles.length; i++) {
+         if (i > 0) result.append ("...");
+         result.append (controlWordName (roles [i], ss));
+      }
+      return result.toString();
+   } // end of structureLabel()
+
+   /**
+    * Builds readable alternative text for diagnostics.
+    * @param ss current specification set
+    * @param roles control roles
+    * @return comma-separated alternatives
+    */
+   String controlAlternativesText (SpecSet ss, String[] roles) {
+      StringBuffer result = new StringBuffer ("");
+      for (int i = 0; i < roles.length; i++) {
+         if (i > 0) {
+            if (i == roles.length - 1) {
+               result.append (roles.length == 2 ? " or " : ", or ");
+            } else {
+               result.append (", ");
+            }
+         }
+         result.append (controlWordName (roles [i], ss));
+      }
+      return result.toString();
+   } // end of controlAlternativesText()
+
+   /**
+    * Tells whether the current control role ends the parsed sequence.
+    * @param controlMode current control role
+    * @param stopModes active closing roles
+    * @return true if the role closes the sequence
+    */
+   boolean isStopControlMode (String controlMode, String[] stopModes) {
+      for (int i = 0; i < stopModes.length; i++) {
+         if (stopModes [i].equals (controlMode)) return true;
       }
       return false;
-   } // end of isStopWord()
+   } // end of isStopControlMode()
 
    /**
     * Canonicalizes one program word for case-insensitive Forth parsing.
@@ -586,10 +940,12 @@ public class ProgText extends LinkedList<String> {
     * @param expected canonical keyword
     * @return true if token matches keyword case-insensitively
     */
-   static boolean tokenEquals (SourceWord token, String expected) {
+   boolean tokenHasControlMode (SourceWord token, SpecSet ss, String expected) {
       if (token == null) return false;
-      return expected.equals (canonicalWord (token.text));
-   } // end of tokenEquals()
+      Spec spec = controlWordSpec (token.text, ss);
+      if (spec == null) return false;
+      return spec.hasControlMode (expected);
+   } // end of tokenHasControlMode()
 
    /**
     * Creates a missing-terminator diagnostic.
@@ -599,10 +955,28 @@ public class ProgText extends LinkedList<String> {
     * @param wordName current definition
     * @return diagnostic exception
     */
-   ProgramException missingTerminator (String terminator, String opener,
-      SourceSpan openerSpan, String wordName) {
+   ProgramException missingTerminator (String terminatorRole,
+      String openerRole, SourceSpan openerSpan, String wordName, SpecSet ss) {
       return programError ("parse.missing-terminator", "Missing " +
-         terminator + " for " + opener + " in definition of " + wordName,
+         controlWordName (terminatorRole, ss) + " for " +
+         controlWordName (openerRole, ss) + " in definition of " + wordName,
+         "", openerSpan);
+   } // end of missingTerminator()
+
+   /**
+    * Creates a missing-terminator diagnostic for several alternatives.
+    * @param terminatorRoles acceptable closing roles
+    * @param openerRole opening role
+    * @param openerSpan opening token span
+    * @param wordName current definition
+    * @param ss current specification set
+    * @return diagnostic exception
+    */
+   ProgramException missingTerminator (String[] terminatorRoles,
+      String openerRole, SourceSpan openerSpan, String wordName, SpecSet ss) {
+      return programError ("parse.missing-terminator", "Missing " +
+         controlAlternativesText (ss, terminatorRoles) + " for " +
+         controlWordName (openerRole, ss) + " in definition of " + wordName,
          "", openerSpan);
    } // end of missingTerminator()
 
@@ -703,7 +1077,9 @@ public class ProgText extends LinkedList<String> {
       StringBuffer result = new StringBuffer ("");
       Iterator<String> it = iterator();
       while (it.hasNext()) {
-         result.append (it.next().toString() + " ");
+         String current = it.next().toString();
+         if (current.trim().length() == 0) continue;
+         result.append (current + " ");
       }
       return result.toString();
    } // end of toString()
