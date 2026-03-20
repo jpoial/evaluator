@@ -1,0 +1,38 @@
+# Standard-like strict demo type system for the evaluator.
+# Based on the Forth-2012 data-type lattice, while staying conservative
+# where the evaluator currently uses one specification per word.
+# Format:
+#   type <canonical-name> [alias...]
+#   rel <subtype> < <supertype>
+
+type x X cell
+type n number signed
+type +n nonnegative
+type u unsigned
+type char c
+type flag boolean
+type xt
+type addr
+type c-addr ca
+type a-addr aa
+type ior
+type xd cell-pair
+type d
+type +d
+type ud
+
+rel +n < n
+rel +n < u
+rel n < x
+rel u < x
+rel char < +n
+rel flag < x
+rel xt < x
+rel addr < u
+rel c-addr < addr
+rel a-addr < c-addr
+rel ior < n
+rel +d < d
+rel +d < ud
+rel d < xd
+rel ud < xd

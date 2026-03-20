@@ -111,7 +111,7 @@ public class Evaluator {
          if ("--system".equals (arg)) {
             if (i + 1 >= params.length)
                throw new RuntimeException ("Missing profile name after " +
-                  "--system. Use real or legacy.");
+                  "--system. Use real, legacy, or forth2012.");
             profileName = params [++i];
          } else if ("--types".equals (arg)) {
             if (i + 1 >= params.length)
@@ -157,8 +157,11 @@ public class Evaluator {
       if ("legacy".equals (profileName))
          return new DemoProfile ("legacy", "legacytypes.txt",
             "legacyspecs.txt", "legacyprog.txt");
+      if ("forth2012".equals (profileName))
+         return new DemoProfile ("forth2012", "forth2012types.txt",
+            "forth2012specs.txt", "forth2012prog.txt");
       throw new RuntimeException ("Unknown profile " + profileName +
-         ". Use real or legacy.");
+         ". Use real, legacy, or forth2012.");
    } // end of selectProfile()
 
    /**

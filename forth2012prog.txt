@@ -1,0 +1,14 @@
+# Standard-like strict demo program loaded by Evaluator with --system forth2012.
+# Flags are not numbers, addresses are unsigned, and strings use c-addr u.
+
+: PEEK2
+  DUP @ SWAP @
+;
+
+: KEEPIF
+  IF DUP ELSE DUP FI
+;
+
+10 20 + .
+S" hi" TYPE
+DP DP C@ 0= KEEPIF 2DROP

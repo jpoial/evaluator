@@ -9,6 +9,9 @@ Run with your own sequence of words: <code>java evaluator.Evaluator </code> &lt;
 <br>
 Run the preserved strict profile: <code>java evaluator.Evaluator --system legacy</code>
 <br>
+Run the more standard-like strict profile:
+<code>java evaluator.Evaluator --system forth2012</code>
+<br>
 Override the default input files when needed:
 <code>java evaluator.Evaluator --types mytypes.txt --specs myspecs.txt --prog myprog.txt</code>
 <br>
@@ -22,6 +25,9 @@ The default <code>real</code> profile uses:
 <br>
 The preserved old profile uses:
 <code>legacytypes.txt</code>, <code>legacyspecs.txt</code>, <code>legacyprog.txt</code>
+<br>
+The standard-like strict profile uses:
+<code>forth2012types.txt</code>, <code>forth2012specs.txt</code>, <code>forth2012prog.txt</code>
 <br>
 The bundled demo specs now cover a small Forth-like core: stack shuffles;
 numeric words such as <code>+</code>, <code>-</code>, <code>*</code>,
@@ -85,7 +91,12 @@ marker for semantic clashes such as linear type conflicts, non-comparable
 <code>IF ... ELSE ... FI</code> branches, and non-idempotent loop bodies.
 <br>
 The type system is also profile-dependent now. The default <code>real</code>
-profile is more Forth-like: flags are numbers, characters are numbers, and
-the top stack-cell type is also aliased as <code>cell</code>. The
-<code>legacy</code> profile preserves the earlier stricter separation where
-<code>flag</code> is not a subtype of <code>n</code>.
+profile is more Forth-like as a convenience profile: flags are numbers,
+characters are numbers, and the top stack-cell type is also aliased as
+<code>cell</code>. The <code>legacy</code> profile preserves the earlier
+stricter separation where <code>flag</code> is not a subtype of <code>n</code>.
+The <code>forth2012</code> profile follows the Forth-2012 subtype lattice more
+closely: <code>flag</code> is separate from numeric types, addresses sit under
+<code>u</code>, <code>char</code> sits under <code>+n</code>, dot is typed as
+<code>( n -- )</code>, and string-producing scanner words use the standard
+stack form <code>c-addr u</code>.
