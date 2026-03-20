@@ -1,0 +1,2 @@
+: OUTER : INNER DUP ; DUP ;
+DP 1+

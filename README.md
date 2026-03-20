@@ -71,7 +71,11 @@ that may appear in compilation state, while <code>.(</code> is treated as an
 interpretation-state string-printing word with closing <code>)</code> as
 delimiter. For compatibility, the older <code>CONTEXT OUTER</code> and
 <code>CONTEXT DEFINITION</code> spellings are still accepted when loading spec
-files.
+files. The bundled profiles now treat <code>THEN</code> and <code>FI</code> as
+synonyms, and the standard-like profile also includes practical source words
+such as backslash line comments, <code>CHAR</code>, <code>[CHAR]</code>, tick words
+<code>'</code> and <code>[']</code>, <code>ABORT"</code>, <code>C"</code>, and
+defining words such as <code>CREATE</code>.
 <br>
 Spec files may also define literal classes, for example
 <code>LITERAL INTEGER ( -- n )</code>. Decimal integer tokens such as
@@ -90,7 +94,8 @@ left as written, but word names are treated internally as if all letters were
 uppercase.
 <br>
 Inside colon definitions, conditionals are supported as
-<code>IF ... FI</code> and <code>IF ... ELSE ... FI</code>;
+<code>IF ... THEN</code> / <code>IF ... FI</code> and
+<code>IF ... ELSE ... THEN</code> / <code>IF ... ELSE ... FI</code>;
 <code>IF</code> consumes a <code>flag</code>
 value and the two branches must have compatible stack effects.
 <br>
@@ -115,7 +120,10 @@ idempotent under the evaluator's current approximation.
 When program text is loaded from a file, user-facing diagnostics now include
 the failing line and column together with the relevant source line and caret
 marker for semantic clashes such as linear type conflicts, non-comparable
-<code>IF ... ELSE ... FI</code> branches, and non-idempotent loop bodies.
+<code>IF ... ELSE ... THEN</code> branches, and non-idempotent loop bodies.
+The checker also continues after a recoverable program error: it skips an
+invalid top-level word or abandons an invalid definition, then keeps scanning
+the rest of the file and reports later errors as separate diagnostics.
 <br>
 The type system is also profile-dependent now. The default <code>real</code>
 profile is more Forth-like as a convenience profile: flags are numbers,

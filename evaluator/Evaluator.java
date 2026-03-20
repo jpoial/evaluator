@@ -44,10 +44,10 @@ public class Evaluator {
    /**
     * Main method that runs examples only.
     * @param params  command-line parameters (program text)
-    */
+   */
    public static void main (String[] params) {
       try {
-         run (params);
+         if (!run (params)) System.exit (1);
       } catch (ProgramException e) {
          System.err.println ("Error: " +
             ProgramDiagnosticRenderer.format (e.diagnostic()));
@@ -59,7 +59,7 @@ public class Evaluator {
     * Executes one evaluator run.
     * @param params command-line parameters
     */
-   static void run (String[] params) {
+   static boolean run (String[] params) {
       RunConfig cfg = parseArgs (params);
       String profileInfo = cfg.profile.name;
       if (cfg.customFiles())
@@ -81,6 +81,10 @@ public class Evaluator {
       } else {
          ex1prog1 = new ProgText (cfg.progFile, ex1types, ex1specs);
       }
+      if (ex1prog1.hasDiagnostics()) {
+         printDiagnostics (ex1prog1);
+         return false;
+      }
       // System.out.println ("SpecSet:" + ex1specs.toString());
       System.out.println ("Program text:");
       System.out.println (ex1prog1.sourceText());
@@ -92,8 +96,22 @@ public class Evaluator {
          throw ex1list1.typeClash ("linear part of the top-level program",
             ex1prog1);
       System.out.println (annotate (ex1prog1, ex1list1, resultspec));
+      return true;
 
    } // end of run()
+
+   /**
+    * Outputs all recovered diagnostics collected during parsing.
+    * @param prog parsed program with collected diagnostics
+    */
+   static void printDiagnostics (ProgText prog) {
+      Iterator<ProgramDiagnostic> it = prog.diagnostics().iterator();
+      System.out.flush();
+      while (it.hasNext()) {
+         System.err.println ("Error: " + ProgramDiagnosticRenderer.format (
+            (ProgramDiagnostic)it.next()));
+      }
+   } // end of printDiagnostics()
 
    /**
     * Parses command-line parameters.

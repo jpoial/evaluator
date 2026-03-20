@@ -1,0 +1,4 @@
+: BAD1 IF DUP ;
+: GOOD DUP ;
+: BAD2 NO_SUCH_WORD ;
+DP 1+

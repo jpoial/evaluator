@@ -4,6 +4,7 @@
 # Format:
 #   type <canonical-name> [alias...]
 #   rel <subtype> < <supertype>
+#   scanner <name> "<delimiter>"
 
 type x X cell
 type n number signed
@@ -42,3 +43,5 @@ rel +d < d
 rel +d < ud
 rel d < xd
 rel ud < xd
+
+scanner EOL "\n"

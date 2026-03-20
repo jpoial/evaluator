@@ -29,6 +29,10 @@ public class ProgText extends LinkedList<String> {
    /** already resolved stack effects for top-level program words */
    LinkedList<Spec> wordSpecs = new LinkedList<Spec>();
 
+   /** collected diagnostics when recovery continues after an error */
+   LinkedList<ProgramDiagnostic> diagnostics =
+      new LinkedList<ProgramDiagnostic>();
+
    static class CompileContext {
       String wordName;
       SourceWord definingWord;
@@ -162,6 +166,30 @@ public class ProgText extends LinkedList<String> {
    } // end of sourceText()
 
    /**
+    * Tells whether program checking collected any diagnostics.
+    * @return true when at least one diagnostic is present
+    */
+   boolean hasDiagnostics() {
+      return diagnostics.size() > 0;
+   } // end of hasDiagnostics()
+
+   /**
+    * Returns a copy of the collected diagnostics.
+    * @return collected diagnostics
+    */
+   LinkedList<ProgramDiagnostic> diagnostics() {
+      return new LinkedList<ProgramDiagnostic> (diagnostics);
+   } // end of diagnostics()
+
+   /**
+    * Stores one collected diagnostic when recovery is active.
+    * @param diagnostic structured diagnostic
+    */
+   void addDiagnostic (ProgramDiagnostic diagnostic) {
+      if (diagnostic != null) diagnostics.add (diagnostic);
+   } // end of addDiagnostic()
+
+   /**
     * Returns the source span of a top-level word.
     * @param index program word index
     * @return source span or null
@@ -220,21 +248,30 @@ public class ProgText extends LinkedList<String> {
       CompileContext compile = null;
       SourceWord token = null;
       while ((token = scanner.nextWord()) != null) {
-         if (compile == null) {
-            compile = interpretOneWord (token, scanner, ts, ss, sourceName);
-         } else {
-            compile = compileOneWord (token, scanner, compile, ts, ss,
-               sourceName);
+         try {
+            if (compile == null) {
+               compile = interpretOneWord (token, scanner, ts, ss, sourceName);
+            } else {
+               compile = compileOneWord (token, scanner, compile, ts, ss,
+                  sourceName);
+            }
+         } catch (ProgramException e) {
+            addDiagnostic (e.diagnostic());
+            if (compile != null)
+               compile = recoverCompileState (scanner, compile, token,
+                  (Spec)ss.get (token.text), ss);
          }
       }
       if (compile != null) {
-         if (compile.controlStack.size() > 0)
-            throw missingTerminatorForFrame (
+         if (compile.controlStack.size() > 0) {
+            addDiagnostic (missingTerminatorForFrame (
                (CompileFrame)compile.controlStack.getLast(), compile.wordName,
-               ss);
-         throw programError ("parse.unterminated-definition",
-            "Unterminated definition for " + compile.wordName, "",
-            compile.nameToken.span);
+               ss).diagnostic());
+         } else {
+            addDiagnostic (programDiagnostic ("parse.unterminated-definition",
+               "Unterminated definition for " + compile.wordName, "",
+               compile.nameToken.span));
+         }
       }
    } // end of interpretSource()
 
@@ -259,7 +296,7 @@ public class ProgText extends LinkedList<String> {
             sourceName);
       Spec runtime = resolveRuntimeWordSpec (token, spec,
          "top-level program", ts, ss, 0);
-      addTopLevelWord (token.text, token.span, runtime);
+      addCheckedTopLevelWord (token.text, token.span, runtime, ts, ss);
       return null;
    } // end of interpretOneWord()
 
@@ -328,8 +365,8 @@ public class ProgText extends LinkedList<String> {
       if (spec.isControlWord())
          throw unexpectedToken (token.text, token.span, sourceName);
       SourceWord fullToken = consumeImmediateInput (token, spec, scanner);
-      addTopLevelWord (token.text, fullToken.span, runtimeSpecClone (spec,
-         ts));
+      addCheckedTopLevelWord (token.text, fullToken.span, runtimeSpecClone (
+         spec, ts), ts, ss);
       return null;
    } // end of executeImmediateInterpretWord()
 
@@ -353,7 +390,7 @@ public class ProgText extends LinkedList<String> {
             compile.wordName, "", token.span);
       if (spec.isControlWord())
          return executeImmediateControlWord (token, spec, compile, ts, ss);
-      if (spec.consumesUntil()) {
+      if (spec.consumesUntil() || spec.consumesNextWord()) {
          SourceWord fullToken = consumeImmediateInput (token, spec, scanner);
          appendCompiledWord (compile, token.text, fullToken.span,
             runtimeSpecClone (spec, ts));
@@ -547,13 +584,27 @@ public class ProgText extends LinkedList<String> {
     */
    SourceWord consumeImmediateInput (SourceWord token, Spec spec,
       TextScanner scanner) {
-      if ((spec == null) || !spec.consumesUntil()) return token;
+      if (spec == null) return token;
+      if (spec.consumesNextWord()) {
+         SourceWord parsedWord = scanner.nextWord();
+         if (parsedWord == null)
+            throw programError ("parse.missing-parser-word",
+               "Missing word after parser word " + token.text, "",
+               token.span);
+         return new SourceWord (token.text, SourceSpan.covering (token.span,
+            parsedWord.span));
+      }
+      if (!spec.consumesUntil()) return token;
       scanner.skipWhitespace();
       SourceWord parsed = scanner.parseUntil (spec.parseString);
-      if (parsed == null)
+      if (parsed == null) {
+         if ("\n".equals (spec.parseString) && scanner.atEnd())
+            return new SourceWord (token.text, SourceSpan.covering (
+               token.span, scanner.lastConsumedSpan()));
          throw programError ("parse.missing-scanner-end",
             "Missing closing " + TextScanner.quotedText (spec.parseString) +
             " for scanner word " + token.text, "", token.span);
+      }
       return new SourceWord (token.text, SourceSpan.covering (token.span,
          scanner.lastConsumedSpan()));
    } // end of consumeImmediateInput()
@@ -576,6 +627,83 @@ public class ProgText extends LinkedList<String> {
    } // end of isLegacyDefinitionTerminator()
 
    /**
+    * Recovers from a failed definition by skipping to its closing word.
+    * @param scanner source scanner
+    * @param compile failed compile context
+    * @param token token that triggered the failure
+    * @param spec specification of the failing token, if any
+    * @param ss current specification set
+    * @return null after abandoning the invalid definition
+    */
+   CompileContext recoverCompileState (TextScanner scanner,
+      CompileContext compile, SourceWord token, Spec spec, SpecSet ss) {
+      if ((token != null) && isDefinitionEndToken (token, spec, compile))
+         return null;
+      int nestedDefinitions = 0;
+      if ((token != null) && isDefinitionStarterWord (
+          canonicalWord (token.text), ss))
+         nestedDefinitions = 1;
+      if ((token != null) && (spec != null))
+         skipRecoveryPayload (token, spec, scanner, ss);
+      if (scanner.atEnd()) return null;
+      SourceWord skipped = null;
+      while ((skipped = scanner.nextWord()) != null) {
+         Spec skippedSpec = (Spec)ss.get (skipped.text);
+         if (isDefinitionStarterWord (canonicalWord (skipped.text), ss)) {
+            nestedDefinitions++;
+            skipRecoveryPayload (skipped, skippedSpec, scanner, ss);
+            continue;
+         }
+         if (isDefinitionEndToken (skipped, skippedSpec, compile)) {
+            if (nestedDefinitions > 0) {
+               nestedDefinitions--;
+               continue;
+            }
+            return null;
+         }
+         skipRecoveryPayload (skipped, skippedSpec, scanner, ss);
+      }
+      return null;
+   } // end of recoverCompileState()
+
+   /**
+    * Skips any extra source text consumed by one immediate or defining word
+    * while recovery is abandoning the rest of the current definition.
+    * @param token already scanned head word
+    * @param spec resolved specification, if any
+    * @param scanner source scanner
+    * @param ss current specification set
+    */
+   void skipRecoveryPayload (SourceWord token, Spec spec, TextScanner scanner,
+      SpecSet ss) {
+      if ((token == null) || (spec == null)) return;
+      try {
+         if (spec.definesWord()) {
+            nextDefinedName (scanner, token, token.text, ss);
+            return;
+         }
+         if (spec.isImmediate())
+            consumeImmediateInput (token, spec, scanner);
+      } catch (ProgramException e) {
+         if (scanner.atEnd()) return;
+      }
+   } // end of skipRecoveryPayload()
+
+   /**
+    * Tells whether the token closes the current definition for recovery.
+    * @param token current token
+    * @param spec resolved specification, if any
+    * @param compile current compile context
+    * @return true when the token ends the abandoned definition
+    */
+   boolean isDefinitionEndToken (SourceWord token, Spec spec,
+      CompileContext compile) {
+      if ((spec != null) && spec.hasControlMode (Spec.CONTROL_END))
+         return true;
+      return isLegacyDefinitionTerminator (token, spec, compile);
+   } // end of isDefinitionEndToken()
+
+   /**
     * Adds one top-level runtime word together with its resolved stack effect.
     * Hidden bookkeeping operations may use an empty display word.
     * @param word display text
@@ -591,6 +719,34 @@ public class ProgText extends LinkedList<String> {
          wordSpecs.add (((Spec)spec.clone()).withOrigin (span, word));
       }
    } // end of addTopLevelWord()
+
+   /**
+    * Adds one top-level word and drops it again if it breaks the linear part.
+    * @param word display text
+    * @param span source span
+    * @param spec resolved stack effect
+    * @param ts type system to use
+    * @param ss current specification set
+    */
+   void addCheckedTopLevelWord (String word, SourceSpan span, Spec spec,
+      TypeSystem ts, SpecSet ss) {
+      addTopLevelWord (word, span, spec);
+      try {
+         currentTopLevelEffect (ts, ss);
+      } catch (ProgramException e) {
+         discardLastTopLevelWord();
+         addDiagnostic (e.diagnostic());
+      }
+   } // end of addCheckedTopLevelWord()
+
+   /**
+    * Removes the last collected top-level word after a recovered failure.
+    */
+   void discardLastTopLevelWord() {
+      if (size() > 0) removeLast();
+      if (wordSpans.size() > 0) wordSpans.removeLast();
+      if (wordSpecs.size() > 0) wordSpecs.removeLast();
+   } // end of discardLastTopLevelWord()
 
    /**
     * Evaluates the already parsed top-level runtime sequence so far.
@@ -1236,21 +1392,62 @@ public class ProgText extends LinkedList<String> {
     * @return configured word text or the role itself
     */
    String controlWordName (String role, SpecSet ss) {
+      String preferred = preferredControlWordName (role);
+      if ((preferred != null) && hasControlWordName (preferred, role, ss))
+         return preferred;
+      String best = null;
       Iterator<Map.Entry<String, Spec>> it = ss.entrySet().iterator();
       while (it.hasNext()) {
          Map.Entry<String, Spec> entry = (Map.Entry<String, Spec>)it.next();
          Spec spec = (Spec)entry.getValue();
-         if ((spec != null) && spec.hasControlMode (role))
-            return (String)entry.getKey();
+         if ((spec != null) && spec.hasControlMode (role)) {
+            String word = (String)entry.getKey();
+            if ((best == null) || (word.compareTo (best) < 0))
+               best = word;
+         }
       }
+      if (best != null) return best;
       return role;
    } // end of controlWordName()
+
+   /**
+    * Returns the preferred surface spelling of one control role.
+    * @param role control role
+    * @return preferred control word text or null
+    */
+   String preferredControlWordName (String role) {
+      if (Spec.CONTROL_IF.equals (role)) return "IF";
+      if (Spec.CONTROL_ELSE.equals (role)) return "ELSE";
+      if (Spec.CONTROL_FI.equals (role)) return "THEN";
+      if (Spec.CONTROL_BEGIN.equals (role)) return "BEGIN";
+      if (Spec.CONTROL_WHILE.equals (role)) return "WHILE";
+      if (Spec.CONTROL_REPEAT.equals (role)) return "REPEAT";
+      if (Spec.CONTROL_AGAIN.equals (role)) return "AGAIN";
+      if (Spec.CONTROL_UNTIL.equals (role)) return "UNTIL";
+      if (Spec.CONTROL_DO.equals (role)) return "DO";
+      if (Spec.CONTROL_LOOP.equals (role)) return "LOOP";
+      if (Spec.CONTROL_INDEX.equals (role)) return "I";
+      if (Spec.CONTROL_END.equals (role)) return ";";
+      return null;
+   } // end of preferredControlWordName()
+
+   /**
+    * Tells whether the requested control role has the given surface spelling.
+    * @param word candidate surface word
+    * @param role control role
+    * @param ss current specification set
+    * @return true when the word exists for the role
+    */
+   boolean hasControlWordName (String word, String role, SpecSet ss) {
+      Spec spec = (Spec)ss.get (word);
+      return (spec != null) && spec.hasControlMode (role);
+   } // end of hasControlWordName()
 
    /**
     * Builds a readable label for one control structure.
     * @param ss current specification set
     * @param roles control roles in structural order
-    * @return label such as IF...ELSE...FI
+    * @return label such as IF...ELSE...THEN
     */
    String structureLabel (SpecSet ss, String[] roles) {
       StringBuffer result = new StringBuffer ("");
