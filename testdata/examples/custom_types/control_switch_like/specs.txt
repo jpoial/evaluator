@@ -1,0 +1,23 @@
+# Switch-like custom control structure with multiple captured parts.
+
+DUP ( X[1] -- X[1] X[1] )
+2DROP ( X[2] X[1] -- )
+DROP ( X -- )
+: PARSE WORD DEFINE COLON IMMEDIATE STATE INTERPRET ( -- )
+; CONTROL END IMMEDIATE STATE COMPILE ( -- )
+LITERAL INTEGER ( -- n )
+SWITCH CONTROL SWITCH IMMEDIATE STATE COMPILE ( n -- )
+OF CONTROL OF IMMEDIATE STATE COMPILE ( -- )
+DEFAULT CONTROL DEFAULT IMMEDIATE STATE COMPILE ( -- )
+ENDSWITCH CONTROL ENDSWITCH IMMEDIATE STATE COMPILE ( -- )
+
+SYNTAX:
+  SWITCH <selector>
+  OF <first branch>
+  OF <second branch>
+  [DEFAULT <default branch>]
+  ENDSWITCH
+  EFFECT:
+    <selector>
+    SWITCH
+    either <first branch> <second branch> <default branch>

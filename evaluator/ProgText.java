@@ -60,55 +60,91 @@ public class ProgText extends LinkedList<String> {
       abstract SpecList currentSeq();
    } // end of CompileFrame
 
-   static class IfFrame extends CompileFrame {
-      SpecList thenSeq = new SpecList();
-      SpecList elseSeq = null;
-      boolean inElse = false;
+   static class StructureFrame extends CompileFrame {
+      String openRole;
+      LinkedList<ControlStructure> candidates =
+         new LinkedList<ControlStructure>();
+      LinkedList<SpecList> segmentSeqs = new LinkedList<SpecList>();
+      int seenBoundaries = 0;
 
-      IfFrame (SourceWord token) {
+      StructureFrame (SourceWord token, String role,
+         LinkedList<ControlStructure> structures) {
          super (token);
+         openRole = role == null ? "" : role;
+         if (structures != null) candidates.addAll (structures);
+         segmentSeqs.add (new SpecList());
       } // end of constructor
 
-      void startElse() {
-         inElse = true;
-         elseSeq = new SpecList();
-      } // end of startElse()
+      boolean canAdvance (String role) {
+         Iterator<ControlStructure> it = candidates.iterator();
+         while (it.hasNext()) {
+            if (((ControlStructure)it.next()).canAdvanceWithRole (role,
+                  seenBoundaries))
+               return true;
+         }
+         return false;
+      } // end of canAdvance()
+
+      void advance (String role) {
+         LinkedList<ControlStructure> filtered =
+            new LinkedList<ControlStructure>();
+         Iterator<ControlStructure> it = candidates.iterator();
+         while (it.hasNext()) {
+            ControlStructure structure = (ControlStructure)it.next();
+            if (structure.canAdvanceWithRole (role, seenBoundaries))
+               filtered.add (structure);
+         }
+         candidates = filtered;
+         seenBoundaries++;
+         segmentSeqs.add (new SpecList());
+      } // end of advance()
+
+      ControlStructure resolveClose (String role) {
+         ControlStructure result = null;
+         Iterator<ControlStructure> it = candidates.iterator();
+         while (it.hasNext()) {
+            ControlStructure structure = (ControlStructure)it.next();
+            if (!structure.canCloseWithRole (role, seenBoundaries)) continue;
+            if (result != null) return null;
+            result = structure;
+         }
+         return result;
+      } // end of resolveClose()
+
+      String [] expectedNextRoles() {
+         LinkedList<String> roles = new LinkedList<String>();
+         Iterator<ControlStructure> it = candidates.iterator();
+         while (it.hasNext()) {
+            ControlStructure structure = (ControlStructure)it.next();
+            if (structure.canAdvanceWithRole (
+                  structure.boundaryCount() > seenBoundaries ?
+                  structure.boundaryRoleAt (seenBoundaries) : "",
+                  seenBoundaries) &&
+                (structure.boundaryCount() > seenBoundaries))
+               addRoleOnce (roles, structure.boundaryRoleAt (seenBoundaries));
+            if (structure.canCloseWithRole (structure.closeRole,
+                  seenBoundaries))
+               addRoleOnce (roles, structure.closeRole);
+         }
+         String [] result = new String [roles.size()];
+         for (int i = 0; i < roles.size(); i++)
+            result [i] = (String)roles.get (i);
+         return result;
+      } // end of expectedNextRoles()
+
+      boolean countsAsDoLoop() {
+         return Spec.CONTROL_DO.equals (openRole);
+      } // end of countsAsDoLoop()
 
       SpecList currentSeq() {
-         return inElse ? elseSeq : thenSeq;
+         return (SpecList)segmentSeqs.getLast();
       } // end of currentSeq()
-   } // end of IfFrame
 
-   static class BeginFrame extends CompileFrame {
-      SpecList alphaSeq = new SpecList();
-      SpecList betaSeq = null;
-      boolean inWhile = false;
-
-      BeginFrame (SourceWord token) {
-         super (token);
-      } // end of constructor
-
-      void startWhile() {
-         inWhile = true;
-         betaSeq = new SpecList();
-      } // end of startWhile()
-
-      SpecList currentSeq() {
-         return inWhile ? betaSeq : alphaSeq;
-      } // end of currentSeq()
-   } // end of BeginFrame
-
-   static class DoFrame extends CompileFrame {
-      SpecList bodySeq = new SpecList();
-
-      DoFrame (SourceWord token) {
-         super (token);
-      } // end of constructor
-
-      SpecList currentSeq() {
-         return bodySeq;
-      } // end of currentSeq()
-   } // end of DoFrame
+      static void addRoleOnce (LinkedList<String> roles, String role) {
+         if (role == null || role.length() == 0) return;
+         if (!roles.contains (role)) roles.add (role);
+      } // end of addRoleOnce()
+   } // end of StructureFrame
 
    ProgText() {
       super();
@@ -223,6 +259,16 @@ public class ProgText extends LinkedList<String> {
       TypeSystem ts, SpecSet ss) {
       Spec spec = (Spec)ss.get (word);
       if (spec != null) return spec;
+      if (SpecSet.isDecimalDoubleLiteral (word)) {
+         Spec literalSpec = ss.getLiteral (SpecSet.DOUBLE_LITERAL_KIND);
+         if (literalSpec == null)
+            throw programError ("lookup.literal-spec-missing",
+               "No literal specification found for double literal " + word +
+               " in " + context,
+               "define LITERAL DOUBLE ( -- <type> ) in the current specs file",
+               span);
+         return literalSpec;
+      }
       if (SpecSet.isDecimalIntegerLiteral (word)) {
          Spec literalSpec = ss.getLiteral (SpecSet.INTEGER_LITERAL_KIND);
          if (literalSpec == null)
@@ -413,60 +459,6 @@ public class ProgText extends LinkedList<String> {
    CompileContext executeImmediateControlWord (SourceWord token, Spec spec,
       CompileContext compile, TypeSystem ts, SpecSet ss) {
       String role = spec.controlMode;
-      if (Spec.CONTROL_IF.equals (role)) {
-         compile.controlStack.add (new IfFrame (token));
-         return compile;
-      }
-      if (Spec.CONTROL_ELSE.equals (role)) {
-         if (compile.controlStack.size() == 0)
-            throw unexpectedToken (token.text, token.span,
-               "definition of " + compile.wordName);
-         CompileFrame top = (CompileFrame)compile.controlStack.getLast();
-         if (!(top instanceof IfFrame) || ((IfFrame)top).inElse)
-            throw unexpectedToken (token.text, token.span,
-               "definition of " + compile.wordName);
-         ((IfFrame)top).startElse();
-         return compile;
-      }
-      if (Spec.CONTROL_FI.equals (role)) {
-         closeIfFrame (compile, token, ts, ss);
-         return compile;
-      }
-      if (Spec.CONTROL_BEGIN.equals (role)) {
-         compile.controlStack.add (new BeginFrame (token));
-         return compile;
-      }
-      if (Spec.CONTROL_WHILE.equals (role)) {
-         if (compile.controlStack.size() == 0)
-            throw unexpectedToken (token.text, token.span,
-               "definition of " + compile.wordName);
-         CompileFrame top = (CompileFrame)compile.controlStack.getLast();
-         if (!(top instanceof BeginFrame) || ((BeginFrame)top).inWhile)
-            throw unexpectedToken (token.text, token.span,
-               "definition of " + compile.wordName);
-         ((BeginFrame)top).startWhile();
-         return compile;
-      }
-      if (Spec.CONTROL_REPEAT.equals (role)) {
-         closeRepeatFrame (compile, token, ts, ss);
-         return compile;
-      }
-      if (Spec.CONTROL_AGAIN.equals (role)) {
-         closeAgainFrame (compile, token, ts, ss);
-         return compile;
-      }
-      if (Spec.CONTROL_UNTIL.equals (role)) {
-         closeUntilFrame (compile, token, ts, ss);
-         return compile;
-      }
-      if (Spec.CONTROL_DO.equals (role)) {
-         compile.controlStack.add (new DoFrame (token));
-         return compile;
-      }
-      if (Spec.CONTROL_LOOP.equals (role)) {
-         closeLoopFrame (compile, token, ts, ss);
-         return compile;
-      }
       if (Spec.CONTROL_END.equals (role)) {
          if (compile.controlStack.size() > 0)
             throw missingTerminatorForFrame (
@@ -474,6 +466,30 @@ public class ProgText extends LinkedList<String> {
                ss);
          finishDefinition (compile, ts, ss);
          return null;
+      }
+      if (ss.hasOpenControlRole (role)) {
+         compile.controlStack.add (new StructureFrame (token, role,
+            ss.structuresForOpenRole (role)));
+         return compile;
+      }
+      if (compile.controlStack.size() == 0)
+         throw unexpectedToken (token.text, token.span,
+            "definition of " + compile.wordName);
+      CompileFrame frame = (CompileFrame)compile.controlStack.getLast();
+      if (!(frame instanceof StructureFrame))
+         throw unexpectedToken (token.text, token.span,
+            "definition of " + compile.wordName);
+      StructureFrame structureFrame = (StructureFrame)frame;
+      if (structureFrame.canAdvance (role)) {
+         structureFrame.advance (role);
+         return compile;
+      }
+      ControlStructure structure = structureFrame.resolveClose (role);
+      if (structure != null) {
+         compile.controlStack.removeLast();
+         currentCompileSequence (compile).add (buildStructureEffect (structure,
+            structureFrame, token, ts, ss, compile.wordName));
+         return compile;
       }
       throw unexpectedToken (token.text, token.span,
          "definition of " + compile.wordName);
@@ -543,7 +559,10 @@ public class ProgText extends LinkedList<String> {
       int result = 0;
       Iterator<CompileFrame> it = compile.controlStack.iterator();
       while (it.hasNext()) {
-         if (((CompileFrame)it.next()) instanceof DoFrame) result++;
+         CompileFrame frame = (CompileFrame)it.next();
+         if ((frame instanceof StructureFrame) &&
+             ((StructureFrame)frame).countsAsDoLoop())
+            result++;
       }
       return result;
    } // end of currentDoDepth()
@@ -1054,302 +1073,138 @@ public class ProgText extends LinkedList<String> {
    } // end of evaluateSpecList()
 
    /**
-    * Creates the effect of IF..ELSE..FI by consuming a flag and merging
-    * the two alternative branch effects via glb.
-    * @param thenEffect effect of the true branch
-    * @param elseEffect effect of the false branch
+    * Builds one declared control-structure effect from its captured segments.
+    * @param structure structure declaration
+    * @param frame captured structure frame
+    * @param closingToken closing token
     * @param ts type system to use
     * @param ss current specification set
     * @param wordName current definition name
-    * @param structureSpan source span of the full IF structure
-    * @param hasElse true if the source used ELSE explicitly
-    * @return resulting IF effect
+    * @return resulting structure effect
     */
-   Spec buildIfEffect (Spec thenEffect, Spec elseEffect, TypeSystem ts,
-      SpecSet ss, String wordName, SourceSpan structureSpan,
-      boolean hasElse) {
-      String label = hasElse ? structureLabel (ss, new String [] {
-         Spec.CONTROL_IF, Spec.CONTROL_ELSE, Spec.CONTROL_FI}) :
-         structureLabel (ss, new String [] {Spec.CONTROL_IF,
-         Spec.CONTROL_FI});
-      Spec merged = thenEffect.glb (elseEffect, ts, ss);
-      if (merged == null)
-         throw programError ("type.if-branch-clash",
-            "Non-comparable branches in " + label + " of definition " +
-            wordName, "then branch " + thenEffect.toString().trim() +
-            ", else branch " + elseEffect.toString().trim() +
-            " cannot be merged", structureSpan);
-      SpecList seq = new SpecList();
-      seq.add (controlRuntimeSpec (Spec.CONTROL_IF, ts, ss, structureSpan)
-         .withOrigin (structureSpan, label));
-      seq.add (((Spec)merged.clone()).withOrigin (structureSpan, label));
-      return evaluateSpecList (seq, ts, ss,
-         label + " in definition " + wordName).withOrigin (structureSpan,
-         label);
-   } // end of buildIfEffect()
+   Spec buildStructureEffect (ControlStructure structure,
+      StructureFrame frame, SourceWord closingToken, TypeSystem ts,
+      SpecSet ss, String wordName) {
+      SourceSpan structureSpan = SourceSpan.covering (frame.openerToken.span,
+         closingToken.span);
+      String label = structureLabel (ss, structure.labelRoles (
+         frame.seenBoundaries));
+      LinkedList<Spec> segmentEffects = new LinkedList<Spec>();
+      Iterator<SpecList> it = frame.segmentSeqs.iterator();
+      while (it.hasNext()) {
+         segmentEffects.add (evaluateSpecList ((SpecList)it.next(), ts, ss,
+            "linear part of definition " + wordName));
+      }
+      return evaluateStructureExpr (structure.meaning, structure,
+         segmentEffects,
+         label, ts, ss, wordName, structureSpan)
+         .withOrigin (structureSpan, label);
+   } // end of buildStructureEffect()
 
    /**
-    * Creates the effect of BEGIN..WHILE..REPEAT using the must-analysis
-    * approximation described in the papers.
-    * @param alphaEffect effect of the sequence before WHILE
-    * @param betaEffect effect of the sequence after WHILE
+    * Returns the empty stack effect used for missing optional segments.
+    * @param ts type system to use
+    * @return empty effect
+    */
+   Spec emptyStructureEffect (TypeSystem ts) {
+      return (new Spec (ts)).withOrigin (null, "empty");
+   } // end of emptyStructureEffect()
+
+   /**
+    * Evaluates one declarative control-meaning expression.
+    * @param expr expression to evaluate
+    * @param alpha first captured segment
+    * @param beta second captured segment or empty effect
+    * @param label human-readable structure label
     * @param ts type system to use
     * @param ss current specification set
     * @param wordName current definition name
-    * @param structureSpan source span of the full loop
-    * @return resulting loop effect
+    * @param structureSpan source span of the full structure
+    * @return resulting effect
     */
-   Spec buildWhileEffect (Spec alphaEffect, Spec betaEffect, TypeSystem ts,
-      SpecSet ss, String wordName, SourceSpan structureSpan) {
-      String whileWord = controlWordName (Spec.CONTROL_WHILE, ss);
-      String label = structureLabel (ss, new String [] {Spec.CONTROL_BEGIN,
-         Spec.CONTROL_WHILE, Spec.CONTROL_REPEAT});
-      SpecList alphaSeq = new SpecList();
-      alphaSeq.add ((Spec)alphaEffect.clone());
-      alphaSeq.add (controlRuntimeSpec (Spec.CONTROL_WHILE, ts, ss,
-         structureSpan).withOrigin (structureSpan, whileWord));
-      Spec alphaTest = evaluateSpecList (alphaSeq, ts, ss,
-         whileWord + " loop test in definition " + wordName);
-      Spec alphaLoop = alphaTest.piStar (ts, ss);
-      if (alphaLoop == null)
-         throw programError ("type.loop-prefix-non-idempotent",
-            "Non-idempotent loop prefix in " + label + " of definition " +
-            wordName, "prefix effect " +
-            alphaTest.toString().trim(), structureSpan);
-      Spec betaLoop = betaEffect.piStar (ts, ss);
-      if (betaLoop == null)
-         throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in " + label + " of definition " +
-            wordName, "body effect " +
-            betaEffect.toString().trim(), structureSpan);
-      SpecList loopSeq = new SpecList();
-      loopSeq.add (((Spec)alphaLoop.clone()).withOrigin (structureSpan,
-         label));
-      loopSeq.add (((Spec)betaLoop.clone()).withOrigin (structureSpan,
-         label));
-      return evaluateSpecList (loopSeq, ts, ss,
-         label + " in definition " + wordName).withOrigin (
-         structureSpan, label);
-   } // end of buildWhileEffect()
+   Spec evaluateStructureExpr (ControlStructure.EffectExpr expr,
+      ControlStructure structure, LinkedList<Spec> segmentEffects,
+      String label, TypeSystem ts, SpecSet ss, String wordName,
+      SourceSpan structureSpan) {
+      if (expr instanceof ControlStructure.EmptyExpr)
+         return emptyStructureEffect (ts).withOrigin (structureSpan, label);
+      if (expr instanceof ControlStructure.SegmentExpr) {
+         String name = ((ControlStructure.SegmentExpr)expr).segmentName;
+         int index = structure.segmentIndexOf (name);
+         if ((index >= 0) && (index < segmentEffects.size()))
+            return ((Spec)((Spec)segmentEffects.get (index)).clone())
+               .withOrigin (structureSpan, label);
+         if (index >= 0)
+            return emptyStructureEffect (ts).withOrigin (structureSpan, label);
+         throw new RuntimeException ("Unknown structure segment " + name +
+            " in " + label);
+      }
+      if (expr instanceof ControlStructure.ControlExpr) {
+         String role = resolveStructureControlRole (structure,
+            ((ControlStructure.ControlExpr)expr).role);
+         String word = controlWordName (role, ss);
+         return controlRuntimeSpec (role, ts, ss, structureSpan)
+            .withOrigin (structureSpan, word);
+      }
+      if (expr instanceof ControlStructure.SeqExpr) {
+         SpecList seq = new SpecList();
+         Iterator<ControlStructure.EffectExpr> it =
+            ((ControlStructure.SeqExpr)expr).parts.iterator();
+         while (it.hasNext()) {
+            Spec part = evaluateStructureExpr (
+               (ControlStructure.EffectExpr)it.next(), structure,
+               segmentEffects, label, ts, ss, wordName, structureSpan);
+            seq.add (((Spec)part.clone()).withOrigin (structureSpan, label));
+         }
+         return evaluateSpecList (seq, ts, ss,
+            label + " in definition " + wordName)
+            .withOrigin (structureSpan, label);
+      }
+      if (expr instanceof ControlStructure.GlbExpr) {
+         ControlStructure.GlbExpr glbExpr = (ControlStructure.GlbExpr)expr;
+         Spec left = evaluateStructureExpr (glbExpr.left, structure,
+            segmentEffects, label, ts, ss, wordName, structureSpan);
+         Spec right = evaluateStructureExpr (glbExpr.right, structure,
+            segmentEffects, label, ts, ss, wordName, structureSpan);
+         Spec merged = left.glb (right, ts, ss);
+         if (merged == null)
+            throw programError ("type.control-glb-clash",
+               "Non-comparable alternatives in " + label +
+               " of definition " + wordName, "left effect " +
+               left.toString().trim() + ", right effect " +
+               right.toString().trim() + " cannot be merged",
+               structureSpan);
+         return merged.withOrigin (structureSpan, label);
+      }
+      if (expr instanceof ControlStructure.StarExpr) {
+         Spec inner = evaluateStructureExpr (
+            ((ControlStructure.StarExpr)expr).inner, structure, segmentEffects,
+            label, ts, ss, wordName, structureSpan);
+         Spec loop = inner.piStar (ts, ss);
+         if (loop == null)
+            throw programError ("type.control-star-clash",
+               "Non-idempotent repeated effect in " + label +
+               " of definition " + wordName, "effect " +
+               inner.toString().trim(), structureSpan);
+         return loop.withOrigin (structureSpan, label);
+      }
+      throw new RuntimeException ("Unknown control expression in " + label);
+   } // end of evaluateStructureExpr()
 
    /**
-    * Creates the effect of BEGIN..AGAIN using the same fixed-point
-    * approximation as the other loop forms.
-    * @param bodyEffect effect of the loop body
-    * @param ts type system to use
-    * @param ss current specification set
-    * @param wordName current definition name
-    * @param structureSpan source span of the full loop
-    * @return resulting loop effect
+    * Resolves OPEN/MID/CLOSE pseudo-roles inside one structure meaning.
+    * @param structure structure declaration
+    * @param role role text from the meaning expression
+    * @return concrete control role
     */
-   Spec buildAgainEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
-      String wordName, SourceSpan structureSpan) {
-      String label = structureLabel (ss, new String [] {Spec.CONTROL_BEGIN,
-         Spec.CONTROL_AGAIN});
-      Spec bodyLoop = bodyEffect.piStar (ts, ss);
-      if (bodyLoop == null)
-         throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in " + label + " of definition " +
-            wordName, "body effect " + bodyEffect.toString().trim(),
-            structureSpan);
-      return bodyLoop.withOrigin (structureSpan, label);
-   } // end of buildAgainEffect()
-
-   /**
-    * Creates the effect of BEGIN..UNTIL by evaluating the loop body
-    * together with the terminating flag test.
-    * @param bodyEffect effect of the loop body before UNTIL
-    * @param ts type system to use
-    * @param ss current specification set
-    * @param wordName current definition name
-    * @param structureSpan source span of the full loop
-    * @return resulting loop effect
-    */
-   Spec buildUntilEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
-      String wordName, SourceSpan structureSpan) {
-      String untilWord = controlWordName (Spec.CONTROL_UNTIL, ss);
-      String label = structureLabel (ss, new String [] {Spec.CONTROL_BEGIN,
-         Spec.CONTROL_UNTIL});
-      SpecList testSeq = new SpecList();
-      testSeq.add ((Spec)bodyEffect.clone());
-      testSeq.add (controlRuntimeSpec (Spec.CONTROL_UNTIL, ts, ss,
-         structureSpan).withOrigin (structureSpan, untilWord));
-      Spec loopTest = evaluateSpecList (testSeq, ts, ss,
-         untilWord + " loop test in definition " + wordName);
-      Spec untilLoop = loopTest.piStar (ts, ss);
-      if (untilLoop == null)
-         throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in " + label + " of definition " +
-            wordName, "body and flag-test effect " +
-            loopTest.toString().trim(), structureSpan);
-      return untilLoop.withOrigin (structureSpan, label);
-   } // end of buildUntilEffect()
-
-   /**
-    * Creates the effect of DO..LOOP using a conservative counted-loop
-    * approximation: the loop body must be idempotent and the structure
-    * consumes Forth-style limit and start parameters.
-    * @param bodyEffect effect of the loop body
-    * @param ts type system to use
-    * @param ss current specification set
-    * @param wordName current definition name
-    * @param structureSpan source span of the full loop
-    * @return resulting DO..LOOP effect
-    */
-   Spec buildDoLoopEffect (Spec bodyEffect, TypeSystem ts, SpecSet ss,
-      String wordName, SourceSpan structureSpan) {
-      String label = structureLabel (ss, new String [] {Spec.CONTROL_DO,
-         Spec.CONTROL_LOOP});
-      Spec bodyLoop = bodyEffect.piStar (ts, ss);
-      if (bodyLoop == null)
-         throw programError ("type.loop-body-non-idempotent",
-            "Non-idempotent loop body in " + label + " of definition " +
-            wordName, "body effect " + bodyEffect.toString().trim(),
-            structureSpan);
-      SpecList loopSeq = new SpecList();
-      loopSeq.add (controlRuntimeSpec (Spec.CONTROL_DO, ts, ss,
-         structureSpan).withOrigin (structureSpan, label));
-      loopSeq.add (((Spec)bodyLoop.clone()).withOrigin (structureSpan, label));
-      return evaluateSpecList (loopSeq, ts, ss,
-         label + " in definition " + wordName).withOrigin (structureSpan,
-         label);
-   } // end of buildDoLoopEffect()
-
-   /**
-    * Closes one IF structure during compilation and appends its effect.
-    * @param compile current compile context
-    * @param closingToken FI token
-    * @param ts type system to use
-    * @param ss current specification set
-    */
-   void closeIfFrame (CompileContext compile, SourceWord closingToken,
-      TypeSystem ts, SpecSet ss) {
-      if (compile.controlStack.size() == 0)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      CompileFrame top = (CompileFrame)compile.controlStack.getLast();
-      if (!(top instanceof IfFrame))
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      compile.controlStack.removeLast();
-      IfFrame frame = (IfFrame)top;
-      Spec thenEffect = evaluateSpecList (frame.thenSeq, ts, ss,
-         "linear part of definition " + compile.wordName);
-      boolean hasElse = frame.inElse;
-      Spec elseEffect = hasElse ? evaluateSpecList (frame.elseSeq, ts, ss,
-         "linear part of definition " + compile.wordName) :
-         (new Spec (ts)).withOrigin (null, "empty branch");
-      SourceSpan ifSpan = SourceSpan.covering (frame.openerToken.span,
-         closingToken.span);
-      currentCompileSequence (compile).add (buildIfEffect (thenEffect,
-         elseEffect, ts, ss, compile.wordName, ifSpan, hasElse));
-   } // end of closeIfFrame()
-
-   /**
-    * Closes one BEGIN...WHILE...REPEAT structure during compilation.
-    * @param compile current compile context
-    * @param closingToken REPEAT token
-    * @param ts type system to use
-    * @param ss current specification set
-    */
-   void closeRepeatFrame (CompileContext compile, SourceWord closingToken,
-      TypeSystem ts, SpecSet ss) {
-      if (compile.controlStack.size() == 0)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      CompileFrame top = (CompileFrame)compile.controlStack.getLast();
-      if (!(top instanceof BeginFrame) || !((BeginFrame)top).inWhile)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      compile.controlStack.removeLast();
-      BeginFrame frame = (BeginFrame)top;
-      Spec alphaEffect = evaluateSpecList (frame.alphaSeq, ts, ss,
-         "linear part of definition " + compile.wordName);
-      Spec betaEffect = evaluateSpecList (frame.betaSeq, ts, ss,
-         "linear part of definition " + compile.wordName);
-      SourceSpan loopSpan = SourceSpan.covering (frame.openerToken.span,
-         closingToken.span);
-      currentCompileSequence (compile).add (buildWhileEffect (alphaEffect,
-         betaEffect, ts, ss, compile.wordName, loopSpan));
-   } // end of closeRepeatFrame()
-
-   /**
-    * Closes one BEGIN...AGAIN structure during compilation.
-    * @param compile current compile context
-    * @param closingToken AGAIN token
-    * @param ts type system to use
-    * @param ss current specification set
-    */
-   void closeAgainFrame (CompileContext compile, SourceWord closingToken,
-      TypeSystem ts, SpecSet ss) {
-      if (compile.controlStack.size() == 0)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      CompileFrame top = (CompileFrame)compile.controlStack.getLast();
-      if (!(top instanceof BeginFrame) || ((BeginFrame)top).inWhile)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      compile.controlStack.removeLast();
-      BeginFrame frame = (BeginFrame)top;
-      Spec bodyEffect = evaluateSpecList (frame.alphaSeq, ts, ss,
-         "linear part of definition " + compile.wordName);
-      SourceSpan loopSpan = SourceSpan.covering (frame.openerToken.span,
-         closingToken.span);
-      currentCompileSequence (compile).add (buildAgainEffect (bodyEffect, ts,
-         ss, compile.wordName, loopSpan));
-   } // end of closeAgainFrame()
-
-   /**
-    * Closes one BEGIN...UNTIL structure during compilation.
-    * @param compile current compile context
-    * @param closingToken UNTIL token
-    * @param ts type system to use
-    * @param ss current specification set
-    */
-   void closeUntilFrame (CompileContext compile, SourceWord closingToken,
-      TypeSystem ts, SpecSet ss) {
-      if (compile.controlStack.size() == 0)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      CompileFrame top = (CompileFrame)compile.controlStack.getLast();
-      if (!(top instanceof BeginFrame) || ((BeginFrame)top).inWhile)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      compile.controlStack.removeLast();
-      BeginFrame frame = (BeginFrame)top;
-      Spec bodyEffect = evaluateSpecList (frame.alphaSeq, ts, ss,
-         "linear part of definition " + compile.wordName);
-      SourceSpan loopSpan = SourceSpan.covering (frame.openerToken.span,
-         closingToken.span);
-      currentCompileSequence (compile).add (buildUntilEffect (bodyEffect, ts,
-         ss, compile.wordName, loopSpan));
-   } // end of closeUntilFrame()
-
-   /**
-    * Closes one DO...LOOP structure during compilation.
-    * @param compile current compile context
-    * @param closingToken LOOP token
-    * @param ts type system to use
-    * @param ss current specification set
-    */
-   void closeLoopFrame (CompileContext compile, SourceWord closingToken,
-      TypeSystem ts, SpecSet ss) {
-      if (compile.controlStack.size() == 0)
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      CompileFrame top = (CompileFrame)compile.controlStack.getLast();
-      if (!(top instanceof DoFrame))
-         throw unexpectedToken (closingToken.text, closingToken.span,
-            "definition of " + compile.wordName);
-      compile.controlStack.removeLast();
-      DoFrame frame = (DoFrame)top;
-      Spec bodyEffect = evaluateSpecList (frame.bodySeq, ts, ss,
-         "linear part of definition " + compile.wordName);
-      SourceSpan loopSpan = SourceSpan.covering (frame.openerToken.span,
-         closingToken.span);
-      currentCompileSequence (compile).add (buildDoLoopEffect (bodyEffect,
-         ts, ss, compile.wordName, loopSpan));
-   } // end of closeLoopFrame()
+   String resolveStructureControlRole (ControlStructure structure,
+      String role) {
+      if ("OPEN".equals (role)) return structure.openRole;
+      if ("MID".equals (role) && (structure.boundaryCount() == 1))
+         return structure.boundaryRoleAt (0);
+      if ("CLOSE".equals (role)) return structure.closeRole;
+      return role;
+   } // end of resolveStructureControlRole()
 
    /**
     * Returns the runtime specification associated with one control role.
@@ -1497,21 +1352,16 @@ public class ProgText extends LinkedList<String> {
     */
    ProgramException missingTerminatorForFrame (CompileFrame frame,
       String wordName, SpecSet ss) {
-      if (frame instanceof IfFrame)
-         return missingTerminator (Spec.CONTROL_FI, Spec.CONTROL_IF,
-            frame.openerToken.span, wordName, ss);
-      if (frame instanceof BeginFrame) {
-         BeginFrame begin = (BeginFrame)frame;
-         if (begin.inWhile)
-            return missingTerminator (Spec.CONTROL_REPEAT,
-               Spec.CONTROL_BEGIN, begin.openerToken.span, wordName, ss);
-         return missingTerminator (new String [] {Spec.CONTROL_WHILE,
-            Spec.CONTROL_AGAIN, Spec.CONTROL_UNTIL}, Spec.CONTROL_BEGIN,
-            begin.openerToken.span, wordName, ss);
+      if (frame instanceof StructureFrame) {
+         StructureFrame structure = (StructureFrame)frame;
+         String [] expected = structure.expectedNextRoles();
+         if (expected.length == 1)
+            return missingTerminator (expected [0], structure.openRole,
+               frame.openerToken.span, wordName, ss);
+         if (expected.length > 1)
+            return missingTerminator (expected, structure.openRole,
+               frame.openerToken.span, wordName, ss);
       }
-      if (frame instanceof DoFrame)
-         return missingTerminator (Spec.CONTROL_LOOP, Spec.CONTROL_DO,
-            frame.openerToken.span, wordName, ss);
       return programError ("parse.missing-terminator",
          "Missing end of definition for " + wordName, "",
          frame.openerToken.span);

@@ -43,22 +43,53 @@ VARIABLE PARSE WORD DEFINE VARIABLE IMMEDIATE STATE INTERPRET ( -- a-addr )
 2VARIABLE PARSE WORD DEFINE VARIABLE IMMEDIATE STATE INTERPRET ( -- a-addr )
 CREATE PARSE WORD DEFINE VARIABLE IMMEDIATE STATE INTERPRET ( -- a-addr )
 LITERAL INTEGER ( -- n )
+LITERAL DOUBLE ( -- d )
 TRUE ( -- flag )
 FALSE ( -- flag )
 
-# Structured control words
+# Structured control words and declarative control structures
+# `IMMEDIATE STATE COMPILE` says the word acts during compilation.
+# The stack comment still shows what it consumes there.
+# In `WORD CONTROL ROLE`, `ROLE` names the parser slot. `THEN` closes `FI`.
 IF CONTROL IF IMMEDIATE STATE COMPILE ( flag -- )
 ELSE CONTROL ELSE IMMEDIATE STATE COMPILE ( -- )
 FI CONTROL FI IMMEDIATE STATE COMPILE ( -- )
 THEN CONTROL FI IMMEDIATE STATE COMPILE ( -- )
+
+SYNTAX: IF <then branch> [ELSE <else branch>] FI
+  EFFECT:
+    IF
+    either <then branch> <else branch>
+
 BEGIN CONTROL BEGIN IMMEDIATE STATE COMPILE ( -- )
 WHILE CONTROL WHILE IMMEDIATE STATE COMPILE ( flag -- )
 REPEAT CONTROL REPEAT IMMEDIATE STATE COMPILE ( -- )
+
+SYNTAX: BEGIN <loop prefix> WHILE <loop body> REPEAT
+  EFFECT:
+    repeat <loop prefix> WHILE
+    repeat <loop body>
+
 AGAIN CONTROL AGAIN IMMEDIATE STATE COMPILE ( -- )
+
+SYNTAX: BEGIN <loop body> AGAIN
+  EFFECT:
+    repeat <loop body>
+
 UNTIL CONTROL UNTIL IMMEDIATE STATE COMPILE ( flag -- )
+
+SYNTAX: BEGIN <loop body> UNTIL
+  EFFECT:
+    repeat <loop body> UNTIL
+
 DO CONTROL DO IMMEDIATE STATE COMPILE ( n[2] n[1] -- )
 LOOP CONTROL LOOP IMMEDIATE STATE COMPILE ( -- )
 I CONTROL INDEX STATE COMPILE ( -- n )
+
+SYNTAX: DO <loop body> LOOP
+  EFFECT:
+    DO
+    repeat <loop body>
 
 # Core numeric and comparison words
 + ( n n -- n )
@@ -158,7 +189,9 @@ DABS ( d -- d )
 DMAX ( d d -- d )
 DMIN ( d d -- d )
 DNEGATE ( d -- d )
+D.R ( d n -- )
 DU< ( ud ud -- flag )
+M*/ ( d n n -- d )
 M+ ( d n -- d )
 
 # String word set

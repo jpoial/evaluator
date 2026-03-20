@@ -1,0 +1,6 @@
+# Minimal type system for a fixed multi-part switch-like control structure.
+
+type X cell x
+type n number
+
+rel n < X

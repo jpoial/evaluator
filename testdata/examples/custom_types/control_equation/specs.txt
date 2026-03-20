@@ -1,0 +1,19 @@
+# Custom control words described through one structure equation.
+
+DUP ( X[1] -- X[1] X[1] )
+2DROP ( X[2] X[1] -- )
+0= ( n -- flag )
+: PARSE WORD DEFINE COLON IMMEDIATE STATE INTERPRET ( -- )
+; CONTROL END IMMEDIATE STATE COMPILE ( -- )
+LITERAL INTEGER ( -- n )
+WHEN CONTROL WHEN IMMEDIATE STATE COMPILE ( flag -- )
+OTHERWISE CONTROL OTHERWISE IMMEDIATE STATE COMPILE ( -- )
+ENDWHEN CONTROL ENDWHEN IMMEDIATE STATE COMPILE ( -- )
+
+SYNTAX:
+  WHEN <branch>
+  [OTHERWISE <fallback branch>]
+  ENDWHEN
+  EFFECT:
+    WHEN
+    either <branch> <fallback branch>

@@ -1,0 +1,8 @@
+# Minimal self-contained type system for custom control-structure examples.
+
+type X cell x
+type n number
+type flag boolean
+
+rel n < X
+rel flag < n

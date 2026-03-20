@@ -71,18 +71,49 @@ that may appear in compilation state, while <code>.(</code> is treated as an
 interpretation-state string-printing word with closing <code>)</code> as
 delimiter. For compatibility, the older <code>CONTEXT OUTER</code> and
 <code>CONTEXT DEFINITION</code> spellings are still accepted when loading spec
-files. The bundled profiles now treat <code>THEN</code> and <code>FI</code> as
-synonyms, and the standard-like profile also includes practical source words
-such as backslash line comments, <code>CHAR</code>, <code>[CHAR]</code>, tick words
-<code>'</code> and <code>[']</code>, <code>ABORT"</code>, <code>C"</code>, and
-defining words such as <code>CREATE</code>.
+files. Control structures may also be declared explicitly with a top-level
+<code>SYNTAX:</code> block, followed by indented syntax lines such as
+<code>IF &lt;then branch&gt;</code>, <code>[ELSE &lt;else branch&gt;]</code>,
+and <code>FI</code>, and a lower-level indented <code>EFFECT:</code> block.
+For example, <code>IF</code> may be followed by
+<code>either &lt;then branch&gt; &lt;else branch&gt;</code>. The small
+control-effect algebra
+currently supports line-by-line sequencing, <code>either</code> for branch
+merge, <code>repeat</code> for idempotent repetition, bare control words such
+as <code>IF</code> or <code>DO</code>, and segment names taken from the
+<code>&lt;...&gt;</code> metasymbols in <code>SYNTAX</code>. For example,
+<code>repeat &lt;loop body&gt; UNTIL</code> means the repeated effect of the
+body followed by the stack effect of <code>UNTIL</code> on each pass.
+This makes flag consumption visible directly in the control-word declaration
+such as <code>IF ... ( flag -- )</code> or <code>UNTIL ... ( flag -- )</code>.
+Optional <code>COMPILATION:</code> and <code>RUN-TIME:</code> blocks are still
+accepted as extra documentation, but they are not used for checking.
+The older wrapped <code>STRUCTURE ... ENDSTRUCTURE</code> form and the older
+algebraic effect form are still accepted too, including
+<code>SEQUENCE(...)</code>, <code>GLB(...)</code>, <code>STAR(...)</code>,
+<code>WORD(...)</code>, and the older <code>MEANING:</code> spelling.
+The older <code>OPEN</code>/<code>MID</code>/<code>CLOSE</code> structure form
+is still accepted for compatibility. A <code>SYNTAX</code> line may also contain more
+than two captured parts, for example a fixed switch-like form such as
+<code>SWITCH &lt;selector&gt; OF &lt;first branch&gt; OF &lt;second branch&gt; [DEFAULT &lt;default branch&gt;] ENDSWITCH</code>.
+If no structure block is given, the legacy
+<code>IF</code>/<code>BEGIN</code>/<code>DO</code> families are still loaded
+implicitly for compatibility. The bundled profiles now treat
+<code>THEN</code> and <code>FI</code> as synonyms, and the standard-like
+profile also includes practical source words such as backslash line comments,
+<code>CHAR</code>, <code>[CHAR]</code>, tick words <code>'</code> and
+<code>[']</code>, <code>ABORT"</code>, <code>C"</code>, and defining words
+such as <code>CREATE</code>.
 <br>
 Spec files may also define literal classes, for example
 <code>LITERAL INTEGER ( -- n )</code>. Decimal integer tokens such as
 <code>0</code>, <code>17</code>, <code>-1</code>, and <code>+42</code> are
 recognized directly in program text, and their stack effect comes from that
 literal specification so different type systems can choose a different result
-type name when needed.
+type name when needed. A standard-like profile may also define
+<code>LITERAL DOUBLE ( -- d )</code>, in which case decimal tokens with a
+trailing period such as <code>1234.</code> or <code>-7.</code> are recognized
+as double-cell integer literals.
 <br>
 Program text now supports linear colon definitions through the outer
 interpreter: <code>: NAME ... ;</code> starts compilation, <code>;</code>
