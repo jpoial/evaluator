@@ -1,0 +1,5 @@
+# Integer literals are typed as COUNT in this profile.
+
+LITERAL INTEGER ( -- count )
+* ( count count -- count )
+. ( value -- )

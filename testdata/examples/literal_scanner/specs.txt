@@ -1,0 +1,7 @@
+# Comment and string parser words plus CELL-typed integer literals.
+
+"(" ")" ( -- )
+." "\"" ( -- )
+LITERAL INTEGER ( -- cell )
++ ( cell cell -- cell )
+. ( X -- )

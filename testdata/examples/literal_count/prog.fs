@@ -1,0 +1,2 @@
+: DOUBLE 2 * ;
+7 DOUBLE .

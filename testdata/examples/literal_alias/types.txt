@@ -1,0 +1,6 @@
+# Example type system where arithmetic is written using the alias NUMBER.
+
+type X value
+type n number integer
+
+rel n < X
