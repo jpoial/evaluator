@@ -35,6 +35,7 @@ public class Spec {
    static final String CONTROL_DO = "DO";
    static final String CONTROL_LOOP = "LOOP";
    static final String CONTROL_INDEX = "INDEX";
+   static final String CONTROL_END = "END";
 
    static final String STATE_ANY = "";
    static final String STATE_INTERPRET = "INTERPRET";
@@ -52,6 +53,8 @@ public class Spec {
    String defineMode = DEFINE_NONE;
    /** structured-control role for words inside definitions */
    String controlMode = CONTROL_NONE;
+   /** immediate words execute during compilation instead of being compiled */
+   boolean immediate = false;
    /** usage restriction for interpretation or compilation state */
    String stateMode = STATE_ANY;
    /** list of input parameter types */
@@ -151,6 +154,16 @@ public class Spec {
    } // end of withControlMode()
 
    /**
+    * Attaches immediate-word metadata to this spec.
+    * @param flag true when the word is immediate
+    * @return this spec
+    */
+   Spec withImmediate (boolean flag) {
+      immediate = flag;
+      return this;
+   } // end of withImmediate()
+
+   /**
     * Attaches usage-context metadata to this spec.
     * @param mode usage context
     * @return this spec
@@ -215,6 +228,14 @@ public class Spec {
       if (role == null) return false;
       return role.equals (controlMode);
    } // end of hasControlMode()
+
+   /**
+    * Tells whether this word executes during compilation.
+    * @return true for IMMEDIATE words
+    */
+   boolean isImmediate() {
+      return immediate;
+   } // end of isImmediate()
 
    /**
     * Tells whether this word may appear in interpretation state.
@@ -454,6 +475,7 @@ public class Spec {
       result.parseMode = parseMode;
       result.defineMode = defineMode;
       result.controlMode = controlMode;
+      result.immediate = immediate;
       result.stateMode = stateMode;
       result.sourceSpan = sourceSpan;
       result.originLabel = originLabel;

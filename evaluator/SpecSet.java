@@ -194,6 +194,8 @@ public class SpecSet extends Hashtable<String, Spec> {
             String parseString = "";
             String defineMode = Spec.DEFINE_NONE;
             String controlMode = Spec.CONTROL_NONE;
+            boolean immediate = false;
+            boolean immediateSeen = false;
             String stateMode = Spec.STATE_ANY;
             while (true) {
                SourceWord option = scanner.nextAtom ("(");
@@ -263,6 +265,14 @@ public class SpecSet extends Hashtable<String, Spec> {
                         modeToken.text + " in " + modeToken.span.startText());
                   continue;
                }
+               if ("IMMEDIATE".equals (optionKey)) {
+                  if (immediateSeen)
+                     throw new RuntimeException ("Duplicate IMMEDIATE clause " +
+                        "in " + option.span.startText());
+                  immediate = true;
+                  immediateSeen = true;
+                  continue;
+               }
                if ("SCAN".equals (optionKey)) {
                   if (parseMode.length() > 0)
                      throw new RuntimeException ("Duplicate scanner clause in " +
@@ -299,13 +309,17 @@ public class SpecSet extends Hashtable<String, Spec> {
             if ((trailing != null) && (trailing.size() > 0))
                throw new RuntimeException ("Unexpected trailing text in " +
                   ((SourceWord)trailing.getFirst()).span.startText());
+            if (!immediateSeen &&
+                impliedImmediate (parseMode, defineMode, controlMode))
+               immediate = true;
             validateParserMetadata (word.text, parseMode, parseString,
-               defineMode, controlMode, stateMode, body.span);
+               defineMode, controlMode, immediate, stateMode, body.span);
             put (word.text, parseSpec (body.text.trim(), ts, body.span)
                .withParseMode (parseMode)
                .withParseString (parseString)
                .withDefineMode (defineMode)
                .withControlMode (controlMode)
+               .withImmediate (immediate)
                .withStateMode (stateMode));
          }
       } catch (IOException e) {
@@ -571,6 +585,7 @@ public class SpecSet extends Hashtable<String, Spec> {
       if (Spec.CONTROL_DO.equals (key)) return Spec.CONTROL_DO;
       if (Spec.CONTROL_LOOP.equals (key)) return Spec.CONTROL_LOOP;
       if (Spec.CONTROL_INDEX.equals (key)) return Spec.CONTROL_INDEX;
+      if (Spec.CONTROL_END.equals (key)) return Spec.CONTROL_END;
       return null;
    } // end of canonicalControlMode()
 
@@ -608,7 +623,7 @@ public class SpecSet extends Hashtable<String, Spec> {
     */
    static void validateParserMetadata (String word, String parseMode,
       String parseString, String defineMode, String controlMode,
-      String stateMode,
+      boolean immediate, String stateMode,
       SourceSpan span) {
       if (Spec.PARSE_UNTIL.equals (parseMode) &&
           ((parseString == null) | (parseString.length() == 0)))
@@ -619,9 +634,11 @@ public class SpecSet extends Hashtable<String, Spec> {
          throw new RuntimeException ("Missing definition terminator for " +
             word + " in " + sourceLocationText (span));
       if (Spec.DEFINE_COLON.equals (defineMode) &&
-          !Spec.PARSE_DEFINITION.equals (parseMode))
-         throw new RuntimeException ("DEFINE COLON requires PARSE " +
-            "DEFINITION for " + word + " in " + sourceLocationText (span));
+          !Spec.PARSE_DEFINITION.equals (parseMode) &&
+          !Spec.PARSE_WORD.equals (parseMode))
+         throw new RuntimeException ("DEFINE COLON requires PARSE WORD " +
+            "(or legacy PARSE DEFINITION) for " + word + " in " +
+            sourceLocationText (span));
       if ((Spec.DEFINE_CONSTANT.equals (defineMode) |
            Spec.DEFINE_VARIABLE.equals (defineMode)) &&
           !Spec.PARSE_WORD.equals (parseMode))
@@ -637,11 +654,34 @@ public class SpecSet extends Hashtable<String, Spec> {
          throw new RuntimeException ("CONTROL currently cannot be combined " +
             "with PARSE or DEFINE for " + word + " in " +
             sourceLocationText (span));
-      if (((stateMode != null) && (stateMode.length() > 0)) &&
-          Spec.DEFINE_COLON.equals (defineMode))
-         throw new RuntimeException ("STATE is not supported for " + word +
-            " together with DEFINE COLON in " + sourceLocationText (span));
+      if ((((parseMode != null) && (parseMode.length() > 0)) ||
+           ((defineMode != null) && (defineMode.length() > 0)) ||
+           (((controlMode != null) && (controlMode.length() > 0)) &&
+            !Spec.CONTROL_INDEX.equals (controlMode))) &&
+          !immediate)
+         throw new RuntimeException ("IMMEDIATE is required for " + word +
+            " in " + sourceLocationText (span));
+      if (Spec.CONTROL_INDEX.equals (controlMode) && immediate)
+         throw new RuntimeException ("CONTROL INDEX must not be IMMEDIATE " +
+            "for " + word + " in " + sourceLocationText (span));
    } // end of validateParserMetadata()
+
+   /**
+    * Tells whether metadata implies immediate execution for compatibility.
+    * @param parseMode parser mode
+    * @param defineMode defining mode
+    * @param controlMode control role
+    * @return true when the word should default to IMMEDIATE
+    */
+   static boolean impliedImmediate (String parseMode, String defineMode,
+      String controlMode) {
+      if ((parseMode != null) && (parseMode.length() > 0)) return true;
+      if ((defineMode != null) && (defineMode.length() > 0)) return true;
+      if ((controlMode != null) && (controlMode.length() > 0) &&
+          !Spec.CONTROL_INDEX.equals (controlMode))
+         return true;
+      return false;
+   } // end of impliedImmediate()
 
    /**
     * Writes parser metadata of one specification in a stable textual form.
@@ -668,6 +708,7 @@ public class SpecSet extends Hashtable<String, Spec> {
          writer.write (" CONTROL ");
          writer.write (spec.controlMode);
       }
+      if (spec.immediate) writer.write (" IMMEDIATE");
       if ((spec.stateMode != null) && (spec.stateMode.length() > 0)) {
          writer.write (" STATE ");
          writer.write (spec.stateMode);
@@ -728,6 +769,7 @@ public class SpecSet extends Hashtable<String, Spec> {
             result.append (" DEFINE " + spec.defineMode);
          if ((spec.controlMode != null) && (spec.controlMode.length() > 0))
             result.append (" CONTROL " + spec.controlMode);
+         if (spec.immediate) result.append (" IMMEDIATE");
          if ((spec.stateMode != null) && (spec.stateMode.length() > 0))
             result.append (" STATE " + spec.stateMode);
          result.append ("\t" + spec.toString());

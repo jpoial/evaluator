@@ -46,23 +46,30 @@ helper for stack-effect experiments.
 Spec files may now describe parser words explicitly with metadata such as
 <code>PARSE UNTIL</code>, <code>PARSE WORD</code>,
 <code>PARSE DEFINITION</code>, <code>DEFINE</code>,
-<code>CONTROL</code>, and <code>STATE</code>. For example,
-<code>"(" PARSE UNTIL ")" ( -- )</code>,
-<code>".(" PARSE UNTIL ")" STATE INTERPRET ( -- )</code>,
-<code>CONSTANT PARSE WORD DEFINE CONSTANT ( X -- )</code>, and
-<code>: PARSE DEFINITION ";" DEFINE COLON ( -- )</code>. Structured words
-inside definitions can also be declared there, for example
-<code>IF CONTROL IF ( flag -- )</code> and
-<code>DO CONTROL DO ( n[2] n[1] -- )</code>. This lets scanner words,
-defining words, and control-word vocabulary live in the spec file rather than
-being special only in Java. The evaluator still accepts the older delimiter
-shorthand such as <code>"(" ")" ( -- )</code> and the older explicit
-<code>scan</code> form, and type files may still define named scanner
-delimiters when needed.
-This matches the current bundled behavior where <code>."</code> is allowed in
-compilation state, while <code>.(</code> is treated as an interpretation-state
-string-printing word with closing <code>)</code> as delimiter. For
-compatibility, the older <code>CONTEXT OUTER</code> and
+<code>CONTROL</code>, <code>IMMEDIATE</code>, and <code>STATE</code>. For
+example, <code>"(" PARSE UNTIL ")" IMMEDIATE ( -- )</code>,
+<code>".(" PARSE UNTIL ")" IMMEDIATE STATE INTERPRET ( -- )</code>,
+<code>CONSTANT PARSE WORD DEFINE CONSTANT IMMEDIATE STATE INTERPRET ( X -- )</code>,
+<code>: PARSE WORD DEFINE COLON IMMEDIATE STATE INTERPRET ( -- )</code>, and
+<code>; CONTROL END IMMEDIATE STATE COMPILE ( -- )</code>. Structured compile
+words can also be declared there, for example
+<code>IF CONTROL IF IMMEDIATE STATE COMPILE ( flag -- )</code> and
+<code>DO CONTROL DO IMMEDIATE STATE COMPILE ( n[2] n[1] -- )</code>, while
+runtime words such as <code>I</code> may simply be restricted with
+<code>STATE COMPILE</code>. This lets scanner words, defining words, and the
+compile-time control vocabulary live in the spec file rather than being
+special only in Java. The evaluator now follows an explicit outer-interpreter
+model with interpretation state and compilation state: normal words execute in
+interpretation state or are compiled in compilation state, while
+<code>IMMEDIATE</code> words execute during compilation. The evaluator still
+accepts the older delimiter shorthand such as <code>"(" ")" ( -- )</code>, the
+older explicit <code>scan</code> form, and the older
+<code>: PARSE DEFINITION ";" DEFINE COLON</code> form for compatibility; type
+files may still define named scanner delimiters when needed. This matches the
+current bundled behavior where <code>."</code> is an immediate scanner word
+that may appear in compilation state, while <code>.(</code> is treated as an
+interpretation-state string-printing word with closing <code>)</code> as
+delimiter. For compatibility, the older <code>CONTEXT OUTER</code> and
 <code>CONTEXT DEFINITION</code> spellings are still accepted when loading spec
 files.
 <br>
@@ -73,9 +80,10 @@ recognized directly in program text, and their stack effect comes from that
 literal specification so different type systems can choose a different result
 type name when needed.
 <br>
-Program text now supports linear colon definitions: <code>: NAME ... ;</code>,
-and the bundled profiles also declare <code>CONSTANT</code> and
-<code>VARIABLE</code> as defining parser words.
+Program text now supports linear colon definitions through the outer
+interpreter: <code>: NAME ... ;</code> starts compilation, <code>;</code>
+finishes it, and the bundled profiles also declare <code>CONSTANT</code> and
+<code>VARIABLE</code> as immediate defining words.
 <br>
 Forth word lookup is case-insensitive throughout the evaluator; source text is
 left as written, but word names are treated internally as if all letters were
