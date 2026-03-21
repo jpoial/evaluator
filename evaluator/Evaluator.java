@@ -42,7 +42,7 @@ public class Evaluator {
    } // end of RunConfig
 
    /**
-    * Main method that runs examples only.
+    * Main method that runs one evaluator invocation.
     * @param params  command-line parameters (program text)
    */
    public static void main (String[] params) {

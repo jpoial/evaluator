@@ -1,7 +1,7 @@
 # Integer literals are typed as COUNT in this profile.
 
-: PARSE WORD DEFINE COLON IMMEDIATE STATE INTERPRET ( -- )
-; CONTROL END IMMEDIATE STATE COMPILE ( -- )
-LITERAL INTEGER ( -- count )
+: parse word define colon ( -- )
+; control end ( -- )
+literal integer ( -- count )
 * ( count count -- count )
 . ( value -- )

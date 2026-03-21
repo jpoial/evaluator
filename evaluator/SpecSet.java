@@ -274,6 +274,7 @@ public class SpecSet extends Hashtable<String, Spec> {
       String parseMode = Spec.PARSE_NONE;
       String parseString = "";
       String defineMode = Spec.DEFINE_NONE;
+      boolean defineSeen = false;
       String controlMode = Spec.CONTROL_NONE;
       String stateMode = Spec.STATE_ANY;
       boolean immediate = false;
@@ -305,9 +306,14 @@ public class SpecSet extends Hashtable<String, Spec> {
             continue;
          }
          if ("DEFINE".equals (optionKey)) {
-            if (defineMode.length() > 0)
+            if (defineSeen)
                throw new RuntimeException ("Duplicate DEFINE clause in " +
                   option.span.startText());
+            defineSeen = true;
+            if ((line.size() == 0) ||
+                startsAnotherWordSpecClause ((SourceWord)line.getFirst()) ||
+                isUnquotedToken ((SourceWord)line.getFirst(), "("))
+               continue;
             SourceWord modeToken = expectLineToken (line,
                "Missing defining mode after DEFINE in " +
                option.span.startText());
@@ -376,12 +382,12 @@ public class SpecSet extends Hashtable<String, Spec> {
       }
       LineSpecBody body = consumeLineSpecBody (line, word.span,
          "Malformed specification in ");
-      if (!immediateSeen &&
-          impliedImmediate (parseMode, defineMode, controlMode))
-         immediate = true;
+      Spec bodySpec = parseSpec (body.text.trim(), ts, body.span);
+      if (defineSeen && defineMode.length() == 0)
+         defineMode = inferDefineMode (word.text, bodySpec, body.span);
       validateParserMetadata (word.text, parseMode, parseString,
          defineMode, controlMode, immediate, stateMode, body.span);
-      put (word.text, parseSpec (body.text.trim(), ts, body.span)
+      put (word.text, bodySpec
          .withParseMode (parseMode)
          .withParseString (parseString)
          .withDefineMode (defineMode)
@@ -389,6 +395,20 @@ public class SpecSet extends Hashtable<String, Spec> {
          .withImmediate (immediate)
          .withStateMode (stateMode));
    } // end of parseWordSpecLine()
+
+   /**
+    * Tells whether the token begins another metadata clause on the same line.
+    * @param token next token after one clause keyword
+    * @return true when the token starts another option
+    */
+   static boolean startsAnotherWordSpecClause (SourceWord token) {
+      if (token == null || token.quoted || token.text == null) return false;
+      String key = canonicalWord (token.text);
+      return "PARSE".equals (key) || "DEFINE".equals (key) ||
+         "CONTROL".equals (key) || "STATE".equals (key) ||
+         "CONTEXT".equals (key) || "IMMEDIATE".equals (key) ||
+         "SCAN".equals (key);
+   } // end of startsAnotherWordSpecClause()
 
    /**
     * Returns one required next token from a parsed top-level line.
@@ -493,8 +513,8 @@ public class SpecSet extends Hashtable<String, Spec> {
          while (literalIt.hasNext()) {
             String kind = (String)literalIt.next();
             Spec spec = getLiteral (kind);
-            writer.write ("LITERAL ");
-            writer.write (formatWordForFile (kind));
+            writer.write ("literal ");
+            writer.write (formatMetaWordForFile (kind));
             writer.write (" " + spec.toString().trim());
             writer.write (nl);
          }
@@ -1845,6 +1865,28 @@ public class SpecSet extends Hashtable<String, Spec> {
    } // end of canonicalDefineMode()
 
    /**
+    * Infers one simple defining-word flavor from its stack effect.
+    * Bare DEFINE currently supports constant-like ( x -- ) and variable-like
+    * ( -- y ) shapes; DEFINE COLON remains explicit.
+    * @param word word being defined
+    * @param bodySpec parsed stack effect of the defining word
+    * @param span source location for diagnostics
+    * @return internal defining mode
+    */
+   static String inferDefineMode (String word, Spec bodySpec, SourceSpan span) {
+      if (bodySpec == null)
+         throw new RuntimeException ("Missing stack effect for " + word +
+            " in " + sourceLocationText (span));
+      if ((bodySpec.leftSide.size() == 1) && (bodySpec.rightSide.size() == 0))
+         return Spec.DEFINE_CONSTANT;
+      if ((bodySpec.leftSide.size() == 0) && (bodySpec.rightSide.size() > 0))
+         return Spec.DEFINE_VARIABLE;
+      throw new RuntimeException ("DEFINE without mode needs either " +
+         "constant-like ( x -- ) or variable-like ( -- y ) stack effect for " +
+         word + " in " + sourceLocationText (span));
+   } // end of inferDefineMode()
+
+   /**
     * Canonicalizes one control mode keyword.
     * @param mode mode text from the spec file
     * @return canonical control mode or null when unknown
@@ -1892,6 +1934,9 @@ public class SpecSet extends Hashtable<String, Spec> {
       String parseString, String defineMode, String controlMode,
       boolean immediate, String stateMode,
       SourceSpan span) {
+      boolean effectiveImmediate = immediate ||
+         impliedImmediate (parseMode, defineMode, controlMode);
+      String impliedState = impliedStateMode (defineMode, controlMode);
       if (Spec.PARSE_UNTIL.equals (parseMode) &&
           ((parseString == null) | (parseString.length() == 0)))
          throw new RuntimeException ("Missing parser delimiter for " + word +
@@ -1925,12 +1970,18 @@ public class SpecSet extends Hashtable<String, Spec> {
            ((defineMode != null) && (defineMode.length() > 0)) ||
            (((controlMode != null) && (controlMode.length() > 0)) &&
             !Spec.CONTROL_INDEX.equals (controlMode))) &&
-          !immediate)
+          !effectiveImmediate)
          throw new RuntimeException ("IMMEDIATE is required for " + word +
             " in " + sourceLocationText (span));
-      if (Spec.CONTROL_INDEX.equals (controlMode) && immediate)
+      if (Spec.CONTROL_INDEX.equals (controlMode) && effectiveImmediate)
          throw new RuntimeException ("CONTROL INDEX must not be IMMEDIATE " +
             "for " + word + " in " + sourceLocationText (span));
+      if ((stateMode != null) && (stateMode.length() > 0) &&
+          (impliedState != null) && (impliedState.length() > 0) &&
+          !impliedState.equals (stateMode))
+         throw new RuntimeException ("STATE " + stateMode +
+            " conflicts with implied state " + impliedState + " for " + word +
+            " in " + sourceLocationText (span));
    } // end of validateParserMetadata()
 
    /**
@@ -1951,6 +2002,60 @@ public class SpecSet extends Hashtable<String, Spec> {
    } // end of impliedImmediate()
 
    /**
+    * Tells whether metadata implies a default usage state.
+    * Defining words are interpretation-only and control words are
+    * compilation-only.
+    * @param defineMode defining mode
+    * @param controlMode control role
+    * @return implied state mode or STATE_ANY
+    */
+   static String impliedStateMode (String defineMode, String controlMode) {
+      if ((defineMode != null) && (defineMode.length() > 0))
+         return Spec.STATE_INTERPRET;
+      if ((controlMode != null) && (controlMode.length() > 0))
+         return Spec.STATE_COMPILE;
+      return Spec.STATE_ANY;
+   } // end of impliedStateMode()
+
+   /**
+    * Tells whether a spec should serialize an explicit IMMEDIATE marker.
+    * Parser, defining, and control metadata already imply immediate behavior.
+    * @param spec specification being written
+    * @return true when the explicit marker adds information
+    */
+   static boolean writesExplicitImmediate (Spec spec) {
+      if (spec == null || !spec.hasExplicitImmediate()) return false;
+      return !impliedImmediate (spec.parseMode, spec.defineMode,
+         spec.controlMode);
+   } // end of writesExplicitImmediate()
+
+   /**
+    * Tells whether a spec should serialize an explicit STATE marker.
+    * Defining and control metadata already imply a default state.
+    * @param spec specification being written
+    * @return true when STATE adds information
+    */
+   static boolean writesExplicitState (Spec spec) {
+      if (spec == null || spec.stateMode == null || spec.stateMode.length() == 0)
+         return false;
+      return !spec.stateMode.equals (impliedStateMode (spec.defineMode,
+         spec.controlMode));
+   } // end of writesExplicitState()
+
+   /**
+    * Tells whether DEFINE should spell out its internal mode in text.
+    * Simple constant-like and variable-like definers are inferred from the
+    * stack effect, while colon definitions still need DEFINE COLON.
+    * @param spec specification being written
+    * @return true when DEFINE needs an explicit mode token
+    */
+   static boolean writesExplicitDefineMode (Spec spec) {
+      if (spec == null || spec.defineMode == null || spec.defineMode.length() == 0)
+         return false;
+      return Spec.DEFINE_COLON.equals (spec.defineMode);
+   } // end of writesExplicitDefineMode()
+
+   /**
     * Writes parser metadata of one specification in a stable textual form.
     * @param writer destination
     * @param spec specification to render
@@ -1960,25 +2065,28 @@ public class SpecSet extends Hashtable<String, Spec> {
       throws IOException {
       if (spec == null) return;
       if ((spec.parseMode != null) && (spec.parseMode.length() > 0)) {
-         writer.write (" PARSE ");
-         writer.write (spec.parseMode);
+         writer.write (" parse ");
+         writer.write (formatMetaWordForFile (spec.parseMode));
          if (parseModeNeedsArgument (spec.parseMode)) {
             writer.write (" ");
             writer.write (TextScanner.quotedText (spec.parseString));
          }
       }
       if ((spec.defineMode != null) && (spec.defineMode.length() > 0)) {
-         writer.write (" DEFINE ");
-         writer.write (spec.defineMode);
+         writer.write (" define");
+         if (writesExplicitDefineMode (spec)) {
+            writer.write (" ");
+            writer.write (formatMetaWordForFile (spec.defineMode));
+         }
       }
       if ((spec.controlMode != null) && (spec.controlMode.length() > 0)) {
-         writer.write (" CONTROL ");
-         writer.write (spec.controlMode);
+         writer.write (" control ");
+         writer.write (formatMetaWordForFile (spec.controlMode));
       }
-      if (spec.immediate) writer.write (" IMMEDIATE");
-      if ((spec.stateMode != null) && (spec.stateMode.length() > 0)) {
-         writer.write (" STATE ");
-         writer.write (spec.stateMode);
+      if (writesExplicitImmediate (spec)) writer.write (" immediate");
+      if (writesExplicitState (spec)) {
+         writer.write (" state ");
+         writer.write (formatMetaWordForFile (spec.stateMode));
       }
    } // end of appendSpecMetadata()
 
@@ -1993,45 +2101,45 @@ public class SpecSet extends Hashtable<String, Spec> {
       if (writer == null || structure == null) return;
       String nl = System.getProperty ("line.separator");
       if ((structure.syntaxText != null) && (structure.syntaxText.length() > 0)) {
-         appendStructureDirective (writer, "", "SYNTAX", structure.syntaxText,
+         appendStructureDirective (writer, "", "syntax", structure.syntaxText,
             false);
          if ((structure.compilationText != null) &&
              (structure.compilationText.length() > 0))
-            appendStructureDirective (writer, "  ", "COMPILATION",
+            appendStructureDirective (writer, "  ", "compilation",
                structure.compilationText, false);
          if ((structure.runtimeText != null) &&
              (structure.runtimeText.length() > 0))
-            appendStructureDirective (writer, "  ", "RUN-TIME",
+            appendStructureDirective (writer, "  ", "run-time",
                structure.runtimeText, false);
-         appendStructureDirective (writer, "  ", "EFFECT",
+         appendStructureDirective (writer, "  ", "effect",
             structure.meaningText, false);
       } else {
-         writer.write ("STRUCTURE ");
-         writer.write (formatWordForFile (structure.name));
+         writer.write ("structure ");
+         writer.write (formatMetaWordForFile (structure.name));
          writer.write (nl);
-         writer.write ("OPEN ");
-         writer.write (formatWordForFile (structure.openRole));
+         writer.write ("open ");
+         writer.write (formatMetaWordForFile (structure.openRole));
          writer.write (nl);
          if (structure.hasMidRole()) {
-            writer.write ("MID ");
-            writer.write (formatWordForFile (structure.midRole));
-            if (structure.midOptional) writer.write (" OPTIONAL");
+            writer.write ("mid ");
+            writer.write (formatMetaWordForFile (structure.midRole));
+            if (structure.midOptional) writer.write (" optional");
             writer.write (nl);
          }
-         writer.write ("CLOSE ");
-         writer.write (formatWordForFile (structure.closeRole));
+         writer.write ("close ");
+         writer.write (formatMetaWordForFile (structure.closeRole));
          writer.write (nl);
          if ((structure.compilationText != null) &&
              (structure.compilationText.length() > 0))
-            appendStructureDirective (writer, "", "COMPILATION",
+            appendStructureDirective (writer, "", "compilation",
                structure.compilationText, false);
          if ((structure.runtimeText != null) &&
              (structure.runtimeText.length() > 0))
-            appendStructureDirective (writer, "", "RUN-TIME",
+            appendStructureDirective (writer, "", "run-time",
                structure.runtimeText, false);
-         appendStructureDirective (writer, "", "EFFECT", structure.meaningText,
+         appendStructureDirective (writer, "", "effect", structure.meaningText,
             false);
-         writer.write ("ENDSTRUCTURE");
+         writer.write ("endstructure");
       }
    } // end of appendControlStructure()
 
@@ -2098,6 +2206,15 @@ public class SpecSet extends Hashtable<String, Spec> {
    } // end of formatWordForFile()
 
    /**
+    * Formats one metalanguage token in the preferred lowercase file style.
+    * @param word original token text
+    * @return lowercase text or quoted lowercase text when required
+    */
+   static String formatMetaWordForFile (String word) {
+      return formatWordForFile (word).toLowerCase (Locale.ROOT);
+   } // end of formatMetaWordForFile()
+
+   /**
     * Tells whether one atom needs quoting in spec/type files.
     * @param text atom text
     * @return true if quoting is needed
@@ -2127,48 +2244,48 @@ public class SpecSet extends Hashtable<String, Spec> {
          if ((structure.syntaxText != null) &&
              (structure.syntaxText.length() > 0)) {
             result.append (nl);
-            result.append (formatStructureDirective ("", "SYNTAX",
+            result.append (formatStructureDirective ("", "syntax",
                structure.syntaxText, false, nl));
             if ((structure.compilationText != null) &&
                 (structure.compilationText.length() > 0))
-               result.append (formatStructureDirective ("  ", "COMPILATION",
+               result.append (formatStructureDirective ("  ", "compilation",
                   structure.compilationText, false, nl));
             if ((structure.runtimeText != null) &&
                 (structure.runtimeText.length() > 0))
-               result.append (formatStructureDirective ("  ", "RUN-TIME",
+               result.append (formatStructureDirective ("  ", "run-time",
                   structure.runtimeText, false, nl));
-            result.append (formatStructureDirective ("  ", "EFFECT",
+            result.append (formatStructureDirective ("  ", "effect",
                structure.meaningText, false, nl));
          } else {
-            result.append (nl + "STRUCTURE " +
-               formatWordForFile (structure.name));
-            result.append (nl + "OPEN " +
-               formatWordForFile (structure.openRole));
+            result.append (nl + "structure " +
+               formatMetaWordForFile (structure.name));
+            result.append (nl + "open " +
+               formatMetaWordForFile (structure.openRole));
             if (structure.hasMidRole()) {
-               result.append (nl + "MID " +
-                  formatWordForFile (structure.midRole));
-               if (structure.midOptional) result.append (" OPTIONAL");
+               result.append (nl + "mid " +
+                  formatMetaWordForFile (structure.midRole));
+               if (structure.midOptional) result.append (" optional");
             }
-            result.append (nl + "CLOSE " +
-               formatWordForFile (structure.closeRole));
+            result.append (nl + "close " +
+               formatMetaWordForFile (structure.closeRole));
             if ((structure.compilationText != null) &&
                 (structure.compilationText.length() > 0))
-               result.append (formatStructureDirective ("", "COMPILATION",
+               result.append (formatStructureDirective ("", "compilation",
                   structure.compilationText, false, nl));
             if ((structure.runtimeText != null) &&
                 (structure.runtimeText.length() > 0))
-               result.append (formatStructureDirective ("", "RUN-TIME",
+               result.append (formatStructureDirective ("", "run-time",
                   structure.runtimeText, false, nl));
-            result.append (formatStructureDirective ("", "EFFECT",
+            result.append (formatStructureDirective ("", "effect",
                structure.meaningText, false, nl));
-            result.append (nl + "ENDSTRUCTURE");
+            result.append (nl + "endstructure");
          }
       }
       Iterator<String> literalKinds = sortedLiteralKinds().iterator();
       while (literalKinds.hasNext()) {
          String kind = (String)literalKinds.next();
          Spec spec = getLiteral (kind);
-         result.append (nl + "LITERAL " + formatWordForFile (kind));
+         result.append (nl + "literal " + formatMetaWordForFile (kind));
          result.append ("\t" + spec.toString());
       }
       Iterator<String> words = sortedWords().iterator();
@@ -2177,17 +2294,23 @@ public class SpecSet extends Hashtable<String, Spec> {
          Spec spec = (Spec)get (word);
          result.append (nl + formatWordForFile (word));
          if ((spec.parseMode != null) && (spec.parseMode.length() > 0)) {
-            result.append (" PARSE " + spec.parseMode);
+            result.append (" parse " + formatMetaWordForFile (spec.parseMode));
             if (parseModeNeedsArgument (spec.parseMode))
                result.append (" " + TextScanner.quotedText (spec.parseString));
          }
          if ((spec.defineMode != null) && (spec.defineMode.length() > 0))
-            result.append (" DEFINE " + spec.defineMode);
+            if (writesExplicitDefineMode (spec))
+               result.append (" define " +
+                  formatMetaWordForFile (spec.defineMode));
+            else
+               result.append (" define");
          if ((spec.controlMode != null) && (spec.controlMode.length() > 0))
-            result.append (" CONTROL " + spec.controlMode);
-         if (spec.immediate) result.append (" IMMEDIATE");
-         if ((spec.stateMode != null) && (spec.stateMode.length() > 0))
-            result.append (" STATE " + spec.stateMode);
+            result.append (" control " +
+               formatMetaWordForFile (spec.controlMode));
+         if (writesExplicitImmediate (spec)) result.append (" immediate");
+         if (writesExplicitState (spec))
+            result.append (" state " +
+               formatMetaWordForFile (spec.stateMode));
          result.append ("\t" + spec.toString());
       }
       result.append (nl);

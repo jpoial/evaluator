@@ -1,8 +1,8 @@
 # Standard-like strict demo specification set for the evaluator.
 # Format:
-#   WORD [PARSE MODE ["<arg>"]] [DEFINE MODE] [CONTROL MODE]
-#        [IMMEDIATE] [STATE MODE] ( inputs -- outputs )
-#   LITERAL KIND ( inputs -- outputs )
+#   word [parse mode ["<arg>"]] [define [mode]] [control mode]
+#        [state mode] ( inputs -- outputs )
+#   literal kind ( -- outputs )
 
 # Core stack words
 OVER ( x[2] x[1] -- x[2] x[1] x[2] )
@@ -24,70 +24,71 @@ R@ ( -- x )
 2R@ ( -- x[2] x[1] )
 
 # Core parser and literal words
-"(" PARSE UNTIL ")" IMMEDIATE ( -- )
-"\\" PARSE UNTIL EOL IMMEDIATE ( -- )
-".(" PARSE UNTIL ")" IMMEDIATE STATE INTERPRET ( -- )
-." PARSE UNTIL "\"" IMMEDIATE ( -- )
-ABORT" PARSE UNTIL "\"" IMMEDIATE ( flag -- )
-C" PARSE UNTIL "\"" IMMEDIATE ( -- c-addr )
-S" PARSE UNTIL "\"" IMMEDIATE ( -- c-addr u )
-CHAR PARSE WORD IMMEDIATE STATE INTERPRET ( -- char )
-[CHAR] PARSE WORD IMMEDIATE STATE COMPILE ( -- char )
-' PARSE WORD IMMEDIATE STATE INTERPRET ( -- xt )
-['] PARSE WORD IMMEDIATE STATE COMPILE ( -- xt )
-: PARSE WORD DEFINE COLON IMMEDIATE STATE INTERPRET ( -- )
-; CONTROL END IMMEDIATE STATE COMPILE ( -- )
-CONSTANT PARSE WORD DEFINE CONSTANT IMMEDIATE STATE INTERPRET ( x -- )
-2CONSTANT PARSE WORD DEFINE CONSTANT IMMEDIATE STATE INTERPRET ( xd -- )
-VARIABLE PARSE WORD DEFINE VARIABLE IMMEDIATE STATE INTERPRET ( -- a-addr )
-2VARIABLE PARSE WORD DEFINE VARIABLE IMMEDIATE STATE INTERPRET ( -- a-addr )
-CREATE PARSE WORD DEFINE VARIABLE IMMEDIATE STATE INTERPRET ( -- a-addr )
-LITERAL INTEGER ( -- n )
-LITERAL DOUBLE ( -- d )
+"(" parse until ")" ( -- )
+"\\" parse until eol ( -- )
+".(" parse until ")" state interpret ( -- )
+." parse until "\"" ( -- )
+ABORT" parse until "\"" ( flag -- )
+C" parse until "\"" ( -- c-addr )
+S" parse until "\"" ( -- c-addr u )
+CHAR parse word state interpret ( -- char )
+[CHAR] parse word state compile ( -- char )
+' parse word state interpret ( -- xt )
+['] parse word state compile ( -- xt )
+: parse word define colon ( -- )
+; control end ( -- )
+CONSTANT parse word define ( x -- )
+2CONSTANT parse word define ( xd -- )
+VARIABLE parse word define ( -- a-addr )
+2VARIABLE parse word define ( -- a-addr )
+CREATE parse word define ( -- a-addr )
+literal integer ( -- n )
+literal double ( -- d )
 TRUE ( -- flag )
 FALSE ( -- flag )
 
 # Structured control words and declarative control structures
-# `IMMEDIATE STATE COMPILE` says the word acts during compilation.
+# `parse`, `define`, and `control` imply compile-time action.
+# `define` implies interpretation-only, and `control` implies compilation-only.
 # The stack comment still shows what it consumes there.
-# In `WORD CONTROL ROLE`, `ROLE` names the parser slot. `THEN` closes `FI`.
-IF CONTROL IF IMMEDIATE STATE COMPILE ( flag -- )
-ELSE CONTROL ELSE IMMEDIATE STATE COMPILE ( -- )
-FI CONTROL FI IMMEDIATE STATE COMPILE ( -- )
-THEN CONTROL FI IMMEDIATE STATE COMPILE ( -- )
+# In `word control role`, `role` names the parser slot. `THEN` closes `FI`.
+IF control if ( flag -- )
+ELSE control else ( -- )
+FI control fi ( -- )
+THEN control fi ( -- )
 
-SYNTAX: IF <then branch> [ELSE <else branch>] FI
-  EFFECT:
+syntax: IF <then branch> [ELSE <else branch>] FI
+  effect:
     IF
     either <then branch> <else branch>
 
-BEGIN CONTROL BEGIN IMMEDIATE STATE COMPILE ( -- )
-WHILE CONTROL WHILE IMMEDIATE STATE COMPILE ( flag -- )
-REPEAT CONTROL REPEAT IMMEDIATE STATE COMPILE ( -- )
+BEGIN control begin ( -- )
+WHILE control while ( flag -- )
+REPEAT control repeat ( -- )
 
-SYNTAX: BEGIN <loop prefix> WHILE <loop body> REPEAT
-  EFFECT:
+syntax: BEGIN <loop prefix> WHILE <loop body> REPEAT
+  effect:
     repeat <loop prefix> WHILE
     repeat <loop body>
 
-AGAIN CONTROL AGAIN IMMEDIATE STATE COMPILE ( -- )
+AGAIN control again ( -- )
 
-SYNTAX: BEGIN <loop body> AGAIN
-  EFFECT:
+syntax: BEGIN <loop body> AGAIN
+  effect:
     repeat <loop body>
 
-UNTIL CONTROL UNTIL IMMEDIATE STATE COMPILE ( flag -- )
+UNTIL control until ( flag -- )
 
-SYNTAX: BEGIN <loop body> UNTIL
-  EFFECT:
+syntax: BEGIN <loop body> UNTIL
+  effect:
     repeat <loop body> UNTIL
 
-DO CONTROL DO IMMEDIATE STATE COMPILE ( n[2] n[1] -- )
-LOOP CONTROL LOOP IMMEDIATE STATE COMPILE ( -- )
-I CONTROL INDEX STATE COMPILE ( -- n )
+DO control do ( n[2] n[1] -- )
+LOOP control loop ( -- )
+I control index ( -- n )
 
-SYNTAX: DO <loop body> LOOP
-  EFFECT:
+syntax: DO <loop body> LOOP
+  effect:
     DO
     repeat <loop body>
 
@@ -238,7 +239,7 @@ WRITE-FILE ( c-addr u fileid -- ior )
 WRITE-LINE ( c-addr u fileid -- ior )
 
 # Common compile-only runtime words
-EXIT STATE COMPILE ( -- )
-J STATE COMPILE ( -- n )
-LEAVE STATE COMPILE ( -- )
-UNLOOP STATE COMPILE ( -- )
+EXIT state compile ( -- )
+J state compile ( -- n )
+LEAVE state compile ( -- )
+UNLOOP state compile ( -- )

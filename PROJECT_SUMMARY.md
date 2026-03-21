@@ -58,11 +58,10 @@ The Java code in this repo implements mainly the **linear-sequence core** of tha
 
 It does **not** yet implement the full vision described in the papers:
 
-- no real parser for control structures,
-- no full multiple-stack-effects engine for branches,
-- no actual file-based spec/type loading despite the constructor signatures,
+- no full multiple-stack-effects engine for branches or other alternatives,
+- no broad Forth front end beyond the current source-level parser,
 - no toolchain or IDE integration,
-- and only a small built-in vocabulary of Forth words.
+- and only a small profile-driven demo vocabulary.
 
 So the repository is less "finished analyzer" and more "well-focused computational kernel for a larger analyzer."
 
@@ -116,9 +115,10 @@ This is an important evolutionary step: it recognizes that linear composition al
 
 However, the current Java repo still carries only a **partial** version of this stage:
 
-- `SpecSet` exists, but it is a dictionary from words to single `Spec` values, not sets of alternative effects,
+- `SpecSet` is still a dictionary from words to single `Spec` values, not sets of alternative effects,
 - `Spec.glb(...)`, `idemp(...)`, and `piStar(...)` preserve the later branch/loop reasoning ideas,
-- and the parser now supports linear colon definitions containing `IF ... ELSE ... FI`, `BEGIN ... WHILE ... REPEAT`, `BEGIN ... UNTIL`, `BEGIN ... AGAIN`, and counted loops, but it still does not implement the fuller multiple-stack-effects framework described in the papers.
+- `ProgText` and the declarative control-structure support now parse colon definitions containing `IF ... ELSE ... FI`, `BEGIN ... WHILE ... REPEAT`, `BEGIN ... UNTIL`, `BEGIN ... AGAIN`, `DO ... LOOP`, and custom `syntax:` / `effect:` structures,
+- but completed control constructs are still checked by collapsing them to one merged `Spec` rather than carrying an explicit set of alternatives.
 
 In other words, the 1991 paper points toward the larger intended system, but the code in this repo implements only the simpler linear kernel.
 
@@ -195,11 +195,11 @@ It explains the package almost class-for-class:
 
 It also says explicitly that:
 
-- only a **linear sequence of words** is implemented,
-- the package is still a **prototype**,
-- and real tooling would require a larger parser, extensibility, and support for real Forth syntax and control structures.
+- the original framework focused on **linear sequences of words**,
+- the package was a **prototype**,
+- and real tooling would require extensibility and richer parsing.
 
-This matches the repository exactly.
+That still fits the repository at a high level, although the current code now also includes file-backed profiles, parser words, colon definitions, literal classes, and declarative control structures.
 
 ## Core Theory Behind the Project
 
@@ -223,10 +223,11 @@ inside the `Spec` class.
 
 ## Types and Subtypes
 
-The shipped demo now includes two type-system profiles:
+The shipped demo now includes three type-system profiles:
 
 - `real` in `ex1types.txt`
 - `legacy` in `legacytypes.txt`
+- `forth2012` in `forth2012types.txt`
 
 The default `real` profile is more Forth-like:
 
@@ -244,10 +245,18 @@ The preserved `legacy` profile keeps the earlier stricter separation:
 - `char < n < X`
 - `flag < X`
 
+The stricter `forth2012` profile follows the standard lattice more closely:
+
+- `+n < n`
+- `+n < u`
+- `char < +n`
+- `flag < X`
+- `a-addr < c-addr < addr < u < X`
+
 This is still intentionally small, but it demonstrates the main idea: when
 two symbolic items are matched, the analyzer tries to keep the **most exact
-compatible type**. The new `real` profile simply makes the default lattice
-closer to ordinary Forth practice.
+compatible type**. The `real` profile is a more convenient Forth-like default,
+while `legacy` and `forth2012` keep stricter distinctions.
 
 ## Wildcards and Positional Identity
 
@@ -301,7 +310,8 @@ In the code, `Spec.glb(...)`:
 - unifies corresponding symbols,
 - and normalizes the result.
 
-Even though the current repo does not parse real branch syntax, the operation is implemented as a reusable building block.
+The current repo now parses branch syntax inside colon definitions, and this
+operation is the reusable merge primitive those control structures rely on.
 
 ## Idempotence and `piStar`
 
@@ -315,7 +325,9 @@ The code provides two related operations:
 - `idemp(...)`: try to derive the nearest idempotent by matching left and right sides
 - `piStar(...)`: evaluate two copies of the effect and then compute a `glb` with the original, corresponding to the paper's loop approximation idea `glb(e, ee)`
 
-Again, the actual loop syntax is not implemented in this repo, but the mathematical primitives are present.
+The current repo now also parses loop syntax inside colon definitions, so
+these mathematical primitives are part of the executable checking path rather
+than dead theoretical leftovers.
 
 ## Java Architecture
 
@@ -414,59 +426,16 @@ The bundled example vocabulary now includes a more Forth-like core:
 Dot is modeled with stack effect `( X -- )`, so the evaluator can treat it as
 printing and consuming an arbitrary symbolic value.
 
-The evaluator now ships matching `real` and `legacy` file-backed demo
-profiles. The default run uses the `real` profile, and
-`java evaluator.Evaluator --system legacy` switches back to the older one.
+The evaluator now ships three file-backed demo profiles: `real`,
+`legacy`, and `forth2012`. The default run uses `real`, while
+`java evaluator.Evaluator --system legacy` and
+`java evaluator.Evaluator --system forth2012` switch to the stricter
+profiles.
 
-Built-in words include:
-
-- `OVER`
-- `SWAP`
-- `DUP`
-- `DROP`
-- `ROT`
-- `PLUS`
-- `+`
-- `-`
-- `*`
-- `/`
-- `MOD`
-- `1+`
-- `1-`
-- `2*`
-- `2/`
-- `NEGATE`
-- `ABS`
-- `0=`
-- `0<`
-- `0>`
-- `0<>`
-- `=`
-- `<>`
-- `<`
-- `>`
-- `AND`
-- `OR`
-- `XOR`
-- `INVERT`
-- `@`
-- `HERE`
-- `DP`
-- `C@`
-- `!`
-- `C!`
-- `ALLOT`
-- `CELL+`
-- `CHAR+`
-- `CELLS`
-- `CHARS`
-- `KEY`
-- `EMIT`
-- `CR`
-- `SPACE`
-- `SPACES`
-- `TYPE`
-- `.`
+The bundled vocabularies are no longer just fixed Java tables. They are
+loaded from spec files, and those files can now describe parser words,
+defining words, literal classes, and declarative control roles alongside
+ordinary stack effects.
 
 This is enough to demonstrate:
 
@@ -479,14 +448,15 @@ This is enough to demonstrate:
 
 `ProgText` is the internal representation of the program being analyzed.
 
-Right now it is just a `LinkedList<String>` of words.
+It is still backed by a `LinkedList<String>` of top-level words, but it now
+does substantially more than hold raw tokens.
 
 Two details matter:
 
-1. `ProgText(String[] text, TypeSystem ts, SpecSet ss)` tokenizes CLI input, parses linear colon definitions, and registers any defined words before evaluating the remaining top-level program.
-2. `ProgText(String fileName, TypeSystem ts, SpecSet ss)` does the same for a text file, including support for `IF ... FI`, `IF ... ELSE ... FI`, `BEGIN ... WHILE ... REPEAT`, `BEGIN ... UNTIL`, `BEGIN ... AGAIN`, and `DO ... LOOP` inside definitions. `BEGIN ... UNTIL` models the terminating flag test as a consumed `flag`, while `BEGIN ... AGAIN` uses the same fixed-point approximation as the other loop forms. The current `DO ... LOOP` approximation consumes two numeric loop parameters as `( n[2] n[1] -- )`, in standard Forth order `limit start`. With implicit step `1`, the loop runs for `I = start, start+1, ... , limit-1`; for example, `7 0 DO I . LOOP` prints `0 1 2 3 4 5 6`. Inside the loop body, `I` is now recognized as the innermost loop index with stack effect `( -- n )`.
+1. `ProgText(String[] text, TypeSystem ts, SpecSet ss)` tokenizes CLI input, interprets parser words, tracks interpretation vs compilation state, parses colon definitions, and registers any defined words before evaluating the remaining top-level program.
+2. `ProgText(String fileName, TypeSystem ts, SpecSet ss)` does the same for a text file, including support for declared control structures, file-based diagnostics with line/column spans, and recovery after many source errors so later problems can still be reported.
 
-So the class exists as a placeholder for a richer parser, but the real supported entry point is the command-line token array.
+So the class is still a compact front end rather than a full Forth parser, but it is now a real supported entry point for both command-line and file-based checking.
 
 ## `SpecList`
 
@@ -508,20 +478,15 @@ This class is the best candidate to view as "the evaluator proper."
 
 `Evaluator` is the demo-oriented entry point.
 
-It does four things:
+It creates a `TypeSystem`, loads a `SpecSet`, parses either a program file or
+command-line program words into `ProgText`, evaluates the resulting `SpecList`,
+and prints the chosen profile/files, the reconstructed program text, the
+top-level word sequence, and an annotated stack-effect listing. When parsing
+collects recoverable errors, it prints the rendered diagnostics and exits with
+failure.
 
-1. create a `TypeSystem`
-2. create a `SpecSet`
-3. wrap the command-line words in `ProgText`
-4. build `SpecList`, evaluate it, and print:
-   - the full type system
-   - the full spec set
-   - the program
-   - an annotated program listing
-   - a `glb` of first and last spec
-   - the result's idempotent and `piStar`
-
-This is useful for experimentation, but it is clearly a research/demo shell rather than a polished CLI tool.
+This is useful for experimentation, but it is still a compact CLI rather than
+a polished toolchain integration point.
 
 ## End-to-End Evaluation Flow
 
@@ -531,8 +496,8 @@ For a command such as:
 
 the flow is:
 
-1. `TypeSystem` is constructed with the built-in subtype graph.
-2. `SpecSet` is constructed with the built-in word signatures.
+1. `TypeSystem` is loaded from the selected profile's type file.
+2. `SpecSet` is loaded from the selected profile's spec file.
 3. `ProgText` stores the token list `["SWAP", "DUP", "@"]`.
 4. `SpecList` looks up each word in `SpecSet` and clones its `Spec`.
 5. `evaluate(...)` freshens wildcard indices to make all local placeholders unique.
@@ -708,22 +673,22 @@ This also fails, because the value produced by `C@` is a `char`, while `!` expec
 
 This repository is very informative, but it is visibly unfinished.
 
-## 1. File-Based APIs Are Now Real, But Still Minimal
+## 1. File-Based APIs Are Real, But Still Minimal
 
 Both of these constructors take filenames:
 
 - `new TypeSystem("ex1types.txt")`
 - `new SpecSet("ex1specs.txt", ex1types)`
 
-These now read real example files from disk, and `ProgText(String fileName, TypeSystem ts, SpecSet ss)` likewise loads a program text file. The repo also now keeps two bundled demo environments side by side: the default `real` profile and the preserved `legacy` profile.
+These now read real example files from disk, and `ProgText(String fileName, TypeSystem ts, SpecSet ss)` likewise loads a program text file. The repo also now keeps three bundled demo environments side by side: the default `real` profile, the preserved `legacy` profile, and the stricter `forth2012` profile.
 
 That is a meaningful step forward, but the loaders are still deliberately simple:
 
 - the formats are example-oriented rather than full Forth source formats,
-- the demo still ships with a tiny fixed vocabulary,
+- the bundled profiles still ship with a deliberately small vocabulary,
 - and the surrounding evaluator remains prototype-level.
 
-## 2. Only Linear Programs Are Implemented
+## 2. Control Parsing Exists, But Effects Are Still Single-Valued
 
 The papers discuss:
 
@@ -733,9 +698,12 @@ The papers discuss:
 - multiple stack-effects,
 - and a larger Forth grammar.
 
-The code currently supports only a flat sequence of known words.
+The current code does parse branches, loops, parser words, and dictionary
+growth through source text, but each completed construct is still reduced to
+one symbolic effect rather than a richer set of alternatives.
 
-That makes the implementation a **core engine**, not a full Forth analyzer.
+That makes the implementation a **core engine with a practical front end**,
+not a full Forth analyzer.
 
 ## 3. `SpecSet` Is Less Static, But Still Limited
 
@@ -743,31 +711,36 @@ That makes the implementation a **core engine**, not a full Forth analyzer.
 
 But there is still no support for:
 
-- user-defined words,
-- dictionary growth,
-- compile-time stack effects,
-- parser words,
-- or separate runtime/compile-time effect universes.
+- first-class sets of alternative stack effects per word,
+- a broader compile-time data stack model,
+- many Forth-standard compile-time semantics beyond the current metadata,
+- or separate full runtime/compile-time effect universes.
 
-## 4. Error Handling Is Prototype-Level
+## 4. Error Handling Is Better, But Still Prototype-Level
 
-The most obvious demo-shell crash has been fixed: if evaluation fails, `Evaluator.main(...)` now prints an unknown-state result for `idemp` and `piStar` instead of throwing `NullPointerException`.
+The current CLI now reports structured diagnostics with source spans and can
+recover from many file-parsing errors, which is a substantial step beyond the
+original prototype behavior.
 
-The semantic core is still stronger than the demo shell around it, but the user-facing behavior is now safer than the original prototype.
+The semantic core is still stronger than the demo shell around it, but the
+user-facing behavior is much safer and more informative than the original
+prototype.
 
 ## 5. Output Is Verbose and Not Tool-Oriented Yet
 
-The demo always prints:
+The demo currently prints:
 
-- the full type system,
-- the full spec set,
-- and extra exploratory calculations.
+- the chosen profile and file set,
+- the source text,
+- the parsed top-level program,
+- and the annotated stack-effect listing.
 
 That is appropriate for a research prototype but not yet for a normal CLI or editor backend.
 
 ## 6. Scope Is Intentionally Small
 
-The type lattice is tiny, the word set is tiny, and the parser is minimal.
+The type lattice is tiny, the vocabularies are intentionally small, and the
+parser still covers only a focused subset of Forth source.
 
 That is not a flaw by itself; it is consistent with the repo being a compact proof of concept. But it means the project should be judged as an analysis kernel, not as a production Forth validator.
 
@@ -789,18 +762,17 @@ Its main weakness is not conceptual but developmental:
 
 So the most accurate summary is:
 
-> `evaluator` is the semantic core of a much bigger static-analysis idea for Forth, captured in a small Java package that successfully demonstrates linear typed stack-effect reasoning, but stops well before a full parser, full control-flow analysis, or a production-quality tool.
+> `evaluator` is the semantic core of a much bigger static-analysis idea for Forth, captured in a small Java package that now includes a practical source-level front end, declarative control structures, and file-backed demo profiles, but still stops well before full multiple-effect control-flow analysis or a production-quality tool.
 
 ## If Someone Continues This Project
 
 The most natural next steps would be:
 
-1. make `TypeSystem` and `SpecSet` genuinely file-backed,
-2. replace `ProgText` with a real parser,
-3. represent control structures explicitly,
-4. lift the evaluator from single effects to branch-aware program constructs,
-5. harden error handling around `null` results,
-6. add tests using the examples already present in the papers,
-7. and turn the demo into a stable CLI or editor-facing library.
+1. extend the current source parser toward a broader slice of real Forth syntax,
+2. lift the evaluator from single merged effects to branch-aware program constructs,
+3. model more compile-time semantics explicitly instead of approximating them through metadata,
+4. keep hardening diagnostics and recovery around malformed source,
+5. add a maintained automated test harness around the bundled examples and diagnostics,
+6. and turn the demo into a stable CLI or editor-facing library.
 
 That would extend the current code in the same direction the papers have already laid out.

@@ -1,19 +1,19 @@
-# Custom control words described through one structure equation.
+# Custom control words described through one declarative syntax/effect block.
 
 DUP ( X[1] -- X[1] X[1] )
 2DROP ( X[2] X[1] -- )
 0= ( n -- flag )
-: PARSE WORD DEFINE COLON IMMEDIATE STATE INTERPRET ( -- )
-; CONTROL END IMMEDIATE STATE COMPILE ( -- )
-LITERAL INTEGER ( -- n )
-WHEN CONTROL WHEN IMMEDIATE STATE COMPILE ( flag -- )
-OTHERWISE CONTROL OTHERWISE IMMEDIATE STATE COMPILE ( -- )
-ENDWHEN CONTROL ENDWHEN IMMEDIATE STATE COMPILE ( -- )
+: parse word define colon ( -- )
+; control end ( -- )
+literal integer ( -- n )
+WHEN control when ( flag -- )
+OTHERWISE control otherwise ( -- )
+ENDWHEN control endwhen ( -- )
 
-SYNTAX:
+syntax:
   WHEN <branch>
   [OTHERWISE <fallback branch>]
   ENDWHEN
-  EFFECT:
+  effect:
     WHEN
     either <branch> <fallback branch>

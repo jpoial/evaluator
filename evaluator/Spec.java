@@ -53,7 +53,7 @@ public class Spec {
    String defineMode = DEFINE_NONE;
    /** structured-control role for words inside definitions */
    String controlMode = CONTROL_NONE;
-   /** immediate words execute during compilation instead of being compiled */
+   /** explicit immediate flag for unusual words without implied metadata */
    boolean immediate = false;
    /** usage restriction for interpretation or compilation state */
    String stateMode = STATE_ANY;
@@ -154,14 +154,32 @@ public class Spec {
    } // end of withControlMode()
 
    /**
-    * Attaches immediate-word metadata to this spec.
-    * @param flag true when the word is immediate
+    * Attaches an explicit immediate-word marker to this spec.
+    * @param flag true when the word is explicitly immediate
     * @return this spec
     */
    Spec withImmediate (boolean flag) {
       immediate = flag;
       return this;
    } // end of withImmediate()
+
+   /**
+    * Tells whether this spec carries an explicit IMMEDIATE marker.
+    * @return true when IMMEDIATE was set directly
+    */
+   boolean hasExplicitImmediate() {
+      return immediate;
+   } // end of hasExplicitImmediate()
+
+   /**
+    * Returns the effective usage-context metadata for this word.
+    * Defining and control words imply a default state restriction.
+    * @return effective state mode
+    */
+   String effectiveStateMode() {
+      if ((stateMode != null) && (stateMode.length() > 0)) return stateMode;
+      return SpecSet.impliedStateMode (defineMode, controlMode);
+   } // end of effectiveStateMode()
 
    /**
     * Attaches usage-context metadata to this spec.
@@ -231,10 +249,13 @@ public class Spec {
 
    /**
     * Tells whether this word executes during compilation.
-    * @return true for IMMEDIATE words
+    * Parser, defining, and control metadata imply this even without an
+    * explicit IMMEDIATE marker.
+    * @return true for words with immediate behavior
     */
    boolean isImmediate() {
-      return immediate;
+      return immediate ||
+         SpecSet.impliedImmediate (parseMode, defineMode, controlMode);
    } // end of isImmediate()
 
    /**
@@ -242,7 +263,7 @@ public class Spec {
     * @return true if allowed while interpreting
     */
    boolean allowedInInterpretState() {
-      return !STATE_COMPILE.equals (stateMode);
+      return !STATE_COMPILE.equals (effectiveStateMode());
    } // end of allowedInInterpretState()
 
    /**
@@ -250,7 +271,7 @@ public class Spec {
     * @return true if allowed while compiling
     */
    boolean allowedInCompileState() {
-      return !STATE_INTERPRET.equals (stateMode);
+      return !STATE_INTERPRET.equals (effectiveStateMode());
    } // end of allowedInCompileState()
 
    /**

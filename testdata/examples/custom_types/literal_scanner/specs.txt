@@ -2,6 +2,6 @@
 
 "(" ")" ( -- )
 ." "\"" ( -- )
-LITERAL INTEGER ( -- cell )
+literal integer ( -- cell )
 + ( cell cell -- cell )
 . ( X -- )
