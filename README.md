@@ -198,8 +198,8 @@ Program text supports linear colon definitions through the outer interpreter:
 ```
 
 `:` starts compilation and `;` finishes it. The bundled profiles also declare
-`CONSTANT` and `VARIABLE` as defining words, so they execute during
-compilation.
+`CONSTANT` and `VARIABLE` as defining words in the outer interpreter, so they
+can be used at top level to introduce new words before later program text.
 
 Word lookup is case-insensitive throughout the evaluator. Source text is left
 as written, but names are treated internally as if all letters were uppercase.

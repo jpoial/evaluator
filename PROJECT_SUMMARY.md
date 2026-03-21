@@ -2,7 +2,10 @@
 
 ## What This Repository Is
 
-This repository is a compact Java prototype for **symbolic stack-effect analysis of Forth programs**. Its purpose is not to execute Forth code, but to reason about how a sequence of Forth words transforms the stack:
+This repository is a compact symbolic-analysis project for **stack-effect
+analysis of Forth programs**. It now ships both a Java implementation and a
+native `gforth` implementation. Its purpose is not to execute Forth code, but
+to reason about how a sequence of Forth words transforms the stack:
 
 - what types must be present before execution,
 - what types are produced after execution,
@@ -18,15 +21,20 @@ The project sits at the intersection of:
 
 In practical terms, the repository contains:
 
-- a small Java package `evaluator/` that implements the symbolic core,
+- a small Java package `evaluator/` that implements the original symbolic core,
+- a single-file `gforth` port in `gforth-evaluator.fs`,
 - five PDF papers/slides that show the theory and its evolution,
-- and a minimal `README.md` showing how to compile and run the demo.
+- and markdown documentation describing the launchers, profiles, and file
+  formats.
 
 ## Materials Reviewed
 
 I reviewed:
 
 - `README.md`
+- `PROJECT_SUMMARY.md`
+- `testdata/README.md`
+- `gforth-evaluator.fs`
 - `EuroForth90_Algebraic.pdf`
 - `EuroForth91_Multiple.pdf`
 - `euro02.pdf`
@@ -48,7 +56,9 @@ The theory evolves across the papers like this:
 4. **2006**: frame the work explicitly as **must-analysis** for typeless stack languages, emphasizing `glb`, idempotents, and loop reasoning.
 5. **2008**: package the core ideas as a Java framework with classes that mirror the formal objects: types, symbols, effects, sets of effects, sequences of effects, and a small evaluator/demo.
 
-The Java code in this repo implements mainly the **linear-sequence core** of that theory. It does a solid job of:
+The Java core in this repo, and the matching native `gforth` port beside it,
+implement mainly the **linear-sequence core** of that theory. They do a solid
+job of:
 
 - representing typed stack effects,
 - composing them symbolically,
@@ -56,7 +66,7 @@ The Java code in this repo implements mainly the **linear-sequence core** of tha
 - preserving wildcard identities across stack manipulation,
 - and detecting mismatches.
 
-It does **not** yet implement the full vision described in the papers:
+They do **not** yet implement the full vision described in the papers:
 
 - no full multiple-stack-effects engine for branches or other alternatives,
 - no broad Forth front end beyond the current source-level parser,
@@ -229,7 +239,7 @@ The shipped demo now includes three type-system profiles:
 - `legacy` in `legacytypes.txt`
 - `forth2012` in `forth2012types.txt`
 
-The default `real` profile is more Forth-like:
+The `real` profile is the more Forth-like convenience profile:
 
 - `a-addr < c-addr < addr < X`
 - `char < n < X`
@@ -255,8 +265,9 @@ The stricter `forth2012` profile follows the standard lattice more closely:
 
 This is still intentionally small, but it demonstrates the main idea: when
 two symbolic items are matched, the analyzer tries to keep the **most exact
-compatible type**. The `real` profile is a more convenient Forth-like default,
-while `legacy` and `forth2012` keep stricter distinctions.
+compatible type**. The `real` profile is the more convenient Forth-like
+profile, while `legacy` and `forth2012` keep stricter distinctions. The
+bundled launchers default to `forth2012`.
 
 ## Wildcards and Positional Identity
 
@@ -684,7 +695,7 @@ Both of these constructors take filenames:
 - `new TypeSystem(typesFile)`
 - `new SpecSet(specsFile, typeSystem)`
 
-These now read real example files from disk, and `ProgText(String fileName, TypeSystem ts, SpecSet ss)` likewise loads a program text file. The repo also keeps three bundled demo environments side by side, with an optional helper script choosing those demo filenames outside Java.
+These now read real example files from disk, and `ProgText(String fileName, TypeSystem ts, SpecSet ss)` likewise loads a program text file. The repo also keeps three bundled demo environments side by side, with explicit Java and `gforth` launchers choosing those demo filenames outside the core entrypoints.
 
 That is a meaningful step forward, but the loaders are still deliberately simple:
 

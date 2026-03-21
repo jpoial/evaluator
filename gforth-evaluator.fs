@@ -2656,21 +2656,107 @@ defer ev-parse-definition-structure
   s" Missing control terminator in definition" ev-scopy 0 opener ev-word-span@ ev-error-msg ;
 is ev-parse-definition-structure
 
+\ Treats actual definition opener/terminator surface words as reserved names.
+: ev-definition-boundary-name? { name ss -- flag }
+  name ss ev-ss-word@ dup 0= if drop false exit then { spec }
+  spec ev-spec.define-mode + @ ev-define.colon = if true exit then
+  spec ev-spec-is-control? if
+    spec ev-spec.control-mode + @ s" END" ev-key= if true exit then
+  then
+  false ;
+
+\ Reads the next user-defined word name after a defining word.
+: ev-next-defined-name { sc defining-token ss -- name }
+  sc ev-next-prog-word dup 0= if
+    s" Missing word name after " ev-scopy defining-token ev-word-text@ ev-scat2
+    0 defining-token ev-word-span@ ev-error-msg
+  then { name }
+  name ev-word-text@ ev-slen@ 0= if
+    s" Empty word name after " ev-scopy defining-token ev-word-text@ ev-scat2
+    0 name ev-word-span@ ev-error-msg
+  then
+  name ev-word-text@ ss ev-definition-boundary-name? if
+    s" Illegal word name " ev-scopy name ev-word-text@ ev-scat2
+    0 name ev-word-span@ ev-error-msg
+  then
+  name ;
+
+\ Builds a one-input runtime effect for a concrete type name.
+: ev-type-input-spec { type -- spec }
+  4 ev-vec-new { left }
+  4 ev-vec-new { right }
+  type 0 false ev-sym-new left ev-vec-push
+  left right ev-spec-new dup ev-spec-max-pos drop ;
+
+\ Builds a zero-input runtime effect that produces one concrete type.
+: ev-type-output-spec { type -- spec }
+  4 ev-vec-new { left }
+  4 ev-vec-new { right }
+  type 0 false ev-sym-new right ev-vec-push
+  left right ev-spec-new dup ev-spec-max-pos drop ;
+
+\ Adds a hidden bookkeeping effect to the top-level program sequence.
+: ev-prog-add-hidden { label span spec prog -- }
+  ev-sempty prog ev-prog.words + @ ev-vec-push
+  span prog ev-prog.spans + @ ev-vec-push
+  spec span label ev-spec-with-origin prog ev-prog.specs + @ ev-vec-push ;
+
 \ Handles ':' at top level: read the new word name, compile its body, then register the result.
 : ev-parse-definition { token spec sc ts ss -- }
   spec ev-spec-left-count 0<> spec ev-spec-right-count 0<> or if
     s" Colon definition word must have stack effect ( -- )" ev-scopy 0 token ev-word-span@ ev-error-msg
   then
-  sc ev-next-prog-word dup 0= if
-    s" Missing word name after :" ev-scopy 0 token ev-word-span@ ev-error-msg
-  then { name }
-  name ev-word-text@ s" END" ev-key= if
-    s" Illegal word name" ev-scopy 0 name ev-word-span@ ev-error-msg
-  then
+  sc token ss ev-next-defined-name { name }
   s" END" ev-scopy { end-role }
   token ev-word-text@ drop
   name ev-word-text@ sc ts ss 0 end-role ev-parse-definition-seq
   name ev-word-text@ swap ss ev-ss-set-word ;
+
+\ Handles top-level CONSTANT-like words by consuming one runtime value and defining a zero-argument word.
+: ev-parse-top-level-constant { token spec sc ts ss prog -- }
+  sc token ss ev-next-defined-name { name }
+  token ev-word-text@ ev-sspace ev-scat2 name ev-word-text@ ev-scat2 { opname }
+  token ev-word-span@ name ev-word-span@ ev-span-cover { defspan }
+  spec ev-spec-left-count 1 <> spec ev-spec-right-count 0<> or if
+    token ev-word-text@ ev-sspace ev-scat2
+    s" must have defining shape ( x -- )" ev-scopy ev-scat2
+    0 defspan ev-error-msg
+  then
+  prog ev-prog.specs + @ s" top-level program" ev-scopy ts ev-seq-evaluate { prefix }
+  prefix ev-spec.right + @ { right }
+  right ev-vec-count@ 0= if
+    opname ev-sspace ev-scat2
+    s" requires one value on the stack" ev-scopy ev-scat2
+    0 defspan ev-error-msg
+  then
+  right ev-vec-last@ { top }
+  0 spec ev-spec.left + @ ev-vec@ { expected }
+  top ev-sym.type + @ expected ev-sym.type + @ ts ev-ts-relation 0= if
+    opname ev-sspace ev-scat2
+    s" expects a value comparable with " ev-scopy ev-scat2
+    expected ev-sym.type + @ ev-scat2
+    s" but the current stack provides " ev-scopy ev-scat2
+    top ev-sym.type + @ ev-scat2
+    0 defspan ev-error-msg
+  then
+  top ev-sym.type + @ ev-type-output-spec { constspec }
+  constspec name ev-word-span@ name ev-word-text@ ev-spec-with-origin drop
+  name ev-word-text@ constspec ss ev-ss-set-word
+  top ev-sym.type + @ ev-type-input-spec
+  opname defspan rot prog ev-prog-add-hidden ;
+
+\ Handles top-level VARIABLE-like words by defining a zero-input runtime word.
+: ev-parse-top-level-variable { token spec sc ts ss -- }
+  sc token ss ev-next-defined-name { name }
+  token ev-word-span@ name ev-word-span@ ev-span-cover { defspan }
+  spec ev-spec-left-count 0<> spec ev-spec-right-count 1 <> or if
+    token ev-word-text@ ev-sspace ev-scat2
+    s" must have defining shape ( -- y )" ev-scopy ev-scat2
+    0 defspan ev-error-msg
+  then
+  spec ev-runtime-clone { varspec }
+  varspec name ev-word-span@ name ev-word-text@ ev-spec-with-origin drop
+  name ev-word-text@ varspec ss ev-ss-set-word ;
 
 : ev-prog-current-effect { prog ts -- spec }
   prog ev-prog.specs + @ s" top-level program" ev-scopy ts ev-seq-evaluate ;
@@ -2698,7 +2784,7 @@ is ev-parse-definition-structure
   ." < " final ev-spec.right + @ ev-sym-vec>sptr ev-s.
   cr ;
 
-\ Outer interpreter for program text: parse definitions immediately and collect top-level runtime effects.
+\ Outer interpreter for program text: execute top-level defining words immediately and collect runtime effects.
 : ev-parse-program { name text ts ss -- prog }
   name text ev-sc-new { sc }
   sc ev-sc.lines + @ ev-current-source-lines !
@@ -2714,11 +2800,16 @@ is ev-parse-definition-structure
       then
       spec ev-spec-is-immediate? if
         spec ev-spec-defines-word? if
-          spec ev-spec.define-mode + @ ev-define.colon = if
+          spec ev-spec.define-mode + @ { mode }
+          mode ev-define.colon = if
             tok spec sc ts ss ev-parse-definition
+          else mode ev-define.constant = if
+            tok spec sc ts ss prog ev-parse-top-level-constant
+          else mode ev-define.variable = if
+            tok spec sc ts ss ev-parse-top-level-variable
           else
-            s" Top-level defining word not implemented in native gforth yet" ev-scopy 0 tok ev-word-span@ ev-error-msg
-          then
+            s" Unsupported top-level defining word" ev-scopy 0 tok ev-word-span@ ev-error-msg
+          then then then
         else spec ev-spec-is-control? if
           s" Unexpected control word in top-level program" ev-scopy 0 tok ev-word-span@ ev-error-msg
         else
