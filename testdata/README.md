@@ -4,8 +4,10 @@
 successfully.
 
 `positive/forth2012/` contains plain Forth source examples intended to run
-with the bundled launcher defaults, for example `./run-evaluator.sh --prog ...`
-on Linux or `run-evaluator.bat --prog ...` on Windows.
+with the bundled launcher defaults, for example
+`./run-evaluator-gforth.sh --prog ...` or `./run-evaluator-java.sh --prog ...`
+on Linux, or `run-evaluator-gforth.bat --prog ...` /
+`run-evaluator-java.bat --prog ...` on Windows.
 
 `positive/custom_types/` contains small self-contained example profiles where
 the program, specs, and type system are bundled together to demonstrate

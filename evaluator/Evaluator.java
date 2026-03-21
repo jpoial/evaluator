@@ -106,8 +106,9 @@ public class Evaluator {
          if ("--system".equals (arg)) {
             throw new RuntimeException ("The Java entrypoint no longer " +
                "accepts --system. Use --types/--specs/--prog directly, " +
-               "or use run-evaluator.sh / run-evaluator.bat for the " +
-               "bundled demo profiles.");
+               "or use the explicit run-evaluator-java.* / " +
+               "run-evaluator-gforth.* launchers for the bundled demo " +
+               "profiles.");
          } else if ("--help".equals (arg) || "-h".equals (arg)) {
             throw new RuntimeException (usageText());
          } else if ("--types".equals (arg)) {

@@ -428,11 +428,13 @@ printing and consuming an arbitrary symbolic value.
 
 The repository now ships three file-backed demo profiles: `real`,
 `legacy`, and `forth2012`. The primary evaluator interface is explicit
-filename parameters, so the Java entrypoint itself no longer hardcodes any
-of those files. `run-evaluator.sh` on Linux and `run-evaluator.bat` on
-Windows are only convenience wrappers that supply the bundled demo
-filenames, defaulting to `forth2012` and accepting `real` or `legacy` as
-the first argument.
+filename parameters, so the evaluator entrypoints themselves no longer
+hardcode any of those files. The convenience wrappers are now split by
+runtime and platform: `run-evaluator-gforth.sh`,
+`run-evaluator-java.sh`, `run-evaluator-gforth.bat`, and
+`run-evaluator-java.bat`. They all supply the bundled demo filenames,
+defaulting to `forth2012` and accepting `real` or `legacy` as the first
+argument.
 
 The bundled vocabularies are no longer just fixed Java tables. They are
 loaded from spec files, and those files can now describe parser words,

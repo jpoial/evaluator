@@ -3,6 +3,32 @@ setlocal
 
 set "script_dir=%~dp0"
 set "profile=forth2012"
+set "gforth_bin="
+
+where /Q gforth-fast.exe
+if not errorlevel 1 set "gforth_bin=gforth-fast.exe"
+
+if not defined gforth_bin (
+   where /Q gforth.exe
+   if not errorlevel 1 set "gforth_bin=gforth.exe"
+)
+
+if not defined gforth_bin if exist "%script_dir%..\gforth\gforth-fast.exe" set "gforth_bin=%script_dir%..\gforth\gforth-fast.exe"
+if not defined gforth_bin if exist "%script_dir%..\gforth\gforth.exe" set "gforth_bin=%script_dir%..\gforth\gforth.exe"
+
+if not defined gforth_bin (
+   echo Error: gforth executable not found on PATH or in %script_dir%..\gforth 1>&2
+   exit /b 1
+)
+
+if exist "%script_dir%..\gforth\lib\gforth" (
+   for /d /r "%script_dir%..\gforth\lib\gforth" %%D in (libcc-named) do (
+      if not defined libccnameddir set "libccnameddir=%%~fD\"
+   )
+)
+
+if not defined XDG_CACHE_HOME set "XDG_CACHE_HOME=%TEMP%\gforth-cache"
+if not exist "%XDG_CACHE_HOME%" mkdir "%XDG_CACHE_HOME%" >nul 2>nul
 
 if /I "%~1"=="real" set "profile=real" & shift
 if /I "%~1"=="legacy" set "profile=legacy" & shift
@@ -32,7 +58,7 @@ shift
 goto collect_args
 
 :launch
-java -cp "%script_dir%." evaluator.Evaluator ^
+"%gforth_bin%" "%script_dir%gforth-evaluator.fs" ^
    --types "%types_file%" ^
    --specs "%specs_file%" ^
    --prog "%prog_file%" ^

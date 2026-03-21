@@ -1303,6 +1303,7 @@ variable ev-eval-result
   spec ev-spec.right + @ ev-sym-vec>sptr ev-scat2
   s" ) " ev-scopy ev-scat2 ;
 
+\ Renumbers wildcard indices into a compact, readable form after evaluation.
 : ev-spec-list-normalize { list result -- norm }
   result ev-spec-max-pos { max }
   list ev-vec-count@ 0 ?do
@@ -1360,6 +1361,7 @@ variable ev-eval-result
   m1 ev-sym.explicit + @ m2 ev-sym.explicit + @ or
   ev-sym-new ;
 
+\ Composes two stack effects, unifying the touching boundary one symbol at a time.
 : ev-spec-multiply { list s1 s2 ts -- spec|0 }
   s1 0= s2 0= or if 0 exit then
   s1 ev-spec-copy-left { rleft }
@@ -1957,6 +1959,7 @@ variable ev-eval-result
   open drop
   ss drop ;
 
+\ Seeds the legacy IF/BEGIN/DO families so old spec files still work without syntax blocks.
 : ev-ss-install-builtins { ss -- }
   1 ev-vec-new { b1 } 1 ev-vec-new { o1 } 2 ev-vec-new { s1 } 2 ev-vec-new { p1 }
   s" ELSE" ev-scopy b1 ev-vec-push
@@ -2089,6 +2092,7 @@ variable ev-eval-result
     then
   then ;
 
+\ Parses one ordinary word specification line, including parser/define/control metadata.
 : ev-parse-word-spec-line { line ts ss -- }
   0 line ev-vec@ { word }
   word ev-word-text@ ev-s@ { waddr wu }
@@ -2219,6 +2223,7 @@ variable ev-eval-result
   then
   kind ev-word-text@ spec kind ev-word-span@ ss ev-ss-add-literal ;
 
+\ Collects one indented syntax/effect block and turns it into a declarative structure entry.
 : ev-parse-syntax-block { sc head line ss -- pending|0 }
   head ev-word-span@ ev-span.scol + @ { basecol }
   8 ev-vec-new { syntaxlines }
@@ -2267,6 +2272,7 @@ variable ev-eval-result
   st ss ev-ss-add-structure
   pending ;
 
+\ Loads the spec file into the native dictionaries and declarative structure table.
 : ev-ss-load { file ts -- ss }
   ev-ss-new { ss }
   file ev-sc-from-file { sc }
@@ -2405,6 +2411,7 @@ variable ev-eval-result
   then
   s" flag --" ts span ev-parse-spec-body ;
 
+\ Resolves a program token to the runtime effect it contributes at the current nesting depth.
 : ev-resolve-runtime-spec { token do-depth ts ss -- spec }
   token ev-word-text@ ss ev-ss-word@ { spec }
   spec if
@@ -2449,6 +2456,7 @@ variable ev-eval-result
 : ev-seq-add { word span spec seq -- }
   spec span word ev-spec-with-origin seq ev-vec-push ;
 
+\ Evaluates a linear sequence of runtime effects and raises a contextual clash if composition fails.
 : ev-seq-evaluate { seq context ts -- spec }
   seq ts ev-spec-list-evaluate dup if exit then
   drop
@@ -2487,6 +2495,7 @@ variable ev-eval-result
   loop
   out s" ..." ev-scopy ev-scat2 st ev-struct.close + @ ev-scat2 ;
 
+\ Evaluates the control-effect algebra for one parsed structure instance.
 : ev-eval-structure-expr { expr st segspecs ts ss span -- spec }
   expr ev-expr.kind + @ case
     ev-expr.empty of
@@ -2532,6 +2541,7 @@ variable ev-eval-result
 
 defer ev-parse-definition-structure
 
+\ Parses a colon-definition body until its closing role, recursively handling nested structures.
 : ev-parse-definition-seq { defname sc ts ss do-depth close-role -- spec }
   16 ev-vec-new { seq }
   begin
@@ -2646,6 +2656,7 @@ defer ev-parse-definition-structure
   s" Missing control terminator in definition" ev-scopy 0 opener ev-word-span@ ev-error-msg ;
 is ev-parse-definition-structure
 
+\ Handles ':' at top level: read the new word name, compile its body, then register the result.
 : ev-parse-definition { token spec sc ts ss -- }
   spec ev-spec-left-count 0<> spec ev-spec-right-count 0<> or if
     s" Colon definition word must have stack effect ( -- )" ev-scopy 0 token ev-word-span@ ev-error-msg
@@ -2687,6 +2698,7 @@ is ev-parse-definition-structure
   ." < " final ev-spec.right + @ ev-sym-vec>sptr ev-s.
   cr ;
 
+\ Outer interpreter for program text: parse definitions immediately and collect top-level runtime effects.
 : ev-parse-program { name text ts ss -- prog }
   name text ev-sc-new { sc }
   sc ev-sc.lines + @ ev-current-source-lines !
@@ -2752,6 +2764,7 @@ is ev-parse-definition-structure
   loop
   out ;
 
+\ Parses the gforth command line into explicit types/specs/program inputs.
 : ev-parse-args ( -- cfg )
   ev-cfg-new { cfg }
   1 { i }
@@ -2790,6 +2803,7 @@ is ev-parse-definition-structure
   then
   cfg ;
 
+\ Native CLI entrypoint: load the files, parse the program, evaluate it, and print the annotation.
 : ev-run-native ( -- )
   ev-parse-args { cfg }
   ." Types file: " cfg ev-cfg.types + @ ev-s. cr
