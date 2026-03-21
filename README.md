@@ -3,30 +3,33 @@ Forth code symbolic executor
 <br>
 Compile on the level of evaluator package parent directory: <code>javac evaluator/*.java</code>
 <br>
-Run the file-based example on the same level: <code>java evaluator.Evaluator</code>
-<br>
-Run with your own sequence of words: <code>java evaluator.Evaluator </code> &lt;Sequence of Forth words&gt;
-<br>
-Run the preserved strict profile: <code>java evaluator.Evaluator --system legacy</code>
-<br>
-Run the more standard-like strict profile:
-<code>java evaluator.Evaluator --system forth2012</code>
-<br>
-Override the default input files when needed:
+Run the evaluator with explicit files:
 <code>java evaluator.Evaluator --types mytypes.txt --specs myspecs.txt --prog myprog.txt</code>
 <br>
-If these file parameters are omitted, the evaluator behaves exactly as before
-and uses the files of the selected profile. If both a <code>--prog</code> file
-and command-line program words are given, the command-line program words take
-precedence.
+Or pass the program itself on the command line:
+<code>java evaluator.Evaluator --types mytypes.txt --specs myspecs.txt</code>
+&lt;Sequence of Forth words&gt;
 <br>
-The default <code>real</code> profile uses:
+The evaluator binary itself requires <code>--types</code> and
+<code>--specs</code>; no profile filenames are hardcoded inside Java.
+If both a <code>--prog</code> file and command-line program words are given,
+the command-line program words take precedence.
+<br>
+The bundled launcher is optional convenience for the shipped demo profiles:
+Linux: <code>./run-evaluator.sh</code>,
+<code>./run-evaluator.sh legacy</code>,
+<code>./run-evaluator.sh forth2012</code>
+Windows: <code>run-evaluator.bat</code>,
+<code>run-evaluator.bat legacy</code>,
+<code>run-evaluator.bat forth2012</code>
+<br>
+It uses these files for the default <code>real</code> profile:
 <code>ex1types.txt</code>, <code>ex1specs.txt</code>, <code>ex1prog.txt</code>
 <br>
-The preserved old profile uses:
+For the preserved old profile it uses:
 <code>legacytypes.txt</code>, <code>legacyspecs.txt</code>, <code>legacyprog.txt</code>
 <br>
-The standard-like strict profile uses:
+For the standard-like strict profile it uses:
 <code>forth2012types.txt</code>, <code>forth2012specs.txt</code>, <code>forth2012prog.txt</code>
 <br>
 The bundled demo specs now cover a small Forth-like core: stack shuffles;

@@ -26,6 +26,8 @@ public class SpecSet extends Hashtable<String, Spec> {
 
    Hashtable<String, Spec> literalSpecs;
    LinkedList<ControlStructure> controlStructures;
+   String loadSourceName = null;
+   LinkedList<String> loadSourceLines = new LinkedList<String>();
 
    SpecSet() {
       super();
@@ -184,6 +186,8 @@ public class SpecSet extends Hashtable<String, Spec> {
    void load (String fileName, TypeSystem ts) {
       try {
          TextScanner scanner = TextScanner.fromFile (fileName);
+         loadSourceName = fileName;
+         loadSourceLines = scanner.sourceLines();
          LinkedList<SourceWord> pendingLine = null;
          while (true) {
             LinkedList<SourceWord> line = pendingLine;
@@ -196,9 +200,15 @@ public class SpecSet extends Hashtable<String, Spec> {
          installBuiltinControlStructures();
          validateControlStructures();
          validateDeclaredControlWords();
+      } catch (ProgramException e) {
+         throw e;
       } catch (IOException e) {
-         throw new RuntimeException ("Unable to read specification set from "
-            + fileName, e);
+         throw new ProgramException (new ProgramDiagnostic (
+            "specs.read-failed", ProgramDiagnostic.SEVERITY_ERROR,
+            "Unable to read specification set from " + fileName, "",
+            fileName, 0, 0, 0, 0, null, null), e);
+      } catch (RuntimeException e) {
+         throw wrapLoadFailure (e);
       }
    } // end of load()
 
@@ -257,7 +267,9 @@ public class SpecSet extends Hashtable<String, Spec> {
             kind.span.startText());
       LineSpecBody body = consumeLineSpecBody (line, kind.span,
          "Malformed literal specification in ");
-      putLiteral (kind.text, parseSpec (body.text.trim(), ts, body.span));
+      Spec literalSpec = parseSpec (body.text.trim(), ts, body.span);
+      validateLiteralSpec (kind.text, literalSpec, body.span);
+      putLiteral (kind.text, literalSpec);
    } // end of parseLiteralLine()
 
    /**
@@ -385,9 +397,11 @@ public class SpecSet extends Hashtable<String, Spec> {
       Spec bodySpec = parseSpec (body.text.trim(), ts, body.span);
       if (defineSeen && defineMode.length() == 0)
          defineMode = inferDefineMode (word.text, bodySpec, body.span);
+      validateDefineShape (word.text, defineMode, bodySpec, body.span);
       validateParserMetadata (word.text, parseMode, parseString,
          defineMode, controlMode, immediate, stateMode, body.span);
       put (word.text, bodySpec
+         .withOrigin (word.span, null)
          .withParseMode (parseMode)
          .withParseString (parseString)
          .withDefineMode (defineMode)
@@ -1803,7 +1817,9 @@ public class SpecSet extends Hashtable<String, Spec> {
       if ((previous != null) && !previous.equals (kind))
          throw new RuntimeException ("Control role " + role +
             " cannot be both " + previous + " and " + kind +
-            " in structure " + structure.name);
+            " in structure " + structure.name + " at " +
+            sourceLocationText (structure == null ? null :
+               structure.sourceSpan));
       roleKinds.put (role, kind);
    } // end of validateRoleKind()
 
@@ -1821,9 +1837,115 @@ public class SpecSet extends Hashtable<String, Spec> {
             continue;
          if (!isDeclaredStructureRole (spec.controlMode))
             throw new RuntimeException ("Unknown control role " +
-               spec.controlMode + " for " + word);
+               spec.controlMode + " for " + word + " at " +
+               sourceLocationText (spec.sourceSpan));
       }
    } // end of validateDeclaredControlWords()
+
+   /**
+    * Converts one raw loader failure into a structured diagnostic.
+    * Most low-level parsing code still throws RuntimeException with an
+    * embedded source location, which is decoded here for user-facing output.
+    * @param error raw failure
+    * @return structured program exception
+    */
+   ProgramException wrapLoadFailure (RuntimeException error) {
+      if (error instanceof ProgramException) return (ProgramException)error;
+      String message = (error == null || error.getMessage() == null) ?
+         "Unknown specification error" : error.getMessage();
+      SourceSpan span = extractSpanFromMessage (message, loadSourceName);
+      String cleaned = stripLocationFromMessage (message, span);
+      return new ProgramException (new ProgramDiagnostic (
+         "specs.load-failed", ProgramDiagnostic.SEVERITY_ERROR, cleaned, "",
+         span, sourceLineText (span), markerLineText (span)), error);
+   } // end of wrapLoadFailure()
+
+   /**
+    * Extracts one source span from a loader error message, when present.
+    * @param message raw message text
+    * @param sourceName current specification file name
+    * @return parsed start span or null
+    */
+   static SourceSpan extractSpanFromMessage (String message, String sourceName) {
+      if ((message == null) || (sourceName == null) || (sourceName.length() == 0))
+         return null;
+      int start = message.lastIndexOf (sourceName + ":");
+      if (start < 0) return null;
+      int pos = start + sourceName.length() + 1;
+      int lineEnd = pos;
+      while ((lineEnd < message.length()) &&
+             Character.isDigit (message.charAt (lineEnd))) lineEnd++;
+      if ((lineEnd == pos) || (lineEnd >= message.length()) ||
+          (message.charAt (lineEnd) != ':'))
+         return null;
+      int colStart = lineEnd + 1;
+      int colEnd = colStart;
+      while ((colEnd < message.length()) &&
+             Character.isDigit (message.charAt (colEnd))) colEnd++;
+      if (colEnd == colStart) return null;
+      try {
+         int line = Integer.parseInt (message.substring (pos, lineEnd));
+         int col = Integer.parseInt (message.substring (colStart, colEnd));
+         return new SourceSpan (sourceName, line, col, line, col);
+      } catch (NumberFormatException e) {
+         return null;
+      }
+   } // end of extractSpanFromMessage()
+
+   /**
+    * Removes a trailing source-location suffix from one raw loader message.
+    * @param message raw message
+    * @param span parsed source span
+    * @return cleaned summary message
+    */
+   static String stripLocationFromMessage (String message, SourceSpan span) {
+      if ((message == null) || (span == null) || !span.hasLocation())
+         return message == null ? "Unknown specification error" : message;
+      String location = span.startText();
+      String inSuffix = " in " + location;
+      if (message.endsWith (inSuffix))
+         return message.substring (0, message.length() - inSuffix.length());
+      String atSuffix = " at " + location;
+      if (message.endsWith (atSuffix))
+         return message.substring (0, message.length() - atSuffix.length());
+      return message;
+   } // end of stripLocationFromMessage()
+
+   /**
+    * Returns the raw source line for one specification span.
+    * @param span source span
+    * @return source line or null
+    */
+   String sourceLineText (SourceSpan span) {
+      if ((span == null) || !span.hasLocation()) return null;
+      if ((span.startLine < 1) || (span.startLine > loadSourceLines.size()))
+         return null;
+      return (String)loadSourceLines.get (span.startLine - 1);
+   } // end of sourceLineText()
+
+   /**
+    * Builds one caret marker line for one specification span.
+    * @param span source span
+    * @return marker line or null
+    */
+   String markerLineText (SourceSpan span) {
+      String line = sourceLineText (span);
+      if (line == null) return null;
+      StringBuffer result = new StringBuffer ("");
+      int limit = Math.max (0, span.startColumn - 1);
+      for (int i = 0; (i < limit) & (i < line.length()); i++) {
+         if (line.charAt (i) == '\t') {
+            result.append ('\t');
+         } else {
+            result.append (' ');
+         }
+      }
+      int width = 1;
+      if (span.startLine == span.endLine)
+         width = Math.max (1, span.endColumn - span.startColumn + 1);
+      for (int i = 0; i < width; i++) result.append ('^');
+      return result.toString();
+   } // end of markerLineText()
 
    /**
     * Tells whether the role appears in any declared structure.
@@ -1879,12 +2001,63 @@ public class SpecSet extends Hashtable<String, Spec> {
             " in " + sourceLocationText (span));
       if ((bodySpec.leftSide.size() == 1) && (bodySpec.rightSide.size() == 0))
          return Spec.DEFINE_CONSTANT;
-      if ((bodySpec.leftSide.size() == 0) && (bodySpec.rightSide.size() > 0))
+      if ((bodySpec.leftSide.size() == 0) && (bodySpec.rightSide.size() == 1))
          return Spec.DEFINE_VARIABLE;
       throw new RuntimeException ("DEFINE without mode needs either " +
          "constant-like ( x -- ) or variable-like ( -- y ) stack effect for " +
          word + " in " + sourceLocationText (span));
    } // end of inferDefineMode()
+
+   /**
+    * Validates the shape of one literal declaration.
+    * Literal classes are source tokens, so they must not consume stack input.
+    * @param kind literal kind name
+    * @param spec parsed literal stack effect
+    * @param span source span for diagnostics
+    */
+   static void validateLiteralSpec (String kind, Spec spec, SourceSpan span) {
+      if (spec == null)
+         throw new RuntimeException ("Missing literal specification for " +
+            kind + " in " + sourceLocationText (span));
+      if (spec.leftSide.size() != 0)
+         throw new RuntimeException ("LITERAL " + kind +
+            " must not consume stack input in " + sourceLocationText (span));
+   } // end of validateLiteralSpec()
+
+   /**
+    * Validates the stack-effect shape of one explicit defining word.
+    * @param word word being defined
+    * @param defineMode defining mode
+    * @param spec parsed stack effect
+    * @param span source span for diagnostics
+    */
+   static void validateDefineShape (String word, String defineMode, Spec spec,
+      SourceSpan span) {
+      if ((defineMode == null) || (defineMode.length() == 0)) return;
+      if (spec == null)
+         throw new RuntimeException ("Missing stack effect for " + word +
+            " in " + sourceLocationText (span));
+      if (Spec.DEFINE_COLON.equals (defineMode)) {
+         if ((spec.leftSide.size() != 0) || (spec.rightSide.size() != 0))
+            throw new RuntimeException ("DEFINE COLON for " + word +
+               " must have stack effect ( -- ) in " +
+               sourceLocationText (span));
+         return;
+      }
+      if (Spec.DEFINE_CONSTANT.equals (defineMode)) {
+         if ((spec.leftSide.size() != 1) || (spec.rightSide.size() != 0))
+            throw new RuntimeException ("DEFINE CONSTANT for " + word +
+               " must have stack effect ( x -- ) in " +
+               sourceLocationText (span));
+         return;
+      }
+      if (Spec.DEFINE_VARIABLE.equals (defineMode)) {
+         if ((spec.leftSide.size() != 0) || (spec.rightSide.size() != 1))
+            throw new RuntimeException ("DEFINE VARIABLE for " + word +
+               " must have stack effect ( -- y ) in " +
+               sourceLocationText (span));
+      }
+   } // end of validateDefineShape()
 
    /**
     * Canonicalizes one control mode keyword.

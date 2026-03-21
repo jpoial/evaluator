@@ -1,4 +1,4 @@
-# Standard-like strict demo program loaded by Evaluator with --system forth2012.
+# Standard-like strict demo program loaded by the bundled launcher in forth2012 mode.
 # Flags are not numbers, addresses are unsigned, and strings use c-addr u.
 
 : PEEK2

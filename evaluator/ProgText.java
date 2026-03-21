@@ -267,6 +267,8 @@ public class ProgText extends LinkedList<String> {
                " in " + context,
                "define LITERAL DOUBLE ( -- <type> ) in the current specs file",
                span);
+         validateLiteralRuntimeSpec (SpecSet.DOUBLE_LITERAL_KIND, literalSpec,
+            word, span, context);
          return literalSpec;
       }
       if (SpecSet.isDecimalIntegerLiteral (word)) {
@@ -277,6 +279,8 @@ public class ProgText extends LinkedList<String> {
                " in " + context,
                "define LITERAL INTEGER ( -- <type> ) in the current specs file",
                span);
+         validateLiteralRuntimeSpec (SpecSet.INTEGER_LITERAL_KIND, literalSpec,
+            word, span, context);
          return literalSpec;
       }
       throw missingWord (word, span, context);
@@ -505,6 +509,10 @@ public class ProgText extends LinkedList<String> {
     */
    CompileContext startDefinition (SourceWord token, Spec spec,
       TextScanner scanner, SpecSet ss) {
+      if ((spec.leftSide.size() != 0) || (spec.rightSide.size() != 0))
+         throw programError ("define.colon-shape",
+            token.text + " must have defining shape ( -- )", "",
+            token.span);
       SourceWord nameToken = nextDefinedName (scanner, token, token.text, ss);
       String legacyTerminator = null;
       if (Spec.PARSE_DEFINITION.equals (spec.parseMode))
@@ -934,6 +942,13 @@ public class ProgText extends LinkedList<String> {
       SourceWord variableToken, Spec definerSpec, TypeSystem ts, SpecSet ss) {
       SourceWord nameToken = nextDefinedName (tokens, variableToken,
          variableToken.text, ss);
+      SourceSpan definerSpan = SourceSpan.covering (variableToken.span,
+         nameToken.span);
+      if ((definerSpec.leftSide.size() != 0) |
+          (definerSpec.rightSide.size() != 1))
+         throw programError ("define.variable-shape",
+            variableToken.text + " must have defining shape ( -- y )", "",
+            definerSpan);
       ss.put (nameToken.text, runtimeSpecClone (definerSpec, ts)
          .withOrigin (nameToken.span, nameToken.text));
    } // end of defineVariable()
@@ -950,6 +965,13 @@ public class ProgText extends LinkedList<String> {
       Spec definerSpec, TypeSystem ts, SpecSet ss) {
       SourceWord nameToken = nextDefinedName (scanner, variableToken,
          variableToken.text, ss);
+      SourceSpan definerSpan = SourceSpan.covering (variableToken.span,
+         nameToken.span);
+      if ((definerSpec.leftSide.size() != 0) |
+          (definerSpec.rightSide.size() != 1))
+         throw programError ("define.variable-shape",
+            variableToken.text + " must have defining shape ( -- y )", "",
+            definerSpan);
       ss.put (nameToken.text, runtimeSpecClone (definerSpec, ts)
          .withOrigin (nameToken.span, nameToken.text));
    } // end of defineVariable()
@@ -990,6 +1012,24 @@ public class ProgText extends LinkedList<String> {
       result.maxPos();
       return result;
    } // end of runtimeSpecClone()
+
+   /**
+    * Guards literal specifications when they come from programmatic setup.
+    * Loader-side validation already rejects such shapes for file-based specs.
+    * @param kind literal kind name
+    * @param spec literal specification
+    * @param token literal token as written in the program
+    * @param span source span of the token
+    * @param context surrounding context for diagnostics
+    */
+   void validateLiteralRuntimeSpec (String kind, Spec spec, String token,
+      SourceSpan span, String context) {
+      if ((spec != null) && (spec.leftSide.size() != 0))
+         throw programError ("lookup.literal-spec-invalid",
+            "Literal specification for " + kind + " cannot consume stack " +
+            "input, but " + token + " is used in " + context,
+            "", span);
+   } // end of validateLiteralRuntimeSpec()
 
    /**
     * Returns the terminator word of a definition-starting parser word.

@@ -426,11 +426,13 @@ The bundled example vocabulary now includes a more Forth-like core:
 Dot is modeled with stack effect `( X -- )`, so the evaluator can treat it as
 printing and consuming an arbitrary symbolic value.
 
-The evaluator now ships three file-backed demo profiles: `real`,
-`legacy`, and `forth2012`. The default run uses `real`, while
-`java evaluator.Evaluator --system legacy` and
-`java evaluator.Evaluator --system forth2012` switch to the stricter
-profiles.
+The repository now ships three file-backed demo profiles: `real`,
+`legacy`, and `forth2012`. The primary evaluator interface is explicit
+filename parameters, so the Java entrypoint itself no longer hardcodes any
+of those files. `run-evaluator.sh` on Linux and `run-evaluator.bat` on
+Windows are only convenience wrappers that supply the bundled demo
+filenames, defaulting to `real` and accepting `legacy` or `forth2012` as
+the first argument.
 
 The bundled vocabularies are no longer just fixed Java tables. They are
 loaded from spec files, and those files can now describe parser words,
@@ -490,14 +492,14 @@ a polished toolchain integration point.
 
 ## End-to-End Evaluation Flow
 
-For a command such as:
+For a direct invocation such as:
 
-`java evaluator.Evaluator SWAP DUP @`
+`java evaluator.Evaluator --types forth2012types.txt --specs forth2012specs.txt SWAP DUP @`
 
 the flow is:
 
-1. `TypeSystem` is loaded from the selected profile's type file.
-2. `SpecSet` is loaded from the selected profile's spec file.
+1. `TypeSystem` is loaded from the indicated type file.
+2. `SpecSet` is loaded from the indicated spec file.
 3. `ProgText` stores the token list `["SWAP", "DUP", "@"]`.
 4. `SpecList` looks up each word in `SpecSet` and clones its `Spec`.
 5. `evaluate(...)` freshens wildcard indices to make all local placeholders unique.
@@ -677,10 +679,10 @@ This repository is very informative, but it is visibly unfinished.
 
 Both of these constructors take filenames:
 
-- `new TypeSystem("ex1types.txt")`
-- `new SpecSet("ex1specs.txt", ex1types)`
+- `new TypeSystem(typesFile)`
+- `new SpecSet(specsFile, typeSystem)`
 
-These now read real example files from disk, and `ProgText(String fileName, TypeSystem ts, SpecSet ss)` likewise loads a program text file. The repo also now keeps three bundled demo environments side by side: the default `real` profile, the preserved `legacy` profile, and the stricter `forth2012` profile.
+These now read real example files from disk, and `ProgText(String fileName, TypeSystem ts, SpecSet ss)` likewise loads a program text file. The repo also keeps three bundled demo environments side by side, with an optional helper script choosing those demo filenames outside Java.
 
 That is a meaningful step forward, but the loaders are still deliberately simple:
 

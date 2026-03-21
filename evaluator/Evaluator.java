@@ -13,32 +13,11 @@ import java.util.Iterator;
  */
 public class Evaluator {
 
-   static class DemoProfile {
-      String name;
-      String typesFile;
-      String specsFile;
-      String progFile;
-
-      DemoProfile (String n, String tf, String sf, String pf) {
-         name = n;
-         typesFile = tf;
-         specsFile = sf;
-         progFile = pf;
-      } // end of constructor
-   } // end of DemoProfile
-
    static class RunConfig {
-      DemoProfile profile;
       String typesFile;
       String specsFile;
       String progFile;
       String[] programParams;
-
-      boolean customFiles() {
-         return ! profile.typesFile.equals (typesFile) ||
-            ! profile.specsFile.equals (specsFile) ||
-            ! profile.progFile.equals (progFile);
-      } // end of customFiles()
    } // end of RunConfig
 
    /**
@@ -52,19 +31,18 @@ public class Evaluator {
          System.err.println ("Error: " +
             ProgramDiagnosticRenderer.format (e.diagnostic()));
          System.exit (1);
+      } catch (RuntimeException e) {
+         System.err.println ("Error: " + e.getMessage());
+         System.exit (1);
       }
    } // end of main()
 
    /**
     * Executes one evaluator run.
     * @param params command-line parameters
-    */
+   */
    static boolean run (String[] params) {
       RunConfig cfg = parseArgs (params);
-      String profileInfo = cfg.profile.name;
-      if (cfg.customFiles())
-         profileInfo = profileInfo + " (custom files)";
-      System.out.println ("Profile: " + profileInfo);
       System.out.println ("Types file: " + cfg.typesFile);
       System.out.println ("Specs file: " + cfg.specsFile);
       if (cfg.programParams.length > 0) {
@@ -72,30 +50,30 @@ public class Evaluator {
       } else {
          System.out.println ("Program file: " + cfg.progFile);
       }
-      TypeSystem ex1types = new TypeSystem (cfg.typesFile);
-      // System.out.println ("TypeSystem: " + ex1types.toString());
-      SpecSet ex1specs = new SpecSet (cfg.specsFile, ex1types);
-      ProgText ex1prog1;
+      TypeSystem typeSystem = new TypeSystem (cfg.typesFile);
+      // System.out.println ("TypeSystem: " + typeSystem.toString());
+      SpecSet specSet = new SpecSet (cfg.specsFile, typeSystem);
+      ProgText program;
       if (cfg.programParams.length > 0) {
-         ex1prog1 = new ProgText (cfg.programParams, ex1types, ex1specs);
+         program = new ProgText (cfg.programParams, typeSystem, specSet);
       } else {
-         ex1prog1 = new ProgText (cfg.progFile, ex1types, ex1specs);
+         program = new ProgText (cfg.progFile, typeSystem, specSet);
       }
-      if (ex1prog1.hasDiagnostics()) {
-         printDiagnostics (ex1prog1);
+      if (program.hasDiagnostics()) {
+         printDiagnostics (program);
          return false;
       }
-      // System.out.println ("SpecSet:" + ex1specs.toString());
+      // System.out.println ("SpecSet:" + specSet.toString());
       System.out.println ("Program text:");
-      System.out.println (ex1prog1.sourceText());
-      System.out.println ("Program: " + ex1prog1.toString());
-      SpecList ex1list1 = new SpecList (ex1prog1, ex1types, ex1specs);
-      // System.out.println ("Sp.sequence: " + ex1list1.toString());
-      Spec resultspec = ex1list1.evaluate (ex1types, ex1specs);
+      System.out.println (program.sourceText());
+      System.out.println ("Program: " + program.toString());
+      SpecList specList = new SpecList (program, typeSystem, specSet);
+      // System.out.println ("Sp.sequence: " + specList.toString());
+      Spec resultspec = specList.evaluate (typeSystem, specSet);
       if (resultspec == null)
-         throw ex1list1.typeClash ("linear part of the top-level program",
-            ex1prog1);
-      System.out.println (annotate (ex1prog1, ex1list1, resultspec));
+         throw specList.typeClash ("linear part of the top-level program",
+            program);
+      System.out.println (annotate (program, specList, resultspec));
       return true;
 
    } // end of run()
@@ -117,70 +95,66 @@ public class Evaluator {
     * Parses command-line parameters.
     * @param params command-line parameters
     * @return run configuration
-    */
+   */
    static RunConfig parseArgs (String[] params) {
-      String profileName = "real";
-      String typesOverride = null;
-      String specsOverride = null;
-      String progOverride = null;
+      String typesFile = null;
+      String specsFile = null;
+      String progFile = null;
       int wordsCount = 0;
       for (int i = 0; i < params.length; i++) {
          String arg = params [i];
          if ("--system".equals (arg)) {
-            if (i + 1 >= params.length)
-               throw new RuntimeException ("Missing profile name after " +
-                  "--system. Use real, legacy, or forth2012.");
-            profileName = params [++i];
+            throw new RuntimeException ("The Java entrypoint no longer " +
+               "accepts --system. Use --types/--specs/--prog directly, " +
+               "or use run-evaluator.sh / run-evaluator.bat for the " +
+               "bundled demo profiles.");
+         } else if ("--help".equals (arg) || "-h".equals (arg)) {
+            throw new RuntimeException (usageText());
          } else if ("--types".equals (arg)) {
             if (i + 1 >= params.length)
                throw new RuntimeException ("Missing file name after " +
                   "--types.");
-            typesOverride = params [++i];
+            typesFile = params [++i];
          } else if ("--specs".equals (arg)) {
             if (i + 1 >= params.length)
                throw new RuntimeException ("Missing file name after " +
                   "--specs.");
-            specsOverride = params [++i];
+            specsFile = params [++i];
          } else if ("--prog".equals (arg)) {
             if (i + 1 >= params.length)
                throw new RuntimeException ("Missing file name after " +
                   "--prog.");
-            progOverride = params [++i];
+            progFile = params [++i];
          } else {
             wordsCount++;
          }
       }
-      DemoProfile profile = selectProfile (profileName);
+      String[] programParams = collectProgramWords (params, wordsCount);
+      if (typesFile == null)
+         throw new RuntimeException ("Missing required --types file. " +
+            usageText());
+      if (specsFile == null)
+         throw new RuntimeException ("Missing required --specs file. " +
+            usageText());
+      if (progFile == null && programParams.length == 0)
+         throw new RuntimeException ("Missing program source. Provide " +
+            "--prog file or command-line program words. " + usageText());
       RunConfig result = new RunConfig();
-      result.profile = profile;
-      result.typesFile = (typesOverride == null) ? profile.typesFile :
-         typesOverride;
-      result.specsFile = (specsOverride == null) ? profile.specsFile :
-         specsOverride;
-      result.progFile = (progOverride == null) ? profile.progFile :
-         progOverride;
-      result.programParams = collectProgramWords (params, wordsCount);
+      result.typesFile = typesFile;
+      result.specsFile = specsFile;
+      result.progFile = progFile;
+      result.programParams = programParams;
       return result;
    } // end of parseArgs()
 
    /**
-    * Selects the demo profile by name.
-    * @param profileName profile name
-    * @return demo profile descriptor
+    * Usage text for the command-line interface.
+    * @return human-readable usage summary
     */
-   static DemoProfile selectProfile (String profileName) {
-      if ("real".equals (profileName))
-         return new DemoProfile ("real", "ex1types.txt", "ex1specs.txt",
-            "ex1prog.txt");
-      if ("legacy".equals (profileName))
-         return new DemoProfile ("legacy", "legacytypes.txt",
-            "legacyspecs.txt", "legacyprog.txt");
-      if ("forth2012".equals (profileName))
-         return new DemoProfile ("forth2012", "forth2012types.txt",
-            "forth2012specs.txt", "forth2012prog.txt");
-      throw new RuntimeException ("Unknown profile " + profileName +
-         ". Use real, legacy, or forth2012.");
-   } // end of selectProfile()
+   static String usageText () {
+      return "Usage: java evaluator.Evaluator --types TYPES --specs SPECS " +
+         "[--prog PROGRAM] [word ...]";
+   } // end of usageText()
 
    /**
     * Collects non-option words that form the command-line program text.
@@ -193,9 +167,11 @@ public class Evaluator {
       int pos = 0;
       for (int i = 0; i < params.length; i++) {
          String arg = params [i];
-         if ("--system".equals (arg) || "--types".equals (arg) ||
+         if ("--types".equals (arg) ||
              "--specs".equals (arg) || "--prog".equals (arg)) {
             i++;
+         } else if ("--help".equals (arg) || "-h".equals (arg)) {
+            // Help is handled earlier by parseArgs().
          } else {
             result [pos++] = arg;
          }
