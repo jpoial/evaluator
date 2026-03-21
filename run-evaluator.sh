@@ -3,6 +3,30 @@
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$script_dir"
+
+gforth_bin=
+for candidate in gforth-fast gforth \
+   "$script_dir/../gforth/gforth-fast" "$script_dir/../gforth/gforth"
+do
+   if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
+      gforth_bin=$candidate
+      break
+   fi
+done
+
+if [ -z "$gforth_bin" ]; then
+   echo "Error: gforth executable not found on PATH or in $script_dir/../gforth" >&2
+   exit 1
+fi
+
+libcc_dir=$script_dir/../gforth/lib/gforth/0.7.9_20260224/amd64/libcc-named
+if [ -d "$libcc_dir" ]; then
+   export libccnameddir=$libcc_dir/
+fi
+
+export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/gforth-cache}
+mkdir -p "$XDG_CACHE_HOME"
 
 profile=forth2012
 case "${1-}" in
@@ -30,7 +54,7 @@ case "$profile" in
       ;;
 esac
 
-exec java -cp "$script_dir" evaluator.Evaluator \
+exec "$gforth_bin" "$script_dir/gforth-evaluator.fs" \
    --types "$types_file" \
    --specs "$specs_file" \
    --prog "$prog_file" \

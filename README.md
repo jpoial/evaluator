@@ -23,6 +23,12 @@ Windows: <code>run-evaluator.bat</code>,
 <code>run-evaluator.bat real</code>,
 <code>run-evaluator.bat legacy</code>
 <br>
+On Linux, <code>run-evaluator.sh</code> now starts the single-file
+<code>gforth-evaluator.fs</code> entrypoint directly. The Linux launcher is now
+fully native <code>gforth</code>; it no longer bootstraps or depends on the
+Java evaluator path when running the bundled profiles or explicit
+<code>--types</code>/<code>--specs</code>/<code>--prog</code> inputs.
+<br>
 Without an explicit profile or user-supplied <code>--types</code> /
 <code>--specs</code>, the launcher defaults to
 <code>forth2012types.txt</code>, <code>forth2012specs.txt</code>, and
@@ -185,3 +191,9 @@ closely: <code>flag</code> is separate from numeric types, addresses sit under
 <code>u</code>, <code>char</code> sits under <code>+n</code>, dot is typed as
 <code>( n -- )</code>, and string-producing scanner words use the standard
 stack form <code>c-addr u</code>.
+<br>
+The shipped examples under <code>testdata/</code> are intended to be exercised
+through that launcher path: plain Forth examples can be run with
+<code>./run-evaluator.sh --prog testdata/positive/forth2012/string_scanner.fs</code>,
+while custom profiles can be run with explicit
+<code>--types</code>/<code>--specs</code>/<code>--prog</code> arguments.
