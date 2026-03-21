@@ -4,7 +4,7 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-profile=real
+profile=forth2012
 case "${1-}" in
    real|legacy|forth2012)
       profile=$1

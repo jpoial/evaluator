@@ -2,7 +2,7 @@
 setlocal
 
 set "script_dir=%~dp0"
-set "profile=real"
+set "profile=forth2012"
 
 if /I "%~1"=="real" set "profile=real" & shift
 if /I "%~1"=="legacy" set "profile=legacy" & shift

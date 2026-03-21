@@ -431,7 +431,7 @@ The repository now ships three file-backed demo profiles: `real`,
 filename parameters, so the Java entrypoint itself no longer hardcodes any
 of those files. `run-evaluator.sh` on Linux and `run-evaluator.bat` on
 Windows are only convenience wrappers that supply the bundled demo
-filenames, defaulting to `real` and accepting `legacy` or `forth2012` as
+filenames, defaulting to `forth2012` and accepting `real` or `legacy` as
 the first argument.
 
 The bundled vocabularies are no longer just fixed Java tables. They are

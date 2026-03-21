@@ -1,4 +1,4 @@
-# Real Forth-like demo program loaded by the bundled launcher with the default profile.
+# Real Forth-like demo program loaded by the bundled launcher in real mode.
 # Linear colon definitions, IF..FI / IF..ELSE..FI, BEGIN..WHILE..REPEAT,
 # BEGIN..UNTIL / BEGIN..AGAIN, and DO..LOOP are supported.
 

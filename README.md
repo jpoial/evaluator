@@ -17,19 +17,24 @@ the command-line program words take precedence.
 <br>
 The bundled launcher is optional convenience for the shipped demo profiles:
 Linux: <code>./run-evaluator.sh</code>,
-<code>./run-evaluator.sh legacy</code>,
-<code>./run-evaluator.sh forth2012</code>
+<code>./run-evaluator.sh real</code>,
+<code>./run-evaluator.sh legacy</code>
 Windows: <code>run-evaluator.bat</code>,
-<code>run-evaluator.bat legacy</code>,
-<code>run-evaluator.bat forth2012</code>
+<code>run-evaluator.bat real</code>,
+<code>run-evaluator.bat legacy</code>
 <br>
-It uses these files for the default <code>real</code> profile:
+Without an explicit profile or user-supplied <code>--types</code> /
+<code>--specs</code>, the launcher defaults to
+<code>forth2012types.txt</code>, <code>forth2012specs.txt</code>, and
+<code>forth2012prog.txt</code>.
+<br>
+In <code>real</code> mode it uses:
 <code>ex1types.txt</code>, <code>ex1specs.txt</code>, <code>ex1prog.txt</code>
 <br>
-For the preserved old profile it uses:
+In the preserved old profile it uses:
 <code>legacytypes.txt</code>, <code>legacyspecs.txt</code>, <code>legacyprog.txt</code>
 <br>
-For the standard-like strict profile it uses:
+In <code>forth2012</code> mode it uses:
 <code>forth2012types.txt</code>, <code>forth2012specs.txt</code>, <code>forth2012prog.txt</code>
 <br>
 The bundled demo specs now cover a small Forth-like core: stack shuffles;
@@ -170,12 +175,12 @@ The checker also continues after a recoverable program error: it skips an
 invalid top-level word or abandons an invalid definition, then keeps scanning
 the rest of the file and reports later errors as separate diagnostics.
 <br>
-The type system is also profile-dependent now. The default <code>real</code>
-profile is more Forth-like as a convenience profile: flags are numbers,
-characters are numbers, and the top stack-cell type is also aliased as
-<code>cell</code>. The <code>legacy</code> profile preserves the earlier
-stricter separation where <code>flag</code> is not a subtype of <code>n</code>.
-The <code>forth2012</code> profile follows the Forth-2012 subtype lattice more
+The type system is also profile-dependent now. The <code>real</code> profile
+is more Forth-like as a convenience profile: flags are numbers, characters are
+numbers, and the top stack-cell type is also aliased as <code>cell</code>.
+The <code>legacy</code> profile preserves the earlier stricter separation
+where <code>flag</code> is not a subtype of <code>n</code>. The
+<code>forth2012</code> profile follows the Forth-2012 subtype lattice more
 closely: <code>flag</code> is separate from numeric types, addresses sit under
 <code>u</code>, <code>char</code> sits under <code>+n</code>, dot is typed as
 <code>( n -- )</code>, and string-producing scanner words use the standard
