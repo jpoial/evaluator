@@ -3,6 +3,9 @@
 
 package evaluator;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.Iterator;
 
 /**
@@ -43,40 +46,103 @@ public class Evaluator {
    */
    static boolean run (String[] params) {
       RunConfig cfg = parseArgs (params);
-      System.out.println ("Types file: " + cfg.typesFile);
-      System.out.println ("Specs file: " + cfg.specsFile);
-      if (cfg.programParams.length > 0) {
-         System.out.println ("Program source: command line");
-      } else {
-         System.out.println ("Program file: " + cfg.progFile);
+      String logFile = logFileName (cfg);
+      ProgText program = null;
+      try {
+         System.out.println ("Types file: " + cfg.typesFile);
+         System.out.println ("Specs file: " + cfg.specsFile);
+         if (cfg.programParams.length > 0) {
+            System.out.println ("Program source: command line");
+         } else {
+            System.out.println ("Program file: " + cfg.progFile);
+         }
+         TypeSystem typeSystem = new TypeSystem (cfg.typesFile);
+         // System.out.println ("TypeSystem: " + typeSystem.toString());
+         SpecSet specSet = new SpecSet (cfg.specsFile, typeSystem);
+         if (cfg.programParams.length > 0) {
+            program = new ProgText (cfg.programParams, typeSystem, specSet);
+         } else {
+            program = new ProgText (cfg.progFile, typeSystem, specSet);
+         }
+         if (program.hasDiagnostics()) {
+            printDiagnostics (program);
+            writeLog (logFile, program, null, null);
+            return false;
+         }
+         // System.out.println ("SpecSet:" + specSet.toString());
+         System.out.println ("Program text:");
+         System.out.println (program.sourceText());
+         System.out.println ("Program: " + program.toString());
+         SpecList specList = new SpecList (program, typeSystem, specSet);
+         // System.out.println ("Sp.sequence: " + specList.toString());
+         Spec resultspec = specList.evaluate (typeSystem, specSet);
+         if (resultspec == null)
+            throw specList.typeClash ("linear part of the top-level program",
+               program);
+         System.out.println (annotate (program, specList, resultspec));
+         writeLog (logFile, program, null, null);
+         return true;
+      } catch (ProgramException e) {
+         writeLog (logFile, program, e.diagnostic(), null);
+         throw e;
+      } catch (RuntimeException e) {
+         writeLog (logFile, program, null, e.getMessage());
+         throw e;
       }
-      TypeSystem typeSystem = new TypeSystem (cfg.typesFile);
-      // System.out.println ("TypeSystem: " + typeSystem.toString());
-      SpecSet specSet = new SpecSet (cfg.specsFile, typeSystem);
-      ProgText program;
-      if (cfg.programParams.length > 0) {
-         program = new ProgText (cfg.programParams, typeSystem, specSet);
-      } else {
-         program = new ProgText (cfg.progFile, typeSystem, specSet);
-      }
-      if (program.hasDiagnostics()) {
-         printDiagnostics (program);
-         return false;
-      }
-      // System.out.println ("SpecSet:" + specSet.toString());
-      System.out.println ("Program text:");
-      System.out.println (program.sourceText());
-      System.out.println ("Program: " + program.toString());
-      SpecList specList = new SpecList (program, typeSystem, specSet);
-      // System.out.println ("Sp.sequence: " + specList.toString());
-      Spec resultspec = specList.evaluate (typeSystem, specSet);
-      if (resultspec == null)
-         throw specList.typeClash ("linear part of the top-level program",
-            program);
-      System.out.println (annotate (program, specList, resultspec));
-      return true;
 
    } // end of run()
+
+   /**
+    * Returns the log file name for the current run.
+    * @param cfg run configuration
+    * @return program log file path
+    */
+   static String logFileName (RunConfig cfg) {
+      if ((cfg.progFile != null) && (cfg.progFile.length() > 0))
+         return cfg.progFile + ".log";
+      return "command-line.log";
+   } // end of logFileName()
+
+   /**
+    * Writes created definitions and errors to one log file.
+    * @param logFile output file path
+    * @param prog parsed program, or null
+    * @param extraDiagnostic fatal structured diagnostic, or null
+    * @param runtimeMessage fatal plain-text runtime message, or null
+    */
+   static void writeLog (String logFile, ProgText prog,
+      ProgramDiagnostic extraDiagnostic, String runtimeMessage) {
+      BufferedWriter writer = null;
+      try {
+         writer = new BufferedWriter (new FileWriter (logFile));
+         if (prog != null) {
+            Iterator<String> it = prog.logEntries().iterator();
+            while (it.hasNext()) {
+               writer.write ((String)it.next());
+               writer.newLine();
+            }
+         }
+         if (extraDiagnostic != null) {
+            writer.write ("Error: " +
+               ProgramDiagnosticRenderer.summary (extraDiagnostic));
+            writer.newLine();
+         } else if ((runtimeMessage != null) && (runtimeMessage.length() > 0)) {
+            writer.write ("Error: " + runtimeMessage);
+            writer.newLine();
+         }
+      } catch (IOException e) {
+         System.err.println ("Error: Unable to write log file " + logFile +
+            ": " + e.getMessage());
+      } finally {
+         if (writer != null) {
+            try {
+               writer.close();
+            } catch (IOException e) {
+               // Ignore close failure after reporting or writing output.
+            }
+         }
+      }
+   } // end of writeLog()
 
    /**
     * Outputs all recovered diagnostics collected during parsing.

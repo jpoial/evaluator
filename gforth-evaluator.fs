@@ -5,9 +5,11 @@ decimal
 
 -4095 constant ev-error#
 -4094 constant ev-reported-error#
+-1 constant ev-no-fileid
 variable ev-current-diagnostic
 variable ev-diagnostic-count
 variable ev-current-program-token
+variable ev-log-fileid
 
 : ev-throw ( diag -- )
   ev-current-diagnostic !
@@ -334,8 +336,66 @@ variable ev-current-source-lines
     drop
   then ;
 
+: ev-log-open? ( -- flag )
+  ev-log-fileid @ ev-no-fileid <> ;
+
+: ev-log-write-raw { c-addr u -- }
+  ev-log-open? if
+    c-addr u ev-log-fileid @ write-file throw
+  else
+    2drop
+  then ;
+
+: ev-log-write-s { s -- }
+  s ev-s@ ev-log-write-raw ;
+
+: ev-log-cr ( -- )
+  13 pad c!
+  10 pad 1+ c!
+  pad 2 ev-log-write-raw ;
+
+: ev-log-span-start { span -- }
+  span ev-span.source + @ ev-log-write-s
+  span ev-span-has-location? if
+    s" :" ev-log-write-raw
+    span ev-span.sline + @ ev-u>sptr ev-log-write-s
+    s" :" ev-log-write-raw
+    span ev-span.scol + @ ev-u>sptr ev-log-write-s
+  then ;
+
+: ev-log-diagnostic { diag -- }
+  ev-log-open? 0= if drop exit then
+  s" Error: " ev-log-write-raw
+  diag ev-diag.msg + @ ev-log-write-s
+  diag ev-diag.span + @ { span }
+  span 0<> if
+    span ev-span-has-location? if
+      s"  at " ev-log-write-raw
+      span ev-log-span-start
+    then
+  then
+  diag ev-diag.reason + @ dup if
+    ev-slen@ 0> if
+      s" : " ev-log-write-raw
+      ev-log-write-s
+    else
+      drop
+    then
+  else
+    drop
+  then
+  s" ." ev-log-write-raw
+  ev-log-cr ;
+
+: ev-log-close ( -- )
+  ev-log-open? if
+    ev-log-fileid @ close-file drop
+    ev-no-fileid ev-log-fileid !
+  then ;
+
 : ev-report-current-diagnostic ( -- )
   ev-current-diagnostic @ dup if
+    dup ev-log-diagnostic
     ." Error: " ev-diag. cr
     1 ev-diagnostic-count +!
     0 ev-current-diagnostic !
@@ -600,7 +660,7 @@ variable ev-current-source-lines
   stop-addr stop-u sc ev-sc-read-word ;
 
 : ev-sc-next-program-word { stop-addr stop-u sc -- word|0 }
-  sc ev-sc-skip-ignorable
+  sc ev-sc-skip-whitespace
   stop-addr stop-u sc ev-sc-read-program-word ;
 
 : ev-sc-next-atom { stop-addr stop-u sc -- word|0 }
@@ -1346,6 +1406,13 @@ variable ev-eval-result
   s" --  " ev-scopy ev-scat2
   spec ev-spec.right + @ ev-sym-vec>sptr ev-scat2
   s" ) " ev-scopy ev-scat2 ;
+
+: ev-log-definition { name spec -- }
+  ev-log-open? 0= if drop drop exit then
+  name ev-sspace ev-scat2
+  spec ev-spec>sptr ev-scat2
+  ev-log-write-s
+  ev-log-cr ;
 
 \ Renumbers wildcard indices into a compact, readable form after evaluation.
 : ev-spec-list-normalize { list result -- norm }
@@ -2841,8 +2908,9 @@ is ev-parse-definition-structure
     then
     code throw
   then
-  drop
-  name ev-word-text@ swap ss ev-ss-set-word ;
+  drop { defspec }
+  name ev-word-text@ defspec ss ev-ss-set-word
+  name ev-word-text@ defspec ev-log-definition ;
 
 \ Handles top-level CONSTANT-like words by consuming one runtime value and defining a zero-argument word.
 : ev-parse-top-level-constant { token spec sc ts ss prog -- }
@@ -2874,6 +2942,7 @@ is ev-parse-definition-structure
   top ev-sym.type + @ ev-type-output-spec { constspec }
   constspec name ev-word-span@ name ev-word-text@ ev-spec-with-origin drop
   name ev-word-text@ constspec ss ev-ss-set-word
+  name ev-word-text@ constspec ev-log-definition
   top ev-sym.type + @ ev-type-input-spec
   opname defspan rot prog ev-prog-add-hidden ;
 
@@ -2888,7 +2957,8 @@ is ev-parse-definition-structure
   then
   spec ev-runtime-clone { varspec }
   varspec name ev-word-span@ name ev-word-text@ ev-spec-with-origin drop
-  name ev-word-text@ varspec ss ev-ss-set-word ;
+  name ev-word-text@ varspec ss ev-ss-set-word
+  name ev-word-text@ varspec ev-log-definition ;
 
 : ev-prog-current-effect { prog ts -- spec }
   prog ev-prog.specs + @ s" top-level program" ev-scopy ts ev-seq-evaluate ;
@@ -2987,6 +3057,23 @@ is ev-parse-definition-structure
 3 cells constant ev-cfg.words
 4 cells constant /ev-cfg
 
+: ev-log-path { cfg -- path }
+  cfg ev-cfg.prog + @ dup if
+    s" .log" ev-scopy ev-scat2
+  else
+    drop
+    s" command-line.log" ev-scopy
+  then ;
+
+: ev-log-open { cfg -- }
+  cfg ev-log-path { path }
+  path ev-s@ w/o create-file { fileid ior }
+  ior if
+    s" Unable to create log file " ev-scopy path ev-scat2
+    0 0 ev-error-msg
+  then
+  fileid ev-log-fileid ! ;
+
 : ev-cfg-new ( -- cfg )
   /ev-cfg ev-xalloc { cfg }
   0 cfg ev-cfg.types + !
@@ -3049,7 +3136,9 @@ is ev-parse-definition-structure
   0 ev-current-diagnostic !
   0 ev-diagnostic-count !
   0 ev-current-program-token !
+  ev-no-fileid ev-log-fileid !
   ev-parse-args { cfg }
+  cfg ev-log-open
   ." Types file: " cfg ev-cfg.types + @ ev-s. cr
   ." Specs file: " cfg ev-cfg.specs + @ ev-s. cr
   cfg ev-cfg.words + @ ev-vec-count@ 0> if
@@ -3073,17 +3162,20 @@ is ev-parse-definition-structure
   ." Program text:" cr
   prog ev-prog.text + @ ev-s. cr
   ." Program: " prog ev-prog-words>sptr ev-s. cr
-  prog final ev-annotate. ;
+  prog final ev-annotate.
+  ev-log-close ;
 
 : ev-main ( -- code )
   ['] ev-run-native catch dup if
     { code }
+    ev-log-close
     code ev-reported-error# = if
       1
       exit
     then
     ev-current-diagnostic @ dup if
-      ." Error: " ev-diag. cr
+      drop
+      ev-report-current-diagnostic
     else
       code throw
     then

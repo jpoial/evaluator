@@ -33,6 +33,9 @@ public class ProgText extends LinkedList<String> {
    LinkedList<ProgramDiagnostic> diagnostics =
       new LinkedList<ProgramDiagnostic>();
 
+   /** ordered log lines for created definitions and recovered errors */
+   LinkedList<String> logEntries = new LinkedList<String>();
+
    static class CompileContext {
       String wordName;
       SourceWord definingWord;
@@ -218,11 +221,30 @@ public class ProgText extends LinkedList<String> {
    } // end of diagnostics()
 
    /**
+    * Returns a copy of the collected log lines.
+    * @return ordered log lines
+    */
+   LinkedList<String> logEntries() {
+      return new LinkedList<String> (logEntries);
+   } // end of logEntries()
+
+   /**
+    * Stores one log line when logging is active.
+    * @param line one output line
+    */
+   void addLogEntry (String line) {
+      if ((line != null) && (line.length() > 0)) logEntries.add (line);
+   } // end of addLogEntry()
+
+   /**
     * Stores one collected diagnostic when recovery is active.
     * @param diagnostic structured diagnostic
     */
    void addDiagnostic (ProgramDiagnostic diagnostic) {
-      if (diagnostic != null) diagnostics.add (diagnostic);
+      if (diagnostic == null) return;
+      diagnostics.add (diagnostic);
+      addLogEntry ("Error: " + ProgramDiagnosticRenderer.summary (
+         diagnostic));
    } // end of addDiagnostic()
 
    /**
@@ -531,6 +553,7 @@ public class ProgText extends LinkedList<String> {
       Spec defSpec = evaluateSpecList (compile.rootSeq, ts, ss,
          "linear part of definition " + compile.wordName);
       ss.put (compile.wordName, defSpec);
+      addLogEntry (compile.wordName + " " + defSpec.toString());
    } // end of finishDefinition()
 
    /**
@@ -880,6 +903,7 @@ public class ProgText extends LinkedList<String> {
       Spec constSpec = SpecSet.parseSpec ("-- " + top.ftype, ts,
          nameToken.span);
       ss.put (nameToken.text, constSpec);
+      addLogEntry (nameToken.text + " " + constSpec.toString());
       Spec consumeSpec = SpecSet.parseSpec (top.ftype + " --", ts,
          definerSpan);
       addTopLevelWord ("", constantToken.span,
@@ -923,6 +947,7 @@ public class ProgText extends LinkedList<String> {
       Spec constSpec = SpecSet.parseSpec ("-- " + top.ftype, ts,
          nameToken.span);
       ss.put (nameToken.text, constSpec);
+      addLogEntry (nameToken.text + " " + constSpec.toString());
       Spec consumeSpec = SpecSet.parseSpec (top.ftype + " --", ts,
          definerSpan);
       addTopLevelWord ("", definerSpan,
@@ -949,8 +974,10 @@ public class ProgText extends LinkedList<String> {
          throw programError ("define.variable-shape",
             variableToken.text + " must have defining shape ( -- y )", "",
             definerSpan);
-      ss.put (nameToken.text, runtimeSpecClone (definerSpec, ts)
-         .withOrigin (nameToken.span, nameToken.text));
+      Spec variableSpec = runtimeSpecClone (definerSpec, ts).withOrigin (
+         nameToken.span, nameToken.text);
+      ss.put (nameToken.text, variableSpec);
+      addLogEntry (nameToken.text + " " + variableSpec.toString());
    } // end of defineVariable()
 
    /**
@@ -972,8 +999,10 @@ public class ProgText extends LinkedList<String> {
          throw programError ("define.variable-shape",
             variableToken.text + " must have defining shape ( -- y )", "",
             definerSpan);
-      ss.put (nameToken.text, runtimeSpecClone (definerSpec, ts)
-         .withOrigin (nameToken.span, nameToken.text));
+      Spec variableSpec = runtimeSpecClone (definerSpec, ts).withOrigin (
+         nameToken.span, nameToken.text);
+      ss.put (nameToken.text, variableSpec);
+      addLogEntry (nameToken.text + " " + variableSpec.toString());
    } // end of defineVariable()
 
    /**

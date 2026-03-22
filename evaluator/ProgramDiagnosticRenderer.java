@@ -11,11 +11,11 @@ package evaluator;
 public class ProgramDiagnosticRenderer {
 
    /**
-    * Formats a diagnostic for CLI output.
+    * Formats a diagnostic as one summary line.
     * @param diagnostic structured diagnostic
-    * @return rendered text
+    * @return one-line rendered text
     */
-   public static String format (ProgramDiagnostic diagnostic) {
+   public static String summary (ProgramDiagnostic diagnostic) {
       if (diagnostic == null) return "Unknown program error.";
       StringBuffer result = new StringBuffer ("");
       result.append (diagnostic.message);
@@ -28,6 +28,17 @@ public class ProgramDiagnosticRenderer {
          result.append (diagnostic.reason);
       }
       ensureTerminalPunctuation (result);
+      return result.toString();
+   } // end of summary()
+
+   /**
+    * Formats a diagnostic for CLI output.
+    * @param diagnostic structured diagnostic
+    * @return rendered text
+    */
+   public static String format (ProgramDiagnostic diagnostic) {
+      if (diagnostic == null) return "Unknown program error.";
+      StringBuffer result = new StringBuffer (summary (diagnostic));
       if (diagnostic.hasSourceContext()) {
          String nl = System.getProperty ("line.separator");
          result.append (nl);
