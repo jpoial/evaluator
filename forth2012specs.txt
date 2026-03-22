@@ -1,10 +1,10 @@
-# Standard-like strict demo specification set for the evaluator.
-# Format:
-#   word [parse mode ["<arg>"]] [define [mode]] [control mode]
-#        [state mode] ( inputs -- outputs )
-#   literal kind ( -- outputs )
+\ Standard-like strict demo specification set for the evaluator.
+\ Format:
+\   word [parse mode ["<arg>"]] [define [mode]] [control mode]
+\        [state mode] ( inputs -- outputs )
+\   literal kind ( -- outputs )
 
-# Core stack words
+\ Core stack words
 OVER ( x[2] x[1] -- x[2] x[1] x[2] )
 SWAP ( x[2] x[1] -- x[1] x[2] )
 DUP ( x[1] -- x[1] x[1] )
@@ -23,8 +23,9 @@ R@ ( -- x )
 2R> ( -- x[2] x[1] )
 2R@ ( -- x[2] x[1] )
 
-# Core parser and literal words
+\ Core parser and literal words
 "(" parse until ")" ( -- )
+"#" parse until eol ( -- )
 "\\" parse until eol ( -- )
 ".(" parse until ")" state interpret ( -- )
 ." parse until "\"" ( -- )
@@ -47,11 +48,11 @@ literal double ( -- d )
 TRUE ( -- flag )
 FALSE ( -- flag )
 
-# Structured control words and declarative control structures
-# `parse`, `define`, and `control` imply compile-time action.
-# `define` implies interpretation-only, and `control` implies compilation-only.
-# The stack comment still shows what it consumes there.
-# In `word control role`, `role` names the parser slot. `THEN` closes `FI`.
+\ Structured control words and declarative control structures
+\ `parse`, `define`, and `control` imply compile-time action.
+\ `define` implies interpretation-only, and `control` implies compilation-only.
+\ The stack comment still shows what it consumes there.
+\ In `word control role`, `role` names the parser slot. `THEN` closes `FI`.
 IF control if ( flag -- )
 ELSE control else ( -- )
 FI control fi ( -- )
@@ -92,7 +93,7 @@ syntax: DO <loop body> LOOP
     DO
     repeat <loop body>
 
-# Core numeric and comparison words
+\ Core numeric and comparison words
 + ( n n -- n )
 - ( n n -- n )
 * ( n n -- n )
@@ -133,7 +134,7 @@ SM/REM ( d n -- n n )
 LSHIFT ( x u -- x )
 RSHIFT ( x u -- x )
 
-# Core memory, address, and character words
+\ Core memory, address, and character words
 @ ( a-addr -- x )
 2@ ( a-addr -- x[2] x[1] )
 HERE ( -- a-addr )
@@ -162,7 +163,7 @@ MOVE ( addr addr u -- )
 BASE ( -- a-addr )
 STATE ( -- a-addr )
 
-# Core I/O words
+\ Core I/O words
 ACCEPT ( c-addr n -- +n )
 KEY ( -- char )
 EMIT ( char -- )
@@ -175,7 +176,7 @@ U. ( u -- )
 DECIMAL ( -- )
 HEX ( -- )
 
-# Double word set
+\ Double word set
 D+ ( xd xd -- xd )
 D- ( xd xd -- xd )
 D. ( d -- )
@@ -195,7 +196,7 @@ DU< ( ud ud -- flag )
 M*/ ( d n n -- d )
 M+ ( d n -- d )
 
-# String word set
+\ String word set
 -TRAILING ( c-addr u -- c-addr u )
 /STRING ( c-addr u n -- c-addr u )
 BLANK ( c-addr u -- )
@@ -204,7 +205,7 @@ CMOVE> ( c-addr c-addr u -- )
 COMPARE ( c-addr u c-addr u -- n )
 SEARCH ( c-addr u c-addr u -- c-addr u flag )
 
-# Search word set
+\ Search word set
 EXECUTE ( xt -- )
 FORTH-WORDLIST ( -- wid )
 GET-CURRENT ( -- wid )
@@ -214,13 +215,13 @@ WORD ( char -- c-addr )
 ENVIRONMENT? ( c-addr u -- x flag )
 SOURCE ( -- c-addr u )
 
-# Facility word set
+\ Facility word set
 AT-XY ( u u -- )
 KEY? ( -- flag )
 PAGE ( -- )
 MS ( u -- )
 
-# File word set
+\ File word set
 CLOSE-FILE ( fileid -- ior )
 CREATE-FILE ( c-addr u fam -- fileid ior )
 DELETE-FILE ( c-addr u -- ior )
@@ -238,7 +239,7 @@ W/O ( -- fam )
 WRITE-FILE ( c-addr u fileid -- ior )
 WRITE-LINE ( c-addr u fileid -- ior )
 
-# Common compile-only runtime words
+\ Common compile-only runtime words
 EXIT state compile ( -- )
 J state compile ( -- n )
 LEAVE state compile ( -- )

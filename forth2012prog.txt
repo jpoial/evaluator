@@ -1,5 +1,5 @@
-# Standard-like strict demo program loaded by the bundled launcher by default.
-# Flags are not numbers, addresses are unsigned, and strings use c-addr u.
+\ Standard-like strict demo program loaded by the bundled launcher by default.
+\ Flags are not numbers, addresses are unsigned, and strings use c-addr u.
 
 : PEEK2
   DUP @ SWAP @

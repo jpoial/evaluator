@@ -2398,7 +2398,7 @@ public class SpecSet extends Hashtable<String, Spec> {
       for (int i = 0; i < text.length(); i++) {
          char current = text.charAt (i);
          if (Character.isWhitespace (current)) return true;
-         if ((current == '(') | (current == '"') | (current == '#'))
+         if ((current == '(') | (current == '"') | (current == '\\'))
             return true;
       }
       return false;

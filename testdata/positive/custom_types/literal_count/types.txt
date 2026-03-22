@@ -1,4 +1,4 @@
-# Example type system where integer literals produce COUNT values.
+\ Example type system where integer literals produce COUNT values.
 
 type value
 type count

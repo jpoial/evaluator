@@ -1,4 +1,4 @@
-# Switch-like custom control structure with multiple captured parts.
+\ Switch-like custom control structure with multiple captured parts.
 
 DUP ( X[1] -- X[1] X[1] )
 2DROP ( X[2] X[1] -- )

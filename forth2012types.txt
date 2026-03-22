@@ -1,10 +1,10 @@
-# Standard-like strict demo type system for the evaluator.
-# Based on the Forth-2012 data-type lattice, while staying conservative
-# where the evaluator currently uses one specification per word.
-# Format:
-#   type <canonical-name> [alias...]
-#   rel <subtype> < <supertype>
-#   scanner <name> "<delimiter>"
+\ Standard-like strict demo type system for the evaluator.
+\ Based on the Forth-2012 data-type lattice, while staying conservative
+\ where the evaluator currently uses one specification per word.
+\ Format:
+\   type <canonical-name> [alias...]
+\   rel <subtype> < <supertype>
+\   scanner <name> "<delimiter>"
 
 type x X cell
 type n number signed

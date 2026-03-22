@@ -1,4 +1,4 @@
-# Integer literals and arithmetic use the alias NUMBER here.
+\ Integer literals and arithmetic use the alias NUMBER here.
 
 literal integer ( -- number )
 + ( number number -- number )

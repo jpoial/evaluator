@@ -297,7 +297,7 @@ public class ProgText extends LinkedList<String> {
       String sourceName) {
       CompileContext compile = null;
       SourceWord token = null;
-      while ((token = scanner.nextWord()) != null) {
+      while ((token = scanner.nextProgramWord()) != null) {
          try {
             if (compile == null) {
                compile = interpretOneWord (token, scanner, ts, ss, sourceName);
@@ -613,7 +613,7 @@ public class ProgText extends LinkedList<String> {
       TextScanner scanner) {
       if (spec == null) return token;
       if (spec.consumesNextWord()) {
-         SourceWord parsedWord = scanner.nextWord();
+         SourceWord parsedWord = scanner.nextProgramWord();
          if (parsedWord == null)
             throw programError ("parse.missing-parser-word",
                "Missing word after parser word " + token.text, "",
@@ -674,7 +674,7 @@ public class ProgText extends LinkedList<String> {
          skipRecoveryPayload (token, spec, scanner, ss);
       if (scanner.atEnd()) return null;
       SourceWord skipped = null;
-      while ((skipped = scanner.nextWord()) != null) {
+      while ((skipped = scanner.nextProgramWord()) != null) {
          Spec skippedSpec = (Spec)ss.get (skipped.text);
          if (isDefinitionStarterWord (canonicalWord (skipped.text), ss)) {
             nestedDefinitions++;
@@ -828,7 +828,7 @@ public class ProgText extends LinkedList<String> {
     */
    SourceWord nextDefinedName (TextScanner scanner, SourceWord definingToken,
       String definingWord, SpecSet ss) {
-      SourceWord result = scanner.nextWord();
+      SourceWord result = scanner.nextProgramWord();
       if (result == null)
          throw programError ("parse.missing-word-name",
             "Missing word name after " + definingWord, "",

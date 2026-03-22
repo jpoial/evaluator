@@ -1,4 +1,4 @@
-# Custom control words described through one declarative syntax/effect block.
+\ Custom control words described through one declarative syntax/effect block.
 
 DUP ( X[1] -- X[1] X[1] )
 2DROP ( X[2] X[1] -- )

@@ -1,7 +1,8 @@
-# Legacy strict demo type system for the evaluator.
-# Format:
-#   type <canonical-name> [alias...]
-#   rel <subtype> < <supertype>
+\ Legacy strict demo type system for the evaluator.
+\ Format:
+\   type <canonical-name> [alias...]
+\   rel <subtype> < <supertype>
+\   scanner <name> "<delimiter>"
 
 type X x
 type n N
@@ -17,3 +18,5 @@ rel addr < X
 rel char < n
 rel c-addr < addr
 rel a-addr < c-addr
+
+scanner EOL "\n"

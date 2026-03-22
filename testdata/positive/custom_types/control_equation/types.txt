@@ -1,4 +1,4 @@
-# Minimal self-contained type system for custom control-structure examples.
+\ Minimal self-contained type system for custom control-structure examples.
 
 type X cell x
 type n number

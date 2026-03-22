@@ -36,6 +36,11 @@ if /I "%profile%"=="forth2012" (
    set "prog_file=%script_dir%forth2012prog.txt"
 )
 
+if not "%~1"=="" if "%~2"=="" if exist "%~1" (
+   set "prog_file=%~1"
+   shift
+)
+
 set "extra_args="
 :collect_args
 if "%~1"=="" goto launch

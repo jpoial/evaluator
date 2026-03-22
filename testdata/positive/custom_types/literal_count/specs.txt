@@ -1,4 +1,4 @@
-# Integer literals are typed as COUNT in this profile.
+\ Integer literals are typed as COUNT in this profile.
 
 : parse word define colon ( -- )
 ; control end ( -- )

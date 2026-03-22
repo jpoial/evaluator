@@ -1,4 +1,4 @@
-# Comment and string parser words plus CELL-typed integer literals.
+\ Comment and string parser words plus CELL-typed integer literals.
 
 "(" ")" ( -- )
 ." "\"" ( -- )

@@ -4,7 +4,10 @@
 decimal
 
 -4095 constant ev-error#
+-4094 constant ev-reported-error#
 variable ev-current-diagnostic
+variable ev-diagnostic-count
+variable ev-current-program-token
 
 : ev-throw ( diag -- )
   ev-current-diagnostic !
@@ -331,6 +334,15 @@ variable ev-current-source-lines
     drop
   then ;
 
+: ev-report-current-diagnostic ( -- )
+  ev-current-diagnostic @ dup if
+    ." Error: " ev-diag. cr
+    1 ev-diagnostic-count +!
+    0 ev-current-diagnostic !
+  else
+    drop
+  then ;
+
 : ev-literal-error { c-addr u span -- }
   c-addr u ev-scopy 0 span ev-error-msg ;
 
@@ -465,7 +477,7 @@ variable ev-current-source-lines
     ch ev-char-space? if
       dup ev-sc-advance
     else
-      ch [char] # = if
+      ch [char] \ = if
         dup ev-sc-line-comment
       else
         exit
@@ -491,7 +503,35 @@ variable ev-current-source-lines
   while
     sc ev-sc-char@ { ch }
     ch ev-char-space?
-    ch [char] # = or
+    ch [char] \ = or
+    ch stop-addr stop-u ev-stop-char? or if
+      true to done
+    else
+      sc ev-sc-advance
+      sc ev-sc.lastline + @ to eline
+      sc ev-sc.lastcol + @ to ecol
+      count 1+ to count
+    then
+  repeat
+  count 0= if 0 exit then
+  sc ev-sc.addr + @ start-off count ev-substr>sptr
+  sc ev-sc.name + @ sline scol eline ecol ev-span-new
+  false ev-word-new ;
+
+: ev-sc-read-program-word { stop-addr stop-u sc -- word|0 }
+  sc ev-sc-at-end? if 0 exit then
+  sc ev-sc.off + @ { start-off }
+  sc ev-sc.line + @ { sline }
+  sc ev-sc.col + @ { scol }
+  sline { eline }
+  scol { ecol }
+  0 { count }
+  false { done }
+  begin
+    sc ev-sc-at-end? 0= done 0= and
+  while
+    sc ev-sc-char@ { ch }
+    ch ev-char-space?
     ch stop-addr stop-u ev-stop-char? or if
       true to done
     else
@@ -559,6 +599,10 @@ variable ev-current-source-lines
   sc ev-sc-skip-ignorable
   stop-addr stop-u sc ev-sc-read-word ;
 
+: ev-sc-next-program-word { stop-addr stop-u sc -- word|0 }
+  sc ev-sc-skip-ignorable
+  stop-addr stop-u sc ev-sc-read-program-word ;
+
 : ev-sc-next-atom { stop-addr stop-u sc -- word|0 }
   sc ev-sc-skip-ignorable
   stop-addr stop-u sc ev-sc-read-atom ;
@@ -570,7 +614,7 @@ variable ev-current-source-lines
     dup ev-sc-at-end? 0=
   while
     dup ev-sc-char@ { ch }
-    ch [char] # = if
+    ch [char] \ = if
       dup ev-sc-line-comment
     else
       ch 10 = if
@@ -2374,7 +2418,7 @@ variable ev-eval-result
   ev-spec-new ;
 
 : ev-next-prog-word { sc -- word|0 }
-  0 0 sc ev-sc-next-word ;
+  0 0 sc ev-sc-next-program-word dup ev-current-program-token ! ;
 
 : ev-int-literal? { text -- flag }
   text ev-s@ { addr u }
@@ -2452,6 +2496,77 @@ variable ev-eval-result
     s" Missing closing delimiter for parser word" ev-scopy 0 token ev-word-span@ ev-error-msg
   then
   token ev-word-span@ ;
+
+: ev-definition-end-spec? { spec -- flag }
+  spec 0= if false exit then
+  spec ev-spec-is-control? 0= if false exit then
+  spec ev-spec.control-mode + @ s" END" ev-key= ;
+
+: ev-definition-starter-token? { tok ss -- flag }
+  tok 0= if false exit then
+  tok ev-word-text@ ss ev-ss-word@ dup 0= if drop false exit then { spec }
+  spec ev-spec.define-mode + @ ev-define.colon = ;
+
+: ev-ignore-parser-input-error { tok spec sc -- }
+  ev-current-diagnostic @ { saved }
+  tok spec sc ['] ev-consume-parser-input catch dup if
+    { code }
+    drop drop drop
+  else
+    drop drop
+  then
+  saved ev-current-diagnostic ! ;
+
+: ev-skip-recovery-payload { tok spec sc -- }
+  tok 0= spec 0= or if exit then
+  spec ev-spec-defines-word? if
+    sc ev-next-prog-word drop
+    exit
+  then
+  spec ev-spec-is-immediate? if
+    tok spec sc ev-ignore-parser-input-error
+  then ;
+
+: ev-recover-definition { sc tok spec ss -- }
+  tok 0= if exit then
+  spec ev-definition-end-spec? if exit then
+  tok ss ev-definition-starter-token? if 1 else 0 then { nested }
+  tok spec sc ev-skip-recovery-payload
+  begin
+    sc ev-next-prog-word dup
+  while
+    { skipped }
+    skipped ev-word-text@ ss ev-ss-word@ { skippedspec }
+    skipped ss ev-definition-starter-token? if
+      nested 1+ to nested
+      skipped skippedspec sc ev-skip-recovery-payload
+    else
+      skippedspec ev-definition-end-spec? if
+        nested 0> if
+          nested 1- to nested
+        else
+          exit
+        then
+      else
+        skipped skippedspec sc ev-skip-recovery-payload
+      then
+    then
+  repeat
+  drop ;
+
+: ev-recover-top-level { sc tok spec ss -- }
+  spec 0= if exit then
+  spec ev-spec-defines-word? if
+    spec ev-spec.define-mode + @ ev-define.colon = if
+      ev-current-program-token @ { badtok }
+      badtok dup if badtok ev-word-text@ ss ev-ss-word@ else 0 then { badspec }
+      sc badtok badspec ss ev-recover-definition
+    then
+    exit
+  then
+  spec ev-spec-is-immediate? if
+    tok spec sc ev-skip-recovery-payload
+  then ;
 
 : ev-seq-add { word span spec seq -- }
   spec span word ev-spec-with-origin seq ev-vec-push ;
@@ -2701,6 +2816,11 @@ is ev-parse-definition-structure
   span prog ev-prog.spans + @ ev-vec-push
   spec span label ev-spec-with-origin prog ev-prog.specs + @ ev-vec-push ;
 
+: ev-prog-discard-last { prog -- }
+  prog ev-prog.words + @ ev-vec-remove-last
+  prog ev-prog.spans + @ ev-vec-remove-last
+  prog ev-prog.specs + @ ev-vec-remove-last ;
+
 \ Handles ':' at top level: read the new word name, compile its body, then register the result.
 : ev-parse-definition { token spec sc ts ss -- }
   spec ev-spec-left-count 0<> spec ev-spec-right-count 0<> or if
@@ -2709,7 +2829,19 @@ is ev-parse-definition-structure
   sc token ss ev-next-defined-name { name }
   s" END" ev-scopy { end-role }
   token ev-word-text@ drop
-  name ev-word-text@ sc ts ss 0 end-role ev-parse-definition-seq
+  name ev-word-text@ sc ts ss 0 end-role ['] ev-parse-definition-seq catch dup if
+    { code }
+    drop drop drop drop drop drop
+    code ev-error# = if
+      ev-report-current-diagnostic
+      ev-current-program-token @ { badtok }
+      badtok dup if badtok ev-word-text@ ss ev-ss-word@ else 0 then { badspec }
+      sc badtok badspec ss ev-recover-definition
+      exit
+    then
+    code throw
+  then
+  drop
   name ev-word-text@ swap ss ev-ss-set-word ;
 
 \ Handles top-level CONSTANT-like words by consuming one runtime value and defining a zero-argument word.
@@ -2761,6 +2893,10 @@ is ev-parse-definition-structure
 : ev-prog-current-effect { prog ts -- spec }
   prog ev-prog.specs + @ s" top-level program" ev-scopy ts ev-seq-evaluate ;
 
+: ev-prog-add-checked-word { word span spec prog ts -- }
+  drop
+  word span spec prog ev-prog-add-word ;
+
 : ev-prog-words>sptr { prog -- s }
   ev-sempty { out }
   prog ev-prog.words + @ { words }
@@ -2784,6 +2920,38 @@ is ev-parse-definition-structure
   ." < " final ev-spec.right + @ ev-sym-vec>sptr ev-s.
   cr ;
 
+: ev-parse-program-token { tok spec sc ts ss prog -- }
+  spec if
+    spec ev-spec-allowed-interpret? 0= if
+      s" Word not supported in interpretation state" ev-scopy 0 tok ev-word-span@ ev-error-msg
+    then
+    spec ev-spec-is-immediate? if
+      spec ev-spec-defines-word? if
+        spec ev-spec.define-mode + @ { mode }
+        mode ev-define.colon = if
+          tok spec sc ts ss ev-parse-definition
+        else mode ev-define.constant = if
+          tok spec sc ts ss prog ev-parse-top-level-constant
+        else mode ev-define.variable = if
+          tok spec sc ts ss ev-parse-top-level-variable
+        else
+          s" Unsupported top-level defining word" ev-scopy 0 tok ev-word-span@ ev-error-msg
+        then then then
+      else spec ev-spec-is-control? if
+        s" Unexpected control word in top-level program" ev-scopy 0 tok ev-word-span@ ev-error-msg
+      else
+        tok spec sc ev-consume-parser-input { span }
+        tok ev-word-text@ span spec ev-runtime-clone prog ts ev-prog-add-checked-word
+      then then
+    else
+      tok 0 ts ss ev-resolve-runtime-spec { rspec }
+      tok ev-word-text@ tok ev-word-span@ rspec prog ts ev-prog-add-checked-word
+    then
+  else
+    tok 0 ts ss ev-resolve-runtime-spec { rspec }
+    tok ev-word-text@ tok ev-word-span@ rspec prog ts ev-prog-add-checked-word
+  then ;
+
 \ Outer interpreter for program text: execute top-level defining words immediately and collect runtime effects.
 : ev-parse-program { name text ts ss -- prog }
   name text ev-sc-new { sc }
@@ -2794,35 +2962,17 @@ is ev-parse-definition-structure
   while
     { tok }
     tok ev-word-text@ ss ev-ss-word@ { spec }
-    spec if
-      spec ev-spec-allowed-interpret? 0= if
-        s" Word not supported in interpretation state" ev-scopy 0 tok ev-word-span@ ev-error-msg
-      then
-      spec ev-spec-is-immediate? if
-        spec ev-spec-defines-word? if
-          spec ev-spec.define-mode + @ { mode }
-          mode ev-define.colon = if
-            tok spec sc ts ss ev-parse-definition
-          else mode ev-define.constant = if
-            tok spec sc ts ss prog ev-parse-top-level-constant
-          else mode ev-define.variable = if
-            tok spec sc ts ss ev-parse-top-level-variable
-          else
-            s" Unsupported top-level defining word" ev-scopy 0 tok ev-word-span@ ev-error-msg
-          then then then
-        else spec ev-spec-is-control? if
-          s" Unexpected control word in top-level program" ev-scopy 0 tok ev-word-span@ ev-error-msg
-        else
-          tok spec sc ev-consume-parser-input
-          tok ev-word-text@ swap spec ev-runtime-clone prog ev-prog-add-word
-        then then
+    tok spec sc ts ss prog ['] ev-parse-program-token catch dup if
+      { code }
+      drop drop drop drop drop drop
+      code ev-error# = if
+        ev-report-current-diagnostic
+        sc tok spec ss ev-recover-top-level
       else
-        tok 0 ts ss ev-resolve-runtime-spec { rspec }
-        tok ev-word-text@ tok ev-word-span@ rspec prog ev-prog-add-word
+        code throw
       then
     else
-      tok 0 ts ss ev-resolve-runtime-spec { rspec }
-      tok ev-word-text@ tok ev-word-span@ rspec prog ev-prog-add-word
+      drop
     then
   repeat
   drop
@@ -2896,6 +3046,9 @@ is ev-parse-definition-structure
 
 \ Native CLI entrypoint: load the files, parse the program, evaluate it, and print the annotation.
 : ev-run-native ( -- )
+  0 ev-current-diagnostic !
+  0 ev-diagnostic-count !
+  0 ev-current-program-token !
   ev-parse-args { cfg }
   ." Types file: " cfg ev-cfg.types + @ ev-s. cr
   ." Specs file: " cfg ev-cfg.specs + @ ev-s. cr
@@ -2913,6 +3066,9 @@ is ev-parse-definition-structure
     cfg ev-cfg.prog + @ dup ev-s@ ev-file>sptr
   then
   ts ss ev-parse-program { prog }
+  ev-diagnostic-count @ 0> if
+    ev-reported-error# throw
+  then
   prog ts ev-prog-current-effect { final }
   ." Program text:" cr
   prog ev-prog.text + @ ev-s. cr
@@ -2922,6 +3078,10 @@ is ev-parse-definition-structure
 : ev-main ( -- code )
   ['] ev-run-native catch dup if
     { code }
+    code ev-reported-error# = if
+      1
+      exit
+    then
     ev-current-diagnostic @ dup if
       ." Error: " ev-diag. cr
     else

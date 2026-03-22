@@ -1,4 +1,4 @@
-# Example type system mixing custom literal typing with scanner words.
+\ Example type system mixing custom literal typing with scanner words.
 
 type X value
 type cell

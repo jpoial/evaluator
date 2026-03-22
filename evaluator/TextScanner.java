@@ -92,12 +92,23 @@ public class TextScanner {
 
    /**
     * Reads the next Forth-style word using whitespace as the delimiter.
-    * A hash mark starts a line comment and is not returned as part of a word.
+    * A backslash starts a line comment and is not returned as part of a word.
     * @return scanned word or null at end of input
     */
    SourceWord nextWord() {
       return nextWord ("");
    } // end of nextWord()
+
+   /**
+    * Reads the next program word using whitespace as the delimiter.
+    * Unlike nextWord(), this leaves '#' available inside ordinary word names
+    * so source comments can be modeled by parser words instead.
+    * @return scanned program word or null at end of input
+    */
+   SourceWord nextProgramWord() {
+      skipWhitespace();
+      return readProgramWord ("");
+   } // end of nextProgramWord()
 
    /**
     * Reads the next atom, allowing quoted strings in addition to plain words.
@@ -139,7 +150,7 @@ public class TextScanner {
       LinkedList<SourceWord> result = new LinkedList<SourceWord>();
       while (!atEnd()) {
          char current = currentChar();
-         if (current == '#') {
+         if (current == '\\') {
             skipLineComment();
             continue;
          }
@@ -166,7 +177,7 @@ public class TextScanner {
       LinkedList<SourceWord> result = new LinkedList<SourceWord>();
       while (!atEnd()) {
          char current = currentChar();
-         if (current == '#') {
+         if (current == '\\') {
             skipLineComment();
             continue;
          }
@@ -270,7 +281,7 @@ public class TextScanner {
    } // end of skipWhitespace()
 
    /**
-    * Skips whitespace and hash-comments.
+    * Skips whitespace and backslash-comments.
     */
    void skipIgnorable() {
       while (!atEnd()) {
@@ -279,7 +290,7 @@ public class TextScanner {
             advance();
             continue;
          }
-         if (current == '#') {
+         if (current == '\\') {
             skipLineComment();
             continue;
          }
@@ -301,7 +312,7 @@ public class TextScanner {
       StringBuffer text = new StringBuffer ("");
       while (!atEnd()) {
          char current = currentChar();
-         if (Character.isWhitespace (current) | (current == '#') |
+         if (Character.isWhitespace (current) | (current == '\\') |
              isStopChar (current, stopChars))
             break;
          text.append (current);
@@ -313,6 +324,33 @@ public class TextScanner {
       return new SourceWord (text.toString(), new SourceSpan (sourceName,
          startLine, startColumn, endLine, endColumn));
    } // end of readWord()
+
+   /**
+    * Reads one program word without treating '#' as an implicit delimiter.
+    * @param stopChars extra delimiter characters
+    * @return scanned word or null if a delimiter is encountered immediately
+    */
+   SourceWord readProgramWord (String stopChars) {
+      if (atEnd()) return null;
+      int startLine = line;
+      int startColumn = column;
+      int endLine = line;
+      int endColumn = column;
+      StringBuffer text = new StringBuffer ("");
+      while (!atEnd()) {
+         char current = currentChar();
+         if (Character.isWhitespace (current) |
+             isStopChar (current, stopChars))
+            break;
+         text.append (current);
+         endLine = line;
+         endColumn = column;
+         advance();
+      }
+      if (text.length() == 0) return null;
+      return new SourceWord (text.toString(), new SourceSpan (sourceName,
+         startLine, startColumn, endLine, endColumn));
+   } // end of readProgramWord()
 
    /**
     * Reads one atom from the current scanner position.

@@ -42,6 +42,11 @@ case "$profile" in
       ;;
 esac
 
+if [ "$#" -eq 1 ] && [ -f "$1" ]; then
+   prog_file=$1
+   shift
+fi
+
 exec java -cp "$script_dir/." evaluator.Evaluator \
    --types "$types_file" \
    --specs "$specs_file" \

@@ -1,8 +1,8 @@
-# Legacy strict demo specification set for the evaluator.
-# Format:
-#   word [parse mode ["<arg>"]] [define [mode]] [control mode]
-#        [state mode] ( inputs -- outputs )
-#   literal kind ( -- outputs )
+\ Legacy strict demo specification set for the evaluator.
+\ Format:
+\   word [parse mode ["<arg>"]] [define [mode]] [control mode]
+\        [state mode] ( inputs -- outputs )
+\   literal kind ( -- outputs )
 
 OVER ( X[2] X[1] -- X[2] X[1] X[2] )
 SWAP ( X[2] X[1] -- X[1] X[2] )
@@ -10,6 +10,7 @@ DUP ( X[1] -- X[1] X[1] )
 DROP ( X -- )
 ROT ( X[3] X[2] X[1] -- X[2] X[1] X[3] )
 "(" parse until ")" ( -- )
+"#" parse until eol ( -- )
 ".(" parse until ")" state interpret ( -- )
 ." parse until "\"" ( -- )
 : parse word define colon ( -- )
@@ -29,7 +30,7 @@ UNTIL control until ( flag -- )
 DO control do ( n[2] n[1] -- )
 LOOP control loop ( -- )
 I control index ( -- n )
-# Non-standard helper kept for stack-effect experiments.
+\ Non-standard helper kept for stack-effect experiments.
 PLUS ( X[1] X[1] -- X[1] )
 + ( n n -- n )
 - ( n n -- n )
