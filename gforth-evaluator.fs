@@ -368,14 +368,14 @@ variable ev-current-source-lines
   while
     addr idx + c@ { ch }
     ch 13 = if
-      1 +to idx
+      idx 1+ to idx
     else
       ch 10 = if
         addr start + idx start - ev-scopy lines ev-vec-push
         idx 1+ to start
-        1 +to idx
+        idx 1+ to idx
       else
-        1 +to idx
+        idx 1+ to idx
       then
     then
   repeat
@@ -498,7 +498,7 @@ variable ev-current-source-lines
       sc ev-sc-advance
       sc ev-sc.lastline + @ to eline
       sc ev-sc.lastcol + @ to ecol
-      1 +to count
+      count 1+ to count
     then
   repeat
   count 0= if 0 exit then
@@ -537,11 +537,11 @@ variable ev-current-source-lines
         [char] \ of [char] \ endof
       endcase
       buf cell+ outlen + c!
-      1 +to outlen
+      outlen 1+ to outlen
       sc ev-sc-advance
     else
       buf cell+ outlen + ch swap c!
-      1 +to outlen
+      outlen 1+ to outlen
       sc ev-sc-advance
     then
   repeat
@@ -625,7 +625,7 @@ variable ev-current-source-lines
     then
     sc ev-sc-char@ { ch }
     buf cell+ outlen + ch swap c!
-    1 +to outlen
+    outlen 1+ to outlen
     true to has-text
     sc ev-sc-advance
     sc ev-sc.lastline + @ to eline
@@ -1118,7 +1118,7 @@ variable ev-current-source-lines
     i vec ev-vec@ { sym }
     sym old ev-sym= if
       new ev-sym-clone i vec ev-vec-set
-      1 +to count
+      count 1+ to count
     then
   loop
   count ;
@@ -1268,7 +1268,7 @@ variable ev-eval-result
     idx 0>=
   while
     idx vec ev-vec@ table next ev-add-norm-pass2 to next
-    -1 +to idx
+    idx 1- to idx
   repeat
   next ;
 
@@ -1910,31 +1910,31 @@ variable ev-eval-result
   8 ev-vec-new { segs }
   0 { idx }
   idx toks ev-vec@ ev-canon-sptr { open }
-  1 +to idx
+  idx 1+ to idx
   idx toks ev-vec@ ev-metasymbol-name dup 0= if
     s" Missing first segment in SYNTAX" ev-scopy 0 0 ev-error-msg
   then segs ev-vec-push
-  1 +to idx
+  idx 1+ to idx
   begin
     idx toks ev-vec-count@ 1- <
   while
     false { optional? }
     idx toks ev-vec@ s" [" ev-key= if
       true to optional?
-      1 +to idx
+      idx 1+ to idx
     then
     idx toks ev-vec-count@ 1- >= if
       s" Missing boundary word in SYNTAX" ev-scopy 0 0 ev-error-msg
     then
     idx toks ev-vec@ ev-canon-sptr { role }
-    1 +to idx
+    idx 1+ to idx
     idx toks ev-vec-count@ 1- >= if
       s" Missing segment metasymbol in SYNTAX" ev-scopy 0 0 ev-error-msg
     then
     idx toks ev-vec@ ev-metasymbol-name dup 0= if
       s" Missing segment metasymbol in SYNTAX" ev-scopy 0 0 ev-error-msg
     then { segname }
-    1 +to idx
+    idx 1+ to idx
     optional? if
       idx toks ev-vec-count@ 1- >= if
         s" Missing ] in SYNTAX" ev-scopy 0 0 ev-error-msg
@@ -1942,7 +1942,7 @@ variable ev-eval-result
       idx toks ev-vec@ s" ]" ev-key= 0= if
         s" Missing ] in SYNTAX" ev-scopy 0 0 ev-error-msg
       then
-      1 +to idx
+      idx 1+ to idx
     then
     role bounds ev-vec-push
     optional? if 1 else 0 then opt ev-vec-push
@@ -2127,65 +2127,65 @@ variable ev-eval-result
   while
     idx line ev-vec@ { tok }
     tok s" parse" ev-word-text= if
-      1 +to idx
+      idx 1+ to idx
       idx openi >= if s" Missing parser mode" ev-scopy 0 tok ev-word-span@ ev-error-msg then
       idx line ev-vec@ { modetok }
       modetok ev-parse-mode-from { parsedmode }
       parsedmode dup 0= if
         s" Unknown parser mode" ev-scopy 0 idx line ev-vec@ ev-word-span@ ev-error-msg
       then to parsemode
-      1 +to idx
+      idx 1+ to idx
       parsemode ev-parse-mode-needs-arg? if
         idx openi >= if s" Missing parser delimiter" ev-scopy 0 tok ev-word-span@ ev-error-msg then
         idx line ev-vec@ ts ev-resolve-parse-string to parsestring
-        1 +to idx
+        idx 1+ to idx
       then
     else tok s" define" ev-word-text= if
       true to defineseen
-      1 +to idx
+      idx 1+ to idx
       idx openi < if
         idx line ev-vec@ ev-clause-starter? 0= if
           idx line ev-vec@ ev-define-mode-from dup 0= if
             s" Unknown defining mode" ev-scopy 0 idx line ev-vec@ ev-word-span@ ev-error-msg
           then to definemode
-          1 +to idx
+          idx 1+ to idx
         then
       then
     else tok s" control" ev-word-text= if
-      1 +to idx
+      idx 1+ to idx
       idx openi >= if s" Missing control mode" ev-scopy 0 tok ev-word-span@ ev-error-msg then
       idx line ev-vec@ ev-word-text@ ev-canon-sptr to controlmode
-      1 +to idx
+      idx 1+ to idx
     else tok s" state" ev-word-text= if
-      1 +to idx
+      idx 1+ to idx
       idx openi >= if s" Missing state mode" ev-scopy 0 tok ev-word-span@ ev-error-msg then
       idx line ev-vec@ ev-state-mode-from dup 0= if
         s" Unknown state mode" ev-scopy 0 idx line ev-vec@ ev-word-span@ ev-error-msg
       then to statemode
-      1 +to idx
+      idx 1+ to idx
     else tok s" context" ev-word-text= if
-      1 +to idx
+      idx 1+ to idx
       idx openi >= if s" Missing context mode" ev-scopy 0 tok ev-word-span@ ev-error-msg then
       idx line ev-vec@ ev-state-mode-from dup 0= if
         s" Unknown context mode" ev-scopy 0 idx line ev-vec@ ev-word-span@ ev-error-msg
       then to statemode
-      1 +to idx
+      idx 1+ to idx
     else tok s" immediate" ev-word-text= if
       true to immediate
-      1 +to idx
+      idx 1+ to idx
     else tok s" scan" ev-word-text= if
-      1 +to idx
+      idx 1+ to idx
       idx openi >= if s" Missing scanner delimiter" ev-scopy 0 tok ev-word-span@ ev-error-msg then
       ev-parse.until to parsemode
       idx line ev-vec@ ts ev-resolve-parse-string to parsestring
-      1 +to idx
+      idx 1+ to idx
     else
       parsemode ev-parse.none <> if
         s" Duplicate scanner/parser clause" ev-scopy 0 tok ev-word-span@ ev-error-msg
       then
       tok ts ev-resolve-parse-string to parsestring
       ev-parse.until to parsemode
-      1 +to idx
+      idx 1+ to idx
     then then then then then then then
   repeat
   defineseen definemode ev-define.none = and if
@@ -2621,7 +2621,7 @@ defer ev-parse-definition-structure
           current segments ev-vec-push
           16 ev-vec-new to current
           by-boundary to candidates
-          1 +to stage
+          stage 1+ to stage
         else
           role ss ev-ss-open-structures { opens }
           opens ev-vec-count@ 0> if
@@ -2869,18 +2869,18 @@ is ev-parse-definition-structure
     a s" --TYPES" ev-key= if
       i 1+ argc @ >= if s" Missing file name after --types" ev-scopy 0 0 ev-error-msg then
       i 1+ arg ev-scopy cfg ev-cfg.types + !
-      2 +to i
+      i 2 + to i
     else a s" --SPECS" ev-key= if
       i 1+ argc @ >= if s" Missing file name after --specs" ev-scopy 0 0 ev-error-msg then
       i 1+ arg ev-scopy cfg ev-cfg.specs + !
-      2 +to i
+      i 2 + to i
     else a s" --PROG" ev-key= if
       i 1+ argc @ >= if s" Missing file name after --prog" ev-scopy 0 0 ev-error-msg then
       i 1+ arg ev-scopy cfg ev-cfg.prog + !
-      2 +to i
+      i 2 + to i
     else
       a cfg ev-cfg.words + @ ev-vec-push
-      1 +to i
+      i 1+ to i
     then then then
   repeat
   cfg ev-cfg.types + @ 0= if
