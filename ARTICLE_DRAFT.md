@@ -60,34 +60,13 @@ equivalently, by a local fixpoint surrogate.
 
 ## 2. Historical Lineage
 
-The formal line begins with algebraic specifications of stack effects
-[1], where the stack behavior of a word is represented abstractly and combined
-by multiplication-like laws. The next step is the transition from single
-effects to multiple effects [2], motivated by the fact that real programs
-contain control constructs whose behavior cannot always be summarized by one
-linear effect.
-
-Later work introduces typed wildcards, polymorphism, and inheritance [3]. This
-is the crucial move that turns the calculus into something close to symbolic
-execution: unknown values are no longer anonymous; they are typed symbolic
-objects that preserve identity across the stack. The 2003 paper on program
-analysis for stack-based languages [4] makes the connection to static analysis
-explicit. The 2006 paper on typing tools for typeless stack languages [5]
-recasts the model as must-analysis, clarifies the role of greatest lower bounds,
-and emphasizes idempotent effects as loop summaries. The 2008 framework paper
-[6] shows that the theory is executable and architecturally clean enough to be
-implemented as a reusable analysis kernel.
-
-Seen as a whole, the literature moves through four levels:
-
-- algebraic specification of linear stack effects,
-- control-sensitive sets of effects,
-- type-sensitive symbolic identity,
-- and program-analysis operators for merging and iteration.
-
-That trajectory is important because it shows that the calculus is not only a
-Forth curiosity. It is a compact instance of a broader pattern in semantics and
-static analysis.
+The historical background needed here is short. Early work formalized linear
+stack effects algebraically [1], then generalized them to multiple effects so
+that control-sensitive behavior could be represented [2]. Later papers add typed
+wildcards, polymorphism, and inheritance [3], and then recast the same ideas in
+the language of static analysis, must-analysis, and loop reasoning [4]. The
+2008 framework paper [5] matters mainly because it shows that the calculus is
+not just notation: it can be executed as an analyzer.
 
 ## 3. Mathematical Setting
 
@@ -295,7 +274,7 @@ One can therefore read the loop operator in two equivalent ways:
 - algebraically, as the search for an idempotent summary;
 - analytically, as the search for a stable abstract transformer.
 
-The 2006 formulation makes an additional subtle point [5]: all effects support
+The 2006 formulation makes an additional subtle point [4]: all effects support
 greatest lower bound and thus form a semilattice, but the idempotent fragment is
 especially important for loop reasoning because it is the stable part of the
 domain.
@@ -343,7 +322,7 @@ essential analysis pattern for sequencing, branching, and iteration.
 ### 6.1 Transfer-function composition
 
 The nearest classical analogue of stack-effect composition is transfer-function
-composition in dataflow analysis. Kildall's framework [7] already treats a
+composition in dataflow analysis. Kildall's framework [6] already treats a
 program point as carrying information transformed by monotone functions. The
 difference here is that the abstract state is not an environment over named
 variables but a symbolic stack with explicit value identity.
@@ -354,7 +333,7 @@ of information is positional rather than lexical.
 ### 6.2 Meet-over-paths and abstract interpretation
 
 Branch merging by greatest lower bound places the calculus very close to
-abstract interpretation [8]. The semantic picture is familiar:
+abstract interpretation [7]. The semantic picture is familiar:
 
 - there is a concrete semantics,
 - an abstract domain of effects,
@@ -370,7 +349,7 @@ therefore best seen as a must-style abstract interpretation over symbolic stacks
 ### 6.3 Symbolic execution
 
 The use of typed wildcards makes the method close to symbolic execution in the
-sense of King [9]. A stack item is represented by a symbol rather than a
+sense of King [8]. A stack item is represented by a symbol rather than a
 concrete value; operations transform symbolic expressions; path combinations
 retain only what can be guaranteed. The important difference is that this
 calculus is intentionally shallow: it does not attempt full path predicates or
@@ -382,8 +361,8 @@ compositional, and usable for low-level stack code.
 
 ### 6.4 Hoare-Floyd invariants
 
-The loop operator has a clear analogue in Floyd's inductive assertions [10] and
-Hoare's axiomatic reasoning [11]. In both cases the goal is to find a property
+The loop operator has a clear analogue in Floyd's inductive assertions [9] and
+Hoare's axiomatic reasoning [10]. In both cases the goal is to find a property
 preserved by the loop body. Here the property is not a first-order formula over
 store variables but a symbolic effect on the stack. Idempotence plays the role
 normally played by inductiveness.
@@ -400,9 +379,9 @@ The slogan is imperfect but illuminating.
 
 The calculus also has natural relatives in static typing for stack-based
 low-level languages. Bytecode verification for the JVM tracks stack height and
-types across control-flow joins [12, 13]. Compositional type systems for
-stack-based low-level languages [14] pursue a similar goal with more conventional
-type-theoretic machinery. Type inference for stack-based languages [15] is an
+types across control-flow joins [11]. Compositional type systems for
+stack-based low-level languages [12] pursue a similar goal with more conventional
+type-theoretic machinery. Type inference for stack-based languages [13] is an
 earlier close neighbour.
 
 The distinctive feature of the present calculus, compared with much of that
@@ -470,46 +449,39 @@ but the central ideas, composition, order, and fixpoint stability, are the same.
    Conference Proceedings, euroFORML'91 Conference*, Marianske Lazne,
    Czechoslovakia, 11-13 October 1991. FIG, 1992, pp. 400-406.
 3. Jaanus Poial. "Stack Effect Calculus with Typed Wildcards, Polymorphism and
-   Inheritance." In *Proceedings of the 18th EuroForth Conference*, Vienna,
-   Austria, 6-8 September 2002, p. 38.
-4. Jaanus Poial. "Program Analysis for Stack Based Languages." In *Proceedings
-   of the 19th EuroForth Conference*, Ross-on-Wye, UK, 17-19 October 2003,
-   pp. 9-13.
-5. Jaanus Poial. "Typing Tools for Typeless Stack Languages." In *Proceedings
-   of the 22nd EuroForth Conference*, Cambridge, UK, 15-17 September 2006,
+   Inheritance." In *EuroForth 2002 Proceedings*, Vienna, Austria,
+   6-8 September 2002, p. 38.
+4. Jaanus Poial. "Typing Tools for Typeless Stack Languages." In *Proceedings
+   of EuroForth 2006*, Cambridge, UK, 15-17 September 2006,
    pp. 40-46.
-6. Jaanus Poial. "Java Framework for Static Analysis of Forth Programs." In
-   *Proceedings of the 24th EuroForth Conference*, Vienna, Austria,
+5. Jaanus Poial. "Java Framework for Static Analysis of Forth Programs." In
+   *Proceedings of EuroForth 2008*, Vienna, Austria,
    26-28 September 2008, pp. 20-23.
-7. Gary A. Kildall. "A Unified Approach to Global Program Optimization." In
+6. Gary A. Kildall. "A Unified Approach to Global Program Optimization." In
    *Proceedings of the ACM Symposium on Principles of Programming Languages*,
    1973, pp. 194-206. doi:10.1145/512927.512945.
-8. Patrick Cousot and Radhia Cousot. "Abstract Interpretation: A Unified
+7. Patrick Cousot and Radhia Cousot. "Abstract Interpretation: A Unified
    Lattice Model for Static Analysis of Programs by Construction or
    Approximation of Fixpoints." In *Proceedings of the 4th ACM Symposium on
    Principles of Programming Languages*, 1977, pp. 238-252.
    doi:10.1145/512950.512973.
-9. James C. King. "Symbolic Execution and Program Testing."
+8. James C. King. "Symbolic Execution and Program Testing."
    *Communications of the ACM* 19(7), 1976, pp. 385-394.
    doi:10.1145/360248.360252.
-10. Robert W. Floyd. "Assigning Meanings to Programs." In
+9. Robert W. Floyd. "Assigning Meanings to Programs." In
     *Proceedings of Symposia in Applied Mathematics*, Vol. 19,
     *Mathematical Aspects of Computer Science*, American Mathematical Society,
     1967, pp. 19-32. doi:10.1090/psapm/019/0177187.
-11. C. A. R. Hoare. "An Axiomatic Basis for Computer Programming."
+10. C. A. R. Hoare. "An Axiomatic Basis for Computer Programming."
     *Communications of the ACM* 12(10), 1969, pp. 576-580.
     doi:10.1145/363235.363259.
-12. Allen Goldberg. "A Specification of Java Loading and Bytecode Verification."
-    In *Proceedings of the 5th ACM Conference on Computer and Communications
-    Security*, 1998, pp. 49-58. doi:10.1145/288090.288106.
-13. Xavier Leroy. "Java Bytecode Verification: Algorithms and Formalizations."
+11. Xavier Leroy. "Java Bytecode Verification: Algorithms and Formalizations."
     *Journal of Automated Reasoning* 30, 2003, pp. 235-269.
     doi:10.1023/A:1024449429949.
-14. Ilya Sergey, Andres Lochbihler, Gregor Snelting, and Germano Klein.
-    "Compositional Type Systems for Stack-Based Low-Level Languages."
-    In *Proceedings of the 33rd ACM SIGPLAN Conference on Programming Language
-    Design and Implementation*, 2012, pp. 105-114.
-    doi:10.1145/2254064.2254078.
-15. Bill Stoddart and Peter J. Knaggs. "Type Inference in Stack Based
+12. Ando Saabas and Tarmo Uustalu. "Compositional Type Systems for Stack-Based
+    Low-Level Languages." In *Proceedings of the 12th Computing:
+    The Australasian Theory Symposium (CATS 2006)*, Hobart, Australia, 2006,
+    pp. 27-39.
+13. Bill Stoddart and Peter J. Knaggs. "Type Inference in Stack Based
     Languages." *Formal Aspects of Computing* 5, 1993, pp. 289-298.
-    doi:10.1007/BF01211320.
+    doi:10.1007/BF01212404.
