@@ -22,3 +22,6 @@ switch-like structure with several captured segments and repeated boundary
 words.
 
 `negative/` contains programs that are expected to fail with diagnostics.
+
+Both runtimes also create adjacent `.log` files during these runs, recording
+created definitions and reported errors in a specs-like text format.

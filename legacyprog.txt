@@ -1,7 +1,3 @@
-\ Legacy strict demo program loaded by the bundled launcher in legacy mode.
-\ Linear colon definitions, IF..FI / IF..ELSE..FI, BEGIN..WHILE..REPEAT,
-\ BEGIN..UNTIL / BEGIN..AGAIN, and DO..LOOP are supported.
-
 : PEEK2
   DUP @ SWAP @
 ;

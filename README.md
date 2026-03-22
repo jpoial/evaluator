@@ -51,6 +51,9 @@ The repository also ships convenience wrappers for the bundled demo profiles:
 The `gforth` launchers run `gforth-evaluator.fs` directly. The Java launchers
 run `evaluator.Evaluator`. Both use the same bundled profile defaults.
 
+Each launcher also accepts one existing bare filename as shorthand for
+`--prog that-file`.
+
 ## Bundled Profiles
 
 Without an explicit profile or user-supplied `--types` / `--specs`, the
@@ -98,6 +101,11 @@ DO control do ( n[2] n[1] -- )
 
 Parser words, defining words, and control words are implicitly immediate, so
 the bundled specs usually omit a separate `immediate` marker.
+
+Program-file comment handling is profile-driven through these parser-word
+entries. For example, if a specs file declares `"\\" parse until eol ( -- )`,
+both the Java and `gforth` implementations treat backslash comments the same
+way for that profile.
 
 The evaluator follows an explicit outer-interpreter model with interpretation
 state and compilation state:
@@ -257,6 +265,10 @@ The checker also continues after a recoverable program error. It skips an
 invalid top-level word or abandons an invalid definition, then keeps scanning
 the rest of the file and reports later errors as separate diagnostics.
 
+Each run also writes a log file beside the program input as `PROGRAM.log`, or
+to `command-line.log` for command-line programs. The log records created
+definitions in specs format and any reported errors.
+
 ## Type Profiles
 
 The type system is profile-dependent.
@@ -289,4 +301,5 @@ Run the same program through the Java implementation:
 ```
 
 For custom profiles, pass explicit `--types`, `--specs`, and `--prog`
-arguments.
+arguments. Test runs also create adjacent `.log` files for created definitions
+and diagnostics.

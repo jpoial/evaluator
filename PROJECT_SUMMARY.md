@@ -471,6 +471,10 @@ Two details matter:
 1. `ProgText(String[] text, TypeSystem ts, SpecSet ss)` tokenizes CLI input, interprets parser words, tracks interpretation vs compilation state, parses colon definitions, and registers any defined words before evaluating the remaining top-level program.
 2. `ProgText(String fileName, TypeSystem ts, SpecSet ss)` does the same for a text file, including support for declared control structures, file-based diagnostics with line/column spans, and recovery after many source errors so later problems can still be reported.
 
+Program-file comments are now profile-driven parser words from the shared spec
+file, so Java and `gforth` follow the same per-profile behavior for inputs
+such as backslash line comments.
+
 So the class is still a compact front end rather than a full Forth parser, but it is now a real supported entry point for both command-line and file-based checking.
 
 ## `SpecList`
@@ -497,8 +501,9 @@ It creates a `TypeSystem`, loads a `SpecSet`, parses either a program file or
 command-line program words into `ProgText`, evaluates the resulting `SpecList`,
 and prints the chosen profile/files, the reconstructed program text, the
 top-level word sequence, and an annotated stack-effect listing. When parsing
-collects recoverable errors, it prints the rendered diagnostics and exits with
-failure.
+collects recoverable errors, it prints the rendered diagnostics, writes a
+`PROGRAM.log` or `command-line.log` file containing created definitions and
+errors, and exits with failure.
 
 This is useful for experimentation, but it is still a compact CLI rather than
 a polished toolchain integration point.

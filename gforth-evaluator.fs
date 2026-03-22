@@ -2638,11 +2638,22 @@ variable ev-eval-result
 : ev-seq-add { word span spec seq -- }
   spec span word ev-spec-with-origin seq ev-vec-push ;
 
+: ev-current-program-span ( -- span|0 )
+  ev-current-program-token @ dup if
+    ev-word-span@
+  else
+    drop
+    0
+  then ;
+
 \ Evaluates a linear sequence of runtime effects and raises a contextual clash if composition fails.
 : ev-seq-evaluate { seq context ts -- spec }
   seq ts ev-spec-list-evaluate dup if exit then
   drop
-  s" Type clash in " ev-scopy context ev-scat2 0 0 ev-error-msg ;
+  s" Type clash in " ev-scopy context ev-scat2
+  0
+  ev-current-program-span
+  ev-error-msg ;
 
 : ev-control-close-match? { role stage st -- flag }
   role st ev-struct.close + @ ev-s= 0= if false exit then
@@ -2964,8 +2975,17 @@ is ev-parse-definition-structure
   prog ev-prog.specs + @ s" top-level program" ev-scopy ts ev-seq-evaluate ;
 
 : ev-prog-add-checked-word { word span spec prog ts -- }
-  drop
-  word span spec prog ev-prog-add-word ;
+  word span spec prog ev-prog-add-word
+  prog ts ['] ev-prog-current-effect catch dup if
+    { code }
+    prog ev-prog-discard-last
+    code ev-error# = if
+      ev-report-current-diagnostic
+      exit
+    then
+    code throw
+  then
+  drop drop ;
 
 : ev-prog-words>sptr { prog -- s }
   ev-sempty { out }

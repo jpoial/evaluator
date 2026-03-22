@@ -101,8 +101,8 @@ public class TextScanner {
 
    /**
     * Reads the next program word using whitespace as the delimiter.
-    * Unlike nextWord(), this leaves '#' available inside ordinary word names
-    * so source comments can be modeled by parser words instead.
+    * Unlike nextWord(), this leaves parser-word comments such as '\' or '#'
+    * in the token stream so shared spec files can model them explicitly.
     * @return scanned program word or null at end of input
     */
    SourceWord nextProgramWord() {
@@ -326,7 +326,8 @@ public class TextScanner {
    } // end of readWord()
 
    /**
-    * Reads one program word without treating '#' as an implicit delimiter.
+    * Reads one program word without treating parser-word comment markers such
+    * as '\' or '#' as implicit delimiters.
     * @param stopChars extra delimiter characters
     * @return scanned word or null if a delimiter is encountered immediately
     */
@@ -434,7 +435,7 @@ public class TextScanner {
    } // end of advance()
 
    /**
-    * Skips a hash-style line comment.
+    * Skips one backslash-style line comment used by type/spec scanners.
     */
    void skipLineComment() {
       while (!atEnd()) {
