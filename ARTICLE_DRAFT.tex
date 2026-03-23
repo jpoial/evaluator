@@ -60,9 +60,10 @@ algebraic form as effect composition, branch merging, and invariant extraction.
 
 The point of this article is not merely that these analogies exist. It is that
 in the stack-language setting they can be made concrete with very small
-mathematical machinery. A stack effect is a pair of symbolic stacks; sequencing
-is partial multiplication; conditional convergence is a greatest lower bound in
-a must-order; loop reasoning is approximated by an idempotent effect or,
+mathematical machinery. A non-clashing stack effect is a pair of symbolic
+stacks, with a separate clash element for failure; sequencing is partial
+multiplication; conditional convergence is a greatest lower bound in a
+must-order; loop reasoning is approximated by an idempotent effect or,
 equivalently, by a local fixpoint surrogate.
 
 \section{Historical Lineage}
@@ -82,17 +83,18 @@ just notation: it can be executed as an analyzer.
 
 Let $(T, \leq)$ be a finite preorder of abstract types. The order is read as
 ``is at least as specific as'' or, operationally, ``can be used where the other
-type is expected.'' For example, one may have
+type is expected.'' In the examples below we write $<$ for the strict part of
+this preorder, following the notation of the earlier papers. One may have
 \[
-\textit{char} \leq +n \leq n \leq X
+\textit{char} < +n < n < x
 \]
 \[
-\textit{a-addr} \leq \textit{c-addr} \leq \textit{addr} \leq u \leq X
+\textit{a-addr} < \textit{c-addr} < \textit{addr} < u < x
 \]
 \[
-\textit{flag} \leq X
+\textit{flag} < x
 \]
-where $X$ is the most general stack-cell type.
+where $x$ is the least exact stack-cell type.
 
 A symbolic stack item is a pair
 \[
@@ -108,11 +110,15 @@ is topmost.
 
 \subsection{Effects}
 
-A stack effect is a pair of symbolic stacks
+A stack effect is an element of
 \[
-e = (L, R) \in \Sigma^* \times \Sigma^*
+S = (\Sigma^* \times \Sigma^*) \cup \{\emptyset\}
 \]
-usually written in Forth notation as
+and a non-clashing effect is written formally as
+\[
+e = (L \to R)
+\]
+with the familiar Forth-style display
 \[
 ( L \; -- \; R )
 \]
@@ -125,33 +131,32 @@ on the boundary can be unified consistently.
 
 We distinguish two special elements:
 \[
-1 = (\epsilon, \epsilon) \qquad \text{identity effect}
+1 = (\, \to \,) \qquad \text{identity effect}
 \]
 \[
-0 = \text{clash / impossible effect}
+\emptyset \qquad \text{type clash / impossible effect}
 \]
 
 The identity effect corresponds to ``no change.'' The clash effect is the
 failure element produced by incompatible types or impossible unifications.
 
-\subsection{Type meet on comparable boundary symbols}
+\subsection{Matching of boundary symbols}
 
-If two types $t$ and $u$ are comparable, their boundary unification keeps the
-more specific one:
+If two boundary symbols are matched, the more exact type wins, exactly as in the
+earlier typed-wildcard calculus. Write $t \perp u$ when the two types are
+incompatible. Then
 \[
-\operatorname{meet}_T(t, u) =
+\operatorname{match}(t[i], u[j]) =
 \begin{cases}
-t & \text{if } t \leq u, \\
-u & \text{if } u \leq t, \\
-\text{undefined} & \text{otherwise.}
+t[k] & \text{if } t \leq u, \\
+u[k] & \text{if } u \leq t, \\
+\emptyset & \text{if } t \perp u,
 \end{cases}
 \]
+where $k$ is a fresh index.
 
-For symbolic values $t[i]$ and $u[j]$, unification produces a fresh symbol
-\[
-\mu(t[i], u[j]) = \operatorname{meet}_T(t, u)[k]
-\]
-with a new identity index $k$. Intuitively, the two local boundary variables
+Operationally, one substitutes the fresh winner for both boundary symbols
+throughout the effect sequence. Intuitively, the two local boundary variables
 become one shared symbolic value.
 
 This small operation is where static type checking and symbolic execution meet:
@@ -162,30 +167,30 @@ substitution.
 
 \subsection{Operation I: composition of linear effects}
 
-Sequential execution is represented by partial multiplication. At the semantic
-level, if $\llbracket e \rrbracket$ denotes the partial transformer induced by
-effect $e$, then
+Sequential execution is represented by partial multiplication. If $s(\alpha)$
+denotes the stack effect of a word or phrase $\alpha$, then
 \[
-\llbracket e_1 * e_2 \rrbracket = \llbracket e_2 \rrbracket \circ \llbracket e_1 \rrbracket
+s(\alpha \beta) = s(\alpha) \cdot s(\beta)
 \]
-whenever the output boundary of $e_1$ is compatible with the input boundary of
-$e_2$.
+whenever the output boundary of $s(\alpha)$ is compatible with the input
+boundary of $s(\beta)$.
 
 Operationally, multiplication is computed from the top of stack inward. Suppose
 \[
-e_1 = (L_1, R_1\, a)
+e_1 = (L_1 \to R_1\, a)
 \]
 \[
-e_2 = (L_2\, b, R_2)
+e_2 = (L_2\, b \to R_2)
 \]
 where $a$ is the top output symbol of $e_1$ and $b$ is the top input symbol of
-$e_2$. If $\mu(a, b)$ is undefined, then $e_1 * e_2 = 0$. Otherwise let
-$z = \mu(a, b)$. Substitute $z$ for both $a$ and $b$, remove the matched
-boundary pair, and continue recursively. If one side runs out of boundary
-symbols first, the unmatched prefix is carried through.
+$e_2$. If $\operatorname{match}(a, b) = \emptyset$, then
+$e_1 \cdot e_2 = \emptyset$. Otherwise let
+$z = \operatorname{match}(a, b)$. Substitute $z$ for both $a$ and $b$, remove
+the matched boundary pair, and continue recursively. If one side runs out of
+boundary symbols first, the unmatched prefix is carried through.
 
 This gives composition a semigroup flavor: it is associative when defined, it
-has identity $1$, and it admits a zero-like clash element $0$. In the simplest
+has identity $1$, and it admits a clash element $\emptyset$. In the simplest
 untyped case the structure is closely related to the algebraic objects used in
 the early papers~\cite{poial1990}. In the typed symbolic case the multiplication
 becomes partial and information-sensitive, but the semigroup intuition remains
@@ -212,17 +217,17 @@ guarantee.
 In this order, branch convergence in a must-analysis is modeled by greatest
 lower bound:
 \[
-e_1 \sqcap e_2 = \operatorname{glb}(e_1, e_2)
+\operatorname{glb}(e_1, e_2)
 \]
 
 The direction matters. In may-analysis, one usually merges by least upper
 bound, because one wants all behaviors that may happen. Here the goal is the
 opposite: we want the strongest effect guaranteed on all paths. Therefore the
-correct operator is meet, not join.
+correct operator is $\operatorname{glb}$, not $\operatorname{lub}$.
 
 For a conditional with branch effects $p$ and $q$, the abstract effect is
 \[
-(\textit{flag} \; -- \; ) * (p \sqcap q)
+(\textit{flag} \; -- \; ) \cdot \operatorname{glb}(p, q)
 \]
 up to the exact guard convention of the language. If $p$ and $q$ are
 incomparable, the merge is undefined and the analysis correctly rejects the
@@ -236,26 +241,19 @@ and identity.
 \subsection{Operation III: loop invariants as idempotent effects}
 
 Loops require a stable summary for arbitrary repetition. Let $b$ be the effect
-of one loop body execution. An exact must-summary for unbounded repetition is a
-fixpoint-like object. Algebraically, the desired summary should not change when
-composed with itself:
+of one loop body execution. Algebraically, the desired summary should not change
+when composed with itself:
 \[
-i * i = i
+i = i \cdot i
 \]
 
 Such an $i$ is idempotent. As in classical invariant reasoning, idempotence
 expresses stability: once the loop invariant has been reached, one more
 iteration preserves it.
 
-An exact closure would resemble an infinite meet over repeated compositions,
-for example
+In practice the later papers use the local approximation
 \[
-b^\omega = \bigsqcap_{n \geq 1} b^n
-\]
-when this object exists in the analysis order. In practice one often uses a
-local approximation
-\[
-\pi^*(b) = b \sqcap (b * b)
+\operatorname{glb}(b, b \cdot b)
 \]
 which asks what remains true after one iteration and after two iterations, then
 keeps only the common guarantee. This is not a full Kleene star, but it plays a
@@ -283,30 +281,30 @@ equations.
 
 For straight-line code:
 \[
-\llbracket w_1 w_2 \ldots w_n \rrbracket
-= \llbracket w_1 \rrbracket * \llbracket w_2 \rrbracket * \cdots * \llbracket w_n \rrbracket
+s(w_1 w_2 \ldots w_n)
+= s(w_1) \cdot s(w_2) \cdot \cdots \cdot s(w_n)
 \]
 
 For a two-way conditional:
 \[
-\llbracket \textit{IF}\ P\ \textit{ELSE}\ Q\ \textit{THEN} \rrbracket
-= \llbracket \textit{IF} \rrbracket * (\llbracket P \rrbracket \sqcap \llbracket Q \rrbracket)
+s(\textit{IF}\ P\ \textit{ELSE}\ Q\ \textit{THEN})
+= (\textit{flag} \; -- \; ) \cdot \operatorname{glb}(s(P), s(Q))
 \]
 
 For a conditional without explicit else branch:
 \[
-\llbracket \textit{IF}\ P\ \textit{THEN} \rrbracket
-= \llbracket \textit{IF} \rrbracket * (\llbracket P \rrbracket \sqcap 1)
+s(\textit{IF}\ P\ \textit{THEN})
+= (\textit{flag} \; -- \; ) \cdot \operatorname{glb}(s(P), 1)
 \]
 since the false branch has effect $1$.
 
 For a loop body $B$, the idealized repeated summary is an invariant
 $\operatorname{Inv}(B)$ satisfying
 \[
-\operatorname{Inv}(B) * \operatorname{Inv}(B) = \operatorname{Inv}(B)
+\operatorname{Inv}(B) = \operatorname{Inv}(B) \cdot \operatorname{Inv}(B)
 \]
 and intended to approximate arbitrary repetition. Operationally one may use
-$\pi^*(\llbracket B \rrbracket)$ or a related fixpoint iteration.
+$\operatorname{glb}(s(B), s(B) \cdot s(B))$ or a related fixpoint iteration.
 
 These equations are small enough to fit on a page, but they already capture the
 essential analysis pattern for sequencing, branching, and iteration.
@@ -417,9 +415,55 @@ must-style use of greatest lower bounds together with idempotent loop
 summaries. In a conventional control-flow graph this would look unusual. In a
 stack-effect setting it feels almost inevitable.
 
+The typechecker application shows that this calculus is practical as
+well as compact. In the present project it appears as a native Gforth program,
+implemented as a single-file evaluator, that reads a declared type hierarchy, a
+vocabulary of word specifications, and a source program, then computes symbolic
+stack effects for linear code, conditionals, loops, literals, parser words, and
+new definitions. The checker accepts both legacy built-in control structures and
+declarative syntax/effect descriptions, so the same three core operations,
+composition, $\operatorname{glb}$, and idempotent loop approximation, are used
+directly in the executable tool. When a composition fails, the application does
+not merely reject the program abstractly: it reports source locations with
+line-and-column information, shows the offending line, and prints symbolic stack
+annotations that make the inferred behavior visible to the programmer.
+
+A very small pair of input files already shows the style of this application. A
+type file may declare canonical names, aliases, subtype relations, and scanner
+names:
+
+\begin{verbatim}
+type x cell X
+type n number
+type flag boolean
+type a-addr aa
+rel n < x
+rel flag < n
+rel a-addr < x
+scanner eol "\n"
+\end{verbatim}
+
+The corresponding specification file assigns stack effects and optional parser
+or control metadata to words:
+
+\begin{verbatim}
+DUP ( x[1] -- x[1] x[1] )
+0= ( n -- flag )
+@ ( a-addr -- x )
+"#" parse until eol ( -- )
+literal integer ( -- n )
+IF control if ( flag -- )
+ELSE control else ( -- )
+THEN control fi ( -- )
+\end{verbatim}
+
+Even this tiny example is enough for the checker to analyze simple linear code,
+integer literals, comments, and conditionals in the same symbolic framework.
+
 There are also clear limitations. A single effect may be too coarse for
 path-sensitive reasoning in rich control flow. Exact iteration may require
-larger closure operators than $\pi^*$. Data stack and return stack
+larger closure operators than the local approximation
+$\operatorname{glb}(e, e \cdot e)$. Data stack and return stack
 interactions, heap structure, aliasing, and user-defined control operators may
 all force the domain to grow. But these are standard tensions in static
 analysis: precision, cost, and compositionality are always in competition.
@@ -446,7 +490,7 @@ same.
 
 \bibitem{poial1990}
 Jaanus Poial.
-\newblock ``Algebraic Specifications of Stack-Effects for Forth Programs.''
+\newblock ``Algebraic Specifications of Stack Effects for Forth Programs.''
 \newblock In \emph{1990 FORML Conference Proceedings, euroFORML'90 Conference},
 Ampfield, Hampshire, UK, 12--14 October 1990. FIG, 1991, pp. 282--290.
 
@@ -505,7 +549,7 @@ Robert W. Floyd.
 \bibitem{hoare1969}
 C. A. R. Hoare.
 \newblock ``An Axiomatic Basis for Computer Programming.''
-\newblock \emph{Communications of the ACM} 12(10), 1969, pp. 576--580.
+\newblock \emph{Communications of the ACM} 12(10), 1969, pp. 576--580, 583.
 \newblock doi:\href{https://doi.org/10.1145/363235.363259}{10.1145/363235.363259}.
 
 \bibitem{leroy2003}
@@ -523,7 +567,7 @@ Hobart, Australia, 2006, pp. 27--39.
 \bibitem{stoddart1993}
 Bill Stoddart and Peter J. Knaggs.
 \newblock ``Type Inference in Stack Based Languages.''
-\newblock \emph{Formal Aspects of Computing} 5, 1993, pp. 289--298.
+\newblock \emph{Formal Aspects of Computing} 5(4), 1993, pp. 289--298.
 \newblock doi:\href{https://doi.org/10.1007/BF01212404}{10.1007/BF01212404}.
 
 \end{thebibliography}
