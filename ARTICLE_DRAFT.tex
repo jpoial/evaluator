@@ -7,7 +7,7 @@
 \usepackage{hyperref}
 
 \title{Static type checker for Forth}
-\author{Jaanus Pöial \\ Tallinn University of Technology}
+\author{Jaanus Poial \\ Tallinn University of Technology}
 
 \begin{document}
 
@@ -19,69 +19,42 @@ stack languages. The central object is the symbolic stack effect, a typed and
 identity-sensitive abstraction of how a word transforms the data stack. Three
 operations organize the calculus: composition of linear effects, branch merging
 as greatest lower bound in a must-analysis order, and loop summarization by
-idempotent invariants. The article argues that the resulting calculus should be understood as
-an intersection of semigroup-style algebra, symbolic execution, abstract
-interpretation, and static type systems for low-level code. The three basic operators 
-of program analysis appear here in
-a compact form: sequencing becomes effect multiplication, control-flow
-join becomes greatest lower bound, and loop reasoning becomes the search for
-idempotent summaries.
+idempotent effects. These operations provide a basis for reasoning about
+sequencing, control-flow joins, and repeated execution in Forth-like programs.
 \end{abstract}
 
 \noindent\textbf{Keywords:} Program analysis; static type checking; symbolic
-execution; abstract interpretation; stack languages; Forth.
+stack effects; stack languages; Forth.
 
 \section{Introduction}
 
-Forth programs are short, dense, and operationally transparent, but the burden
-of reasoning is shifted onto the stack. The meaning of a phrase is often
-obvious to an expert and opaque to everyone else. Traditional stack comments of
-the form \texttt{( before -- after )} help, but they remain informal,
-non-compositional in practice, and usually too weak to express either type
-refinement or value identity through stack shuffling.
+Forth programs are sequences of stack operations, so much of the reasoning is
+shifted onto the stack. Traditional stack comments of the form
+\texttt{( before -- after )} help, but they remain informal and often do not
+provide a compositional account of type refinement or value identity through
+stack shuffling.
 
-The natural response is to treat stack effects as semantic objects rather than
-mere comments. Once we do that, three classical program-analysis questions
-appear immediately.
+One response is to treat stack effects as semantic objects rather than mere
+comments. The main questions are how to summarize a linear sequence of words,
+how to merge alternative branches, and how to compute a stable summary for
+repeated execution.
 
-\begin{enumerate}
-\item How do we summarize a linear sequence of words?
-\item How do we merge information from alternative branches?
-\item How do we compute a stable summary for repeated execution?
-\end{enumerate}
-
-In mainstream static analysis these questions correspond to transfer-function
-composition, join or meet at control-flow merge points, and fixpoint
-computation for loops. In a stack-effect calculus they reappear in a more
-algebraic form as effect composition, branch merging, and invariant extraction.
-
-The point of this article is not merely that these analogies exist. It is that
-in the stack-language setting they can be made concrete with very small
-mathematical machinery. A non-clashing stack effect is a pair of symbolic
-stacks, with a separate clash element for failure; sequencing is partial
-multiplication; conditional convergence is a greatest lower bound in a
-must-order; loop reasoning is approximated by an idempotent effect or,
-equivalently, by a local fixpoint approximation.
-
-\section{Historical Lineage}
-
-Linear stack effects were formalized algebraically
-in~\cite{poial1990}, then generalized to multiple effects so that
-control-sensitive behavior could be represented~\cite{poial1991}. Typed
-wildcards, polymorphism, and inheritance were added in~\cite{poial2002}, and
-the same ideas were later recast in the language of static analysis,
-must-analysis, and loop reasoning~\cite{poial2006}. The executable framework
-of~\cite{poial2008} shows that the calculus is not merely notation: it can be
-run as an analyzer.
+This article formulates these questions in a stack-effect calculus. A
+non-clashing stack effect is a pair of symbolic stacks, with a separate clash
+element for failure; sequencing is partial multiplication; branch convergence
+is a greatest lower bound in a must-order; and loop reasoning is approximated
+by an idempotent effect or a local fixpoint approximation.
+The calculus developed here follows the line of work
+in~\cite{poial1990,poial1991,poial2002,poial2006} and its executable
+implementation in~\cite{poial2008}.
 
 \section{Mathematical Setting}
 
-\subsection{Types and symbolic values}
+\paragraph{Types and symbolic values.}
 
-Let $(T, \leq)$ be a finite partial order of abstract types. The order is read as
-``is at least as specific as'' or, operationally, ``can be used where the other
-type is expected.'' Throughout this article, $<$ denotes the strict part of
-this partial order. For example,
+Let $(T, \leq)$ be a finite partial order of abstract types. The order is read
+as ``is at least as specific as.'' Throughout this article, $<$ denotes the
+strict part of this partial order. For example,
 \[
 \textit{char} < +n < n < x
 \]
@@ -93,32 +66,18 @@ this partial order. For example,
 \]
 where $x$ is the least exact stack-cell type.
 
-A symbolic stack item is a pair
-\[
-(t, i) \in T \times \mathbb{N}
-\]
-where $t$ is its type and $i$ is its identity index. We write this as $t[i]$.
-The index matters: $x[1]$ and $x[2]$ are distinct symbolic values even if they
-share the same type.
+A symbolic stack item is a pair $(t, i) \in T \times \mathbb{N}$, written
+$t[i]$. The index distinguishes symbolic values that share the same type.
 
 Let $\Sigma = T \times \mathbb{N}$. A symbolic stack is a finite sequence in
 $\Sigma^*$, with the top of stack on the right. Thus $a\ b\ c$ means that $c$
 is topmost.
 
-\subsection{Effects}
+\paragraph{Effects.}
 
 A stack effect is an element of
-\[
-S = (\Sigma^* \times \Sigma^*) \cup \{\emptyset\}
-\]
-and a non-clashing effect is written formally as
-\[
-e = (L \to R)
-\]
-with the familiar Forth-style display
-\[
-( L \; -- \; R )
-\]
+$S = (\Sigma^* \times \Sigma^*) \cup \{\emptyset\}$. A non-clashing effect is
+written formally as $e = (L \to R)$, or in Forth style as $( L \; -- \; R )$,
 where $L$ is the required suffix of the input stack and $R$ is the produced
 suffix of the output stack.
 
@@ -126,21 +85,14 @@ The effect should be read relationally. If the current abstract stack has the
 form $S L$, then after the effect it becomes $S R$, provided that the symbols
 on the boundary can be unified consistently.
 
-We distinguish two special elements:
-\[
-1 = (\, \to \,) \qquad \text{identity effect}
-\]
-\[
-\emptyset \qquad \text{type clash / impossible effect}
-\]
+We distinguish two special elements: $1 = (\, \to \,)$, the identity effect,
+and $\emptyset$, the clash effect produced by incompatible types or impossible
+unifications.
 
-The identity effect corresponds to ``no change.'' The clash effect is the
-failure element produced by incompatible types or impossible unifications.
+\paragraph{Matching of boundary symbols.}
 
-\subsection{Matching of boundary symbols}
-
-If two boundary symbols are matched, the rule used here lets the more exact
-type win. Write $t \perp u$ when the two types are
+If two boundary symbols are matched, the rule used here selects the more
+specific compatible type. Write $t \perp u$ when the two types are
 incompatible. Then
 \[
 \operatorname{match}(t[i], u[j]) =
@@ -152,259 +104,112 @@ u[k] & \text{if } u \leq t, \\
 \]
 where $k$ is a fresh index.
 
-Operationally, one substitutes the fresh winner for both boundary symbols
+Operationally, one substitutes the fresh result for both boundary symbols
 throughout the effect sequence. Intuitively, the two local boundary variables
 become one shared symbolic value.
 
-This small operation is where static type checking and symbolic execution meet:
-the type becomes more precise, while identity is preserved through
-substitution.
+This operation refines the type while preserving identity through substitution.
 
 \section{The Three Core Operations}
 
-\subsection{Operation I: composition of linear effects}
+\paragraph{Composition.}
 
-Sequential execution is represented by partial multiplication. If $s(\alpha)$
+Sequential execution is represented by partial multiplication: if $s(\alpha)$
 denotes the stack effect of a word or phrase $\alpha$, then
-\[
-s(\alpha \beta) = s(\alpha) \cdot s(\beta)
-\]
-whenever the output boundary of $s(\alpha)$ is compatible with the input
-boundary of $s(\beta)$.
+$s(\alpha \beta) = s(\alpha) \cdot s(\beta)$ whenever the output boundary of
+$s(\alpha)$ is compatible with the input boundary of $s(\beta)$.
 
-Operationally, multiplication is computed from the top of stack inward. Suppose
-\[
-e_1 = (L_1 \to R_1\, a)
-\]
-\[
-e_2 = (L_2\, b \to R_2)
-\]
-where $a$ is the top output symbol of $e_1$ and $b$ is the top input symbol of
-$e_2$. If $\operatorname{match}(a, b) = \emptyset$, then
-$e_1 \cdot e_2 = \emptyset$. Otherwise let
+Operationally, multiplication is computed from the top of stack inward.
+Suppose $e_1 = (L_1 \to R_1\, a)$ and $e_2 = (L_2\, b \to R_2)$, where $a$ is
+the top output symbol of $e_1$ and $b$ is the top input symbol of $e_2$. If
+$\operatorname{match}(a, b) = \emptyset$, then $e_1 \cdot e_2 = \emptyset$.
+Otherwise let
 $z = \operatorname{match}(a, b)$. Substitute $z$ for both $a$ and $b$, remove
 the matched boundary pair, and continue recursively. If one side runs out of
 boundary symbols first, the unmatched prefix is carried through.
 
-Composition can be described as a polycyclic monoid: it is associative when defined, it
-has identity $1$, and it admits a clash (null) element $\emptyset$. In the simplest
-case this specializes to the algebraic setting of~\cite{poial1990}. In
-the typed symbolic case the multiplication
-becomes partial and information-sensitive, but the semigroup intuition remains.
+Composition can be described as a polycyclic monoid: it is associative when
+defined, it has identity $1$, and it admits a clash (null) element
+$\emptyset$. In the untyped setting this specializes to the algebraic setting
+of~\cite{poial1990}. In the typed symbolic case the multiplication becomes
+partial and information-sensitive, but the semigroup intuition remains.
 
-The key analysis insight is that composition is not mere concatenation of stack
-comments. Boundary unification propagates substitutions across the effect being
-built. Therefore later uses of a value can refine earlier symbolic positions.
-This is why stack shuffling and typed memory access can be handled by one and
-the same operation.
-
-\subsection{Operation II: branch merging as greatest lower bound}
+\paragraph{Branch merging.}
 
 For control-flow joins we need an information order. Let $\gamma(e)$ be the set
-of concrete stack transformations represented by abstract effect $e$. Define
-\[
-e_1 \leq e_2 \qquad \text{iff} \qquad \gamma(e_1) \subseteq \gamma(e_2)
-\]
+of concrete stack transformations represented by abstract effect $e$, and
+define $e_1 \leq e_2$ iff $\gamma(e_1) \subseteq \gamma(e_2)$.
 
 Thus $e_1 \leq e_2$ means that $e_1$ is at least as informative as $e_2$; it
 describes a smaller set of possible behaviors and therefore gives a stronger
 guarantee.
 
 In this order, branch convergence in a must-analysis is modeled by greatest
-lower bound:
-\[
-\operatorname{glb}(e_1, e_2)
-\]
+lower bound $\operatorname{glb}(e_1, e_2)$.
 
 The direction matters. In may-analysis, one usually merges by least upper
 bound, because one wants all behaviors that may happen. Here the goal is the
-opposite: we want the strongest effect guaranteed on all paths. Therefore the
-correct operator is $\operatorname{glb}$, not $\operatorname{lub}$.
+strongest effect guaranteed on all paths. Therefore the appropriate operator is
+$\operatorname{glb}$, not $\operatorname{lub}$.
 
 For a conditional with branch effects $p$ and $q$, the abstract effect is
-\[
-(\textit{flag} \; -- \; ) \cdot \operatorname{glb}(p, q)
-\]
-up to the exact guard convention of the language. If $p$ and $q$ are
-incomparable, the merge is undefined and the analysis correctly rejects the
+$(\textit{flag} \; -- \; ) \cdot \operatorname{glb}(p, q)$, up to the exact
+guard convention of the language. If $p$ and $q$ are
+incomparable, the merge is undefined and the analysis rejects the
 conditional as lacking a common guaranteed stack behavior.
 
-This is precisely analogous to meet-over-paths formulations in monotone
-frameworks and abstract interpretation, except that the property being merged is
-not a map from variables to facts but a symbolic summary of stack shape, types,
-and identity.
+\paragraph{Loop invariants.}
 
-\subsection{Operation III: loop invariants as idempotent effects}
+Loops require a stable summary (invariant) for arbitrary repetition. Let $b$ be
+the effect of one loop body execution. Algebraically, the desired summary
+should satisfy $i = i \cdot i$. A local approximation is
+$\operatorname{glb}(b, b \cdot b)$, which keeps only the guarantee common to
+one and two iterations. This is not a full Kleene star, but it extracts the
+repeated, stable part of an effect.
+The idempotent fragment is therefore the part used for loop reasoning because
+it captures the stable part of the domain~\cite{poial2006}.
 
-Loops require a stable summary (invariant) for arbitrary repetition. Let $b$ be the effect
-of one loop body execution. Algebraically, the desired summary should not change
-when composed with itself:
-\[
-i = i \cdot i
-\]
+\section{Type-System Perspective}
 
-Such an $i$ is idempotent. As in classical invariant reasoning, idempotence
-expresses stability: once the loop invariant has been reached, one more
-iteration preserves it.
-
-A convenient local approximation is
-\[
-\operatorname{glb}(b, b \cdot b)
-\]
-which asks what remains true after one iteration and after two iterations, then
-keeps only the common guarantee. This is not a full Kleene star, but it plays a
-related role: it extracts the repeated, stable part of an effect.
-
-The connection to loop invariants is direct. In Hoare-style reasoning an
-invariant $I$ must hold before and after the loop body. In this calculus an
-idempotent effect is the stack-transformational analogue of that requirement.
-One can therefore read the loop operator in two equivalent ways:
-
-\begin{itemize}
-\item algebraically, as the search for an idempotent summary;
-\item analytically, as the search for a stable abstract transformer.
-\end{itemize}
-
-A useful structural point is that all effects support greatest lower bound and
-thus form a semilattice, but the idempotent fragment is especially important
-for loop reasoning because it is the stable part of the domain~\cite{poial2006}.
-
-\section{Derived Forms for Control Structures}
-
-Once the three operators are available, the usual control forms become small
-equations.
-
-For straight-line code:
-\[
-s(w_1 w_2 \ldots w_n)
-= s(w_1) \cdot s(w_2) \cdot \cdots \cdot s(w_n)
-\]
-
-For a two-way conditional:
-\[
-s(\textit{IF}\ P\ \textit{ELSE}\ Q\ \textit{THEN})
-= (\textit{flag} \; -- \; ) \cdot \operatorname{glb}(s(P), s(Q))
-\]
-
-For a conditional without explicit else branch:
-\[
-s(\textit{IF}\ P\ \textit{THEN})
-= (\textit{flag} \; -- \; ) \cdot \operatorname{glb}(s(P), 1)
-\]
-since the false branch has effect $1$.
-
-For a loop body $B$, the idealized repeated summary is an invariant
-$\operatorname{Inv}(B)$ satisfying
-\[
-\operatorname{Inv}(B) = \operatorname{Inv}(B) \cdot \operatorname{Inv}(B)
-\]
-and intended to approximate arbitrary repetition. Operationally one may use
-$\operatorname{glb}(s(B), s(B) \cdot s(B))$ or a related fixpoint iteration.
-
-These equations are small enough to fit on a page, but they already capture the
-essential analysis pattern for sequencing, branching, and iteration.
-
-\section{Program-Analysis Analogues}
-
-\subsection{Transfer-function composition}
-
-The nearest classical analogue of stack-effect composition is transfer-function
-composition in dataflow analysis. Kildall's framework~\cite{kildall1973}
-already treats a program point as carrying information transformed by monotone
-functions. The difference here is that the abstract state is not an environment
-over named variables but a symbolic stack with explicit value identity.
-
-In other words, the calculus is a dataflow framework in which the live carrier
-of information is positional rather than lexical.
-
-\subsection{Meet-over-paths and abstract interpretation}
-
-Branch merging by greatest lower bound places the calculus very close to
-abstract interpretation~\cite{cousot1977}. The semantic picture is familiar:
-
-\begin{itemize}
-\item there is a concrete semantics,
-\item an abstract domain of effects,
-\item a soundness relation via concretization,
-\item monotone operators on abstract information,
-\item and stable objects for loops.
-\end{itemize}
-
-What is unusual is the direction of approximation. Because the calculus is
-formulated as must-analysis, the informative operator at joins is meet. This is
-the dual of the more common may-analysis setting. The effect calculus is
-therefore best seen as a must-style abstract interpretation over symbolic
-stacks.
-
-\subsection{Symbolic execution}
-
-The use of typed wildcards makes the method close to symbolic execution in the
-sense of King~\cite{king1976}. A stack item is represented by a symbol rather
-than a concrete value; operations transform symbolic expressions; path
-combinations retain only what can be guaranteed. The important difference is
-that this calculus is intentionally shallow: it does not attempt full path
-predicates or arbitrary theorem proving. It concentrates on stack shape, type
-compatibility, and identity flow.
-
-That restriction is exactly why the method remains small,
-compositional, and usable for low-level stack code.
-
-\subsection{Hoare-Floyd invariants}
-
-The loop operator has a clear analogue in Floyd's inductive assertions~\cite{floyd1967}
-and Hoare's axiomatic reasoning~\cite{hoare1969}. In both cases the goal is to
-find a property preserved by the loop body. Here the property is not a
-first-order formula over store variables but a symbolic effect on the stack.
-Idempotence plays the role normally played by inductiveness.
-
-\subsection{Stack-based bytecode verification and low-level typing}
-
-The calculus also has natural relatives in static typing for stack-based
+The calculus also has related approaches in static typing for stack-based
 low-level languages. Bytecode verification for the JVM tracks stack height and
 types across control-flow joins~\cite{leroy2003}. Compositional type systems
 for stack-based low-level languages~\cite{saabas2006} pursue a similar goal
 with more conventional type-theoretic machinery. Type inference for stack-based
 languages~\cite{stoddart1993} is an earlier attempt.
 
-The distinctive feature of the calculus developed here is the combination of three elements in one object:
+Typical inequalities in the type hierarchy are
+\[
+\textit{char} < +n < n < x
+\]
+\[
+\textit{a-addr} < \textit{c-addr} < \textit{addr} < u < x
+\]
+\[
+\textit{flag} < x
+\]
+These inequalities determine which boundary matches are accepted and which
+type refinements are propagated through compositions and merges.
 
-\begin{itemize}
-\item stack shape,
-\item subtype-aware typing,
-\item identity-sensitive symbolic flow.
-\end{itemize}
+One feature of the calculus developed here is the combination of stack shape,
+subtype-aware typing, and identity-sensitive symbolic flow in one object. This
+combination allows stack shuffling to be analyzed without abandoning the effect
+notation used in Forth practice.
 
-That combination makes stack shuffling analyzable without abandoning the
-compact effect notation that Forth programmers would understand.
+\section{Implementation}
 
-\section{Discussion}
+The calculus is implemented here as a native Gforth program, a single-file
+evaluator that reads a declared type hierarchy, a vocabulary of word
+specifications, and a source program, then computes symbolic stack effects for
+linear code, conditionals, loops, literals, parser words, and new definitions.
+The implementation accepts both legacy built-in control structures and
+declarative syntax/effect descriptions, so the same three core operations,
+composition, $\operatorname{glb}$, and idempotent loop approximation, appear
+directly in the checker. When a composition fails, the checker reports
+line-and-column diagnostics together with the offending line and symbolic stack
+annotations.
 
-The calculus sits between several mature
-areas without collapsing into any one of them.
-
-\begin{itemize}
-\item It is algebraic because straight-line code is organized by a multiplication-like
-law with identity, failure, and idempotence.
-\item It is type-theoretic because effects carry subtype information and reject
-invalid compositions.
-\item It is symbolic because stack items retain identity rather than becoming
-anonymous type placeholders.
-\item It is an abstract interpretation because branches and loops are handled by
-order-theoretic operators.
-\end{itemize}
-
-To make the discussion concrete, the calculus is implemented here as a native
-Gforth program, a single-file evaluator that reads a declared type hierarchy, a
-vocabulary of word specifications, and a source program, then computes symbolic
-stack effects for linear code, conditionals, loops, literals, parser words, and
-new definitions. The implementation accepts both legacy built-in control
-structures and declarative syntax/effect descriptions, so the same three core
-operations, composition, $\operatorname{glb}$, and idempotent loop
-approximation, appear directly in the checker. When a composition fails, the
-checker reports line-and-column diagnostics together with the offending line and
-symbolic stack annotations.
-
-A very small demo profile illustrates the checker. Using
+The following demo profile illustrates the checker. Using
 types such as \texttt{X}, \texttt{n}, \texttt{char}, \texttt{flag},
 \texttt{c-addr}, and \texttt{a-addr}, together with specifications for
 \texttt{DUP}, \texttt{SWAP}, \texttt{@}, \texttt{C@}, \texttt{0=}, and the
@@ -429,26 +234,16 @@ ULOOP ( n[1] --  n[1] )
 KEEPIF ( X[1] flag --  X[1] X[1] )
 \end{verbatim}
 
-Even this tiny example is enough to show linear code, conditionals, and loop
-skeletons handled in one symbolic framework.
+This example shows linear code, conditionals, and loop skeletons handled in one
+symbolic framework.
 
 \section{Conclusion}
 
-Static analysis for stack languages can be presented in a remarkably small
-algebra. The entire method rests on three operations:
-
-\begin{enumerate}
-\item composition for sequencing,
-\item greatest lower bound for branch convergence,
-\item and idempotent closure for loop invariants.
-\end{enumerate}
-
-Once types and symbolic identities are added, this algebra becomes expressive
-enough to function simultaneously as a type checker, a symbolic executor, and a
-must-analysis. The broader lesson is that stack languages do not need to remain
-outside the main traditions of static analysis. Their structure is different,
-but the central ideas, composition, order, and fixpoint stability, are the
-same.
+Static analysis for stack languages can be presented as an algebra based on
+three operations: composition for sequencing, greatest lower bound for branch
+convergence, and idempotent closure for loop invariants. Once types and
+symbolic identities are added, this algebra can function as a type checker for
+linear code, conditionals, and loops in Forth-like languages.
 
 \begin{thebibliography}{99}
 
@@ -481,40 +276,6 @@ Jaanus Poial.
 \newblock ``Java Framework for Static Analysis of Forth Programs.''
 \newblock In \emph{Proceedings of EuroForth 2008}, Vienna, Austria,
 26--28 September 2008, pp. 20--23.
-
-\bibitem{kildall1973}
-Gary A. Kildall.
-\newblock ``A Unified Approach to Global Program Optimization.''
-\newblock In \emph{Proceedings of the ACM Symposium on Principles of Programming Languages},
-1973, pp. 194--206.
-\newblock doi:\href{https://doi.org/10.1145/512927.512945}{10.1145/512927.512945}.
-
-\bibitem{cousot1977}
-Patrick Cousot and Radhia Cousot.
-\newblock ``Abstract Interpretation: A Unified Lattice Model for Static Analysis of Programs by Construction or Approximation of Fixpoints.''
-\newblock In \emph{Proceedings of the 4th ACM Symposium on Principles of Programming Languages},
-1977, pp. 238--252.
-\newblock doi:\href{https://doi.org/10.1145/512950.512973}{10.1145/512950.512973}.
-
-\bibitem{king1976}
-James C. King.
-\newblock ``Symbolic Execution and Program Testing.''
-\newblock \emph{Communications of the ACM} 19(7), 1976, pp. 385--394.
-\newblock doi:\href{https://doi.org/10.1145/360248.360252}{10.1145/360248.360252}.
-
-\bibitem{floyd1967}
-Robert W. Floyd.
-\newblock ``Assigning Meanings to Programs.''
-\newblock In \emph{Proceedings of Symposia in Applied Mathematics}, Vol. 19,
-\emph{Mathematical Aspects of Computer Science}, American Mathematical Society,
-1967, pp. 19--32.
-\newblock doi:\href{https://doi.org/10.1090/psapm/019/0177187}{10.1090/psapm/019/0177187}.
-
-\bibitem{hoare1969}
-C. A. R. Hoare.
-\newblock ``An Axiomatic Basis for Computer Programming.''
-\newblock \emph{Communications of the ACM} 12(10), 1969, pp. 576--580, 583.
-\newblock doi:\href{https://doi.org/10.1145/363235.363259}{10.1145/363235.363259}.
 
 \bibitem{leroy2003}
 Xavier Leroy.
