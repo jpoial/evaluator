@@ -16,17 +16,14 @@
 \begin{abstract}
 This article develops a mathematical view of static analysis for Forth-like
 stack languages. The central object is the symbolic stack effect, a typed and
-identity-sensitive abstraction of how a word transforms the stack. Three
+identity-sensitive abstraction of how a word transforms the data stack. Three
 operations organize the calculus: composition of linear effects, branch merging
 as greatest lower bound in a must-analysis order, and loop summarization by
-idempotent invariants. Historically, this line of work grew from algebraic
-specifications of stack effects to multiple-effect models, typed wildcards,
-polymorphism, inheritance, and later formulations in the language of program
-analysis. The article argues that the resulting calculus should be understood as
+idempotent invariants. The article argues that the resulting calculus should be understood as
 an intersection of semigroup-style algebra, symbolic execution, abstract
-interpretation, and static type systems for low-level code. It is especially
-interesting because the three basic operators of program analysis appear here in
-an unusually compact form: sequencing becomes effect multiplication, control-flow
+interpretation, and static type systems for low-level code. The three basic operators 
+of program analysis appear here in
+a compact form: sequencing becomes effect multiplication, control-flow
 join becomes greatest lower bound, and loop reasoning becomes the search for
 idempotent summaries.
 \end{abstract}
@@ -64,27 +61,27 @@ mathematical machinery. A non-clashing stack effect is a pair of symbolic
 stacks, with a separate clash element for failure; sequencing is partial
 multiplication; conditional convergence is a greatest lower bound in a
 must-order; loop reasoning is approximated by an idempotent effect or,
-equivalently, by a local fixpoint surrogate.
+equivalently, by a local fixpoint approximation.
 
 \section{Historical Lineage}
 
-The historical background needed here is short. Early work formalized linear
-stack effects algebraically~\cite{poial1990}, then generalized them to multiple
-effects so that control-sensitive behavior could be represented~\cite{poial1991}.
-Later papers add typed wildcards, polymorphism, and inheritance~\cite{poial2002},
-and then recast the same ideas in the language of static analysis,
-must-analysis, and loop reasoning~\cite{poial2006}. The 2008 framework
-paper~\cite{poial2008} matters mainly because it shows that the calculus is not
-just notation: it can be executed as an analyzer.
+Linear stack effects were formalized algebraically
+in~\cite{poial1990}, then generalized to multiple effects so that
+control-sensitive behavior could be represented~\cite{poial1991}. Typed
+wildcards, polymorphism, and inheritance were added in~\cite{poial2002}, and
+the same ideas were later recast in the language of static analysis,
+must-analysis, and loop reasoning~\cite{poial2006}. The executable framework
+of~\cite{poial2008} shows that the calculus is not merely notation: it can be
+run as an analyzer.
 
 \section{Mathematical Setting}
 
 \subsection{Types and symbolic values}
 
-Let $(T, \leq)$ be a finite preorder of abstract types. The order is read as
+Let $(T, \leq)$ be a finite partial order of abstract types. The order is read as
 ``is at least as specific as'' or, operationally, ``can be used where the other
-type is expected.'' In the examples below we write $<$ for the strict part of
-this preorder, following the notation of the earlier papers. One may have
+type is expected.'' Throughout this article, $<$ denotes the strict part of
+this partial order. For example,
 \[
 \textit{char} < +n < n < x
 \]
@@ -142,8 +139,8 @@ failure element produced by incompatible types or impossible unifications.
 
 \subsection{Matching of boundary symbols}
 
-If two boundary symbols are matched, the more exact type wins, exactly as in the
-earlier typed-wildcard calculus. Write $t \perp u$ when the two types are
+If two boundary symbols are matched, the rule used here lets the more exact
+type win. Write $t \perp u$ when the two types are
 incompatible. Then
 \[
 \operatorname{match}(t[i], u[j]) =
@@ -189,12 +186,11 @@ $z = \operatorname{match}(a, b)$. Substitute $z$ for both $a$ and $b$, remove
 the matched boundary pair, and continue recursively. If one side runs out of
 boundary symbols first, the unmatched prefix is carried through.
 
-This gives composition a semigroup flavor: it is associative when defined, it
-has identity $1$, and it admits a clash element $\emptyset$. In the simplest
-untyped case the structure is closely related to the algebraic objects used in
-the early papers~\cite{poial1990}. In the typed symbolic case the multiplication
-becomes partial and information-sensitive, but the semigroup intuition remains
-exactly the right one.
+Composition can be described as a polycyclic monoid: it is associative when defined, it
+has identity $1$, and it admits a clash (null) element $\emptyset$. In the simplest
+case this specializes to the algebraic setting of~\cite{poial1990}. In
+the typed symbolic case the multiplication
+becomes partial and information-sensitive, but the semigroup intuition remains.
 
 The key analysis insight is that composition is not mere concatenation of stack
 comments. Boundary unification propagates substitutions across the effect being
@@ -240,7 +236,7 @@ and identity.
 
 \subsection{Operation III: loop invariants as idempotent effects}
 
-Loops require a stable summary for arbitrary repetition. Let $b$ be the effect
+Loops require a stable summary (invariant) for arbitrary repetition. Let $b$ be the effect
 of one loop body execution. Algebraically, the desired summary should not change
 when composed with itself:
 \[
@@ -251,7 +247,7 @@ Such an $i$ is idempotent. As in classical invariant reasoning, idempotence
 expresses stability: once the loop invariant has been reached, one more
 iteration preserves it.
 
-In practice the later papers use the local approximation
+A convenient local approximation is
 \[
 \operatorname{glb}(b, b \cdot b)
 \]
@@ -269,10 +265,9 @@ One can therefore read the loop operator in two equivalent ways:
 \item analytically, as the search for a stable abstract transformer.
 \end{itemize}
 
-The 2006 formulation makes an additional subtle point~\cite{poial2006}: all
-effects support greatest lower bound and thus form a semilattice, but the
-idempotent fragment is especially important for loop reasoning because it is the
-stable part of the domain.
+A useful structural point is that all effects support greatest lower bound and
+thus form a semilattice, but the idempotent fragment is especially important
+for loop reasoning because it is the stable part of the domain~\cite{poial2006}.
 
 \section{Derived Forms for Control Structures}
 
@@ -351,7 +346,7 @@ that this calculus is intentionally shallow: it does not attempt full path
 predicates or arbitrary theorem proving. It concentrates on stack shape, type
 compatibility, and identity flow.
 
-That restriction is not a weakness. It is exactly why the method remains small,
+That restriction is exactly why the method remains small,
 compositional, and usable for low-level stack code.
 
 \subsection{Hoare-Floyd invariants}
@@ -362,12 +357,6 @@ find a property preserved by the loop body. Here the property is not a
 first-order formula over store variables but a symbolic effect on the stack.
 Idempotence plays the role normally played by inductiveness.
 
-This suggests a useful slogan:
-\[
-\text{Hoare invariant : state predicate :: stack invariant : idempotent effect}
-\]
-The slogan is imperfect but illuminating.
-
 \subsection{Stack-based bytecode verification and low-level typing}
 
 The calculus also has natural relatives in static typing for stack-based
@@ -375,10 +364,9 @@ low-level languages. Bytecode verification for the JVM tracks stack height and
 types across control-flow joins~\cite{leroy2003}. Compositional type systems
 for stack-based low-level languages~\cite{saabas2006} pursue a similar goal
 with more conventional type-theoretic machinery. Type inference for stack-based
-languages~\cite{stoddart1993} is an earlier close neighbour.
+languages~\cite{stoddart1993} is an earlier attempt.
 
-The distinctive feature of the present calculus, compared with much of that
-literature, is the combination of three elements in one object:
+The distinctive feature of the calculus developed here is the combination of three elements in one object:
 
 \begin{itemize}
 \item stack shape,
@@ -386,12 +374,12 @@ literature, is the combination of three elements in one object:
 \item identity-sensitive symbolic flow.
 \end{itemize}
 
-That combination is what makes stack shuffling analyzable without abandoning the
-compact effect notation that Forth programmers already understand.
+That combination makes stack shuffling analyzable without abandoning the
+compact effect notation that Forth programmers would understand.
 
 \section{Discussion}
 
-The calculus is interesting precisely because it sits between several mature
+The calculus sits between several mature
 areas without collapsing into any one of them.
 
 \begin{itemize}
@@ -405,68 +393,44 @@ anonymous type placeholders.
 order-theoretic operators.
 \end{itemize}
 
-From the point of view of semantics, the core insight is that low-level stack
-programs admit a very compact abstract domain. One does not need a large memory
-model to recover useful guarantees. For a substantial class of questions,
-symbolic stack effects are already the right abstraction.
-
-From the point of view of program analysis, the main theoretical novelty is the
-must-style use of greatest lower bounds together with idempotent loop
-summaries. In a conventional control-flow graph this would look unusual. In a
-stack-effect setting it feels almost inevitable.
-
-The typechecker application shows that this calculus is practical as
-well as compact. In the present project it appears as a native Gforth program,
-implemented as a single-file evaluator, that reads a declared type hierarchy, a
+To make the discussion concrete, the calculus is implemented here as a native
+Gforth program, a single-file evaluator that reads a declared type hierarchy, a
 vocabulary of word specifications, and a source program, then computes symbolic
 stack effects for linear code, conditionals, loops, literals, parser words, and
-new definitions. The checker accepts both legacy built-in control structures and
-declarative syntax/effect descriptions, so the same three core operations,
-composition, $\operatorname{glb}$, and idempotent loop approximation, are used
-directly in the executable tool. When a composition fails, the application does
-not merely reject the program abstractly: it reports source locations with
-line-and-column information, shows the offending line, and prints symbolic stack
-annotations that make the inferred behavior visible to the programmer.
+new definitions. The implementation accepts both legacy built-in control
+structures and declarative syntax/effect descriptions, so the same three core
+operations, composition, $\operatorname{glb}$, and idempotent loop
+approximation, appear directly in the checker. When a composition fails, the
+checker reports line-and-column diagnostics together with the offending line and
+symbolic stack annotations.
 
-A very small pair of input files already shows the style of this application. A
-type file may declare canonical names, aliases, subtype relations, and scanner
-names:
-
-\begin{verbatim}
-type x cell X
-type n number
-type flag boolean
-type a-addr aa
-rel n < x
-rel flag < n
-rel a-addr < x
-scanner eol "\n"
-\end{verbatim}
-
-The corresponding specification file assigns stack effects and optional parser
-or control metadata to words:
+A very small demo profile illustrates the checker. Using
+types such as \texttt{X}, \texttt{n}, \texttt{char}, \texttt{flag},
+\texttt{c-addr}, and \texttt{a-addr}, together with specifications for
+\texttt{DUP}, \texttt{SWAP}, \texttt{@}, \texttt{C@}, \texttt{0=}, and the
+basic control words, the checker can analyze the following program text:
 
 \begin{verbatim}
-DUP ( x[1] -- x[1] x[1] )
-0= ( n -- flag )
-@ ( a-addr -- x )
-"#" parse until eol ( -- )
-literal integer ( -- n )
-IF control if ( flag -- )
-ELSE control else ( -- )
-THEN control fi ( -- )
+: PEEK2 DUP @ SWAP @ ;
+: MAYSWAP IF SWAP FI ;
+: NLOOP BEGIN DUP 0= WHILE REPEAT ;
+: ULOOP BEGIN DUP 0= UNTIL ;
+: KEEPIF IF DUP ELSE DUP FI ;
+DP DP C@ 0= KEEPIF
 \end{verbatim}
 
-Even this tiny example is enough for the checker to analyze simple linear code,
-integer literals, comments, and conditionals in the same symbolic framework.
+The generated log records the inferred effects of the new definitions:
 
-There are also clear limitations. A single effect may be too coarse for
-path-sensitive reasoning in rich control flow. Exact iteration may require
-larger closure operators than the local approximation
-$\operatorname{glb}(e, e \cdot e)$. Data stack and return stack
-interactions, heap structure, aliasing, and user-defined control operators may
-all force the domain to grow. But these are standard tensions in static
-analysis: precision, cost, and compositionality are always in competition.
+\begin{verbatim}
+PEEK2 ( a-addr[1] --  a-addr[1] a-addr[1] )
+MAYSWAP ( X[1] X[1] flag --  X[1] X[1] )
+NLOOP ( n[1] --  n[1] )
+ULOOP ( n[1] --  n[1] )
+KEEPIF ( X[1] flag --  X[1] X[1] )
+\end{verbatim}
+
+Even this tiny example is enough to show linear code, conditionals, and loop
+skeletons handled in one symbolic framework.
 
 \section{Conclusion}
 
