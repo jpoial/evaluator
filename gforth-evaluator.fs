@@ -2655,6 +2655,15 @@ variable ev-eval-result
   ev-current-program-span
   ev-error-msg ;
 
+: ev-seq-add-checked { word span spec seq context ts -- }
+  word span spec seq ev-seq-add
+  seq context ts ['] ev-seq-evaluate catch dup if
+    { code }
+    seq ev-vec-remove-last
+    code throw
+  then
+  drop drop ;
+
 : ev-control-close-match? { role stage st -- flag }
   role st ev-struct.close + @ ev-s= 0= if false exit then
   st ev-struct-boundary-count stage ?do
@@ -2751,11 +2760,13 @@ defer ev-parse-definition-structure
         spec ev-spec.control-mode + @ ss ev-ss-open-structures { opens }
         opens ev-vec-count@ 0> if
           tok spec defname sc ts ss do-depth ev-parse-definition-structure
-          tok ev-word-text@ tok ev-word-span@ rot seq ev-seq-add
+          tok ev-word-text@ tok ev-word-span@ rot seq defname ts
+            ev-seq-add-checked
         else
           spec ev-spec.control-mode + @ s" INDEX" ev-key= do-depth 0> and if
             spec ev-spec.control-mode + @ ts ss tok ev-word-span@ ev-control-runtime-spec
-            tok ev-word-text@ tok ev-word-span@ rot seq ev-seq-add
+            tok ev-word-text@ tok ev-word-span@ rot seq defname ts
+              ev-seq-add-checked
           else
             s" Unexpected control word in definition" ev-scopy 0 tok ev-word-span@ ev-error-msg
           then
@@ -2765,15 +2776,17 @@ defer ev-parse-definition-structure
           s" Defining words are not supported inside definitions" ev-scopy 0 tok ev-word-span@ ev-error-msg
         then
         tok spec sc ev-consume-parser-input
-        tok ev-word-text@ swap spec ev-runtime-clone seq ev-seq-add
+        tok ev-word-text@ swap spec ev-runtime-clone seq defname ts
+          ev-seq-add-checked
       else
         tok do-depth ts ss ev-resolve-runtime-spec
-        tok ev-word-text@ tok ev-word-span@ rot seq ev-seq-add
+        tok ev-word-text@ tok ev-word-span@ rot seq defname ts
+          ev-seq-add-checked
       then
       then
     else
       tok do-depth ts ss ev-resolve-runtime-spec
-      tok ev-word-text@ tok ev-word-span@ rot seq ev-seq-add
+      tok ev-word-text@ tok ev-word-span@ rot seq defname ts ev-seq-add-checked
     then
   repeat
   drop
@@ -2819,11 +2832,13 @@ defer ev-parse-definition-structure
           role ss ev-ss-open-structures { opens }
           opens ev-vec-count@ 0> if
             tok tspec defname sc ts ss inner-depth recurse
-            tok ev-word-text@ tok ev-word-span@ rot current ev-seq-add
+            tok ev-word-text@ tok ev-word-span@ rot current defname ts
+              ev-seq-add-checked
           else
             role s" INDEX" ev-key= inner-depth 0> and if
               role ts ss tok ev-word-span@ ev-control-runtime-spec
-              tok ev-word-text@ tok ev-word-span@ rot current ev-seq-add
+              tok ev-word-text@ tok ev-word-span@ rot current defname ts
+                ev-seq-add-checked
             else
               s" Unexpected control word in definition" ev-scopy 0 tok ev-word-span@ ev-error-msg
             then
@@ -2834,15 +2849,18 @@ defer ev-parse-definition-structure
           s" Defining words are not supported inside definitions" ev-scopy 0 tok ev-word-span@ ev-error-msg
         then
         tok tspec sc ev-consume-parser-input
-        tok ev-word-text@ swap tspec ev-runtime-clone current ev-seq-add
+        tok ev-word-text@ swap tspec ev-runtime-clone current defname ts
+          ev-seq-add-checked
       else
         tok inner-depth ts ss ev-resolve-runtime-spec
-        tok ev-word-text@ tok ev-word-span@ rot current ev-seq-add
+        tok ev-word-text@ tok ev-word-span@ rot current defname ts
+          ev-seq-add-checked
       then
       then
     else
       tok inner-depth ts ss ev-resolve-runtime-spec
-      tok ev-word-text@ tok ev-word-span@ rot current ev-seq-add
+      tok ev-word-text@ tok ev-word-span@ rot current defname ts
+        ev-seq-add-checked
     then
   repeat
   drop

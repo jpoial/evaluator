@@ -1,4 +1,4 @@
-PEEK2 ( a-addr[1] --  a-addr[1] a-addr[1] ) 
+PEEK2 ( a-addr[1] --  X[2] X ) 
 MAYSWAP ( X[1] X[1] flag --  X[1] X[1] ) 
 NLOOP ( n[1] --  n[1] ) 
 ULOOP ( n[1] --  n[1] ) 

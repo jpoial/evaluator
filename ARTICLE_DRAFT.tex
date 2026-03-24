@@ -7,7 +7,7 @@
 \usepackage{hyperref}
 
 \title{Static type checker for Forth}
-\author{Jaanus Poial \\ Tallinn University of Technology}
+\author{Jaanus Pöial \\ Tallinn University of Technology}
 
 \begin{document}
 
@@ -18,9 +18,9 @@ This article develops a mathematical view of static analysis for Forth-like
 stack languages. The central object is the symbolic stack effect, a typed and
 identity-sensitive abstraction of how a word transforms the data stack. Three
 operations organize the calculus: composition of linear effects, branch merging
-as greatest lower bound in a must-analysis order, and loop summarization by
+as greatest lower bound in a must-analysis manner, and loop summarization by calculating
 idempotent effects. These operations provide a basis for reasoning about
-sequencing, control-flow joins, and repeated execution in Forth-like programs.
+sequencing, control-flow joins, and repeated execution in Forth programs.
 \end{abstract}
 
 \noindent\textbf{Keywords:} Program analysis; static type checking; symbolic
@@ -28,22 +28,21 @@ stack effects; stack languages; Forth.
 
 \section{Introduction}
 
-Forth programs are sequences of stack operations, so much of the reasoning is
-shifted onto the stack. Traditional stack comments of the form
+Forth programs contain sequences of stack operations. Traditional stack comments of the form
 \texttt{( before -- after )} help, but they remain informal and often do not
 provide a compositional account of type refinement or value identity through
 stack shuffling.
 
 One response is to treat stack effects as semantic objects rather than mere
-comments. The main questions are how to summarize a linear sequence of words,
+comments. The main questions are how to find the stack effect of a linear sequence of words,
 how to merge alternative branches, and how to compute a stable summary for
 repeated execution.
 
 This article formulates these questions in a stack-effect calculus. A
 non-clashing stack effect is a pair of symbolic stacks, with a separate clash
-element for failure; sequencing is partial multiplication; branch convergence
-is a greatest lower bound in a must-order; and loop reasoning is approximated
-by an idempotent effect or a local fixpoint approximation.
+element for failure; sequencing corresponds to multiplication; branch convergence
+is a greatest lower bound (most restrictive branch selected); and loop reasoning is approximated
+by an idempotent effect.
 The calculus developed here follows the line of work
 in~\cite{poial1990,poial1991,poial2002,poial2006} and its executable
 implementation in~\cite{poial2008}.
@@ -86,7 +85,7 @@ form $S L$, then after the effect it becomes $S R$, provided that the symbols
 on the boundary can be unified consistently.
 
 We distinguish two special elements: $1 = (\, \to \,)$, the identity effect,
-and $\emptyset$, the clash effect produced by incompatible types or impossible
+and $\emptyset$, the clash (zero) effect produced by incompatible types or impossible
 unifications.
 
 \paragraph{Matching of boundary symbols.}
@@ -128,9 +127,9 @@ $z = \operatorname{match}(a, b)$. Substitute $z$ for both $a$ and $b$, remove
 the matched boundary pair, and continue recursively. If one side runs out of
 boundary symbols first, the unmatched prefix is carried through.
 
-Composition can be described as a polycyclic monoid: it is associative when
-defined, it has identity $1$, and it admits a clash (null) element
-$\emptyset$. In the untyped setting this specializes to the algebraic setting
+Composition can be described as a semigroup (polycyclic monoid): it is associative when
+defined, it has identity $1$, and it admits a clash (zero) element
+$\emptyset$. This specializes to the algebraic setting
 of~\cite{poial1990}. In the typed symbolic case the multiplication becomes
 partial and information-sensitive, but the semigroup intuition remains.
 
@@ -164,12 +163,11 @@ Loops require a stable summary (invariant) for arbitrary repetition. Let $b$ be
 the effect of one loop body execution. Algebraically, the desired summary
 should satisfy $i = i \cdot i$. A local approximation is
 $\operatorname{glb}(b, b \cdot b)$, which keeps only the guarantee common to
-one and two iterations. This is not a full Kleene star, but it extracts the
+one and two iterations. It extracts the
 repeated, stable part of an effect.
-The idempotent fragment is therefore the part used for loop reasoning because
-it captures the stable part of the domain~\cite{poial2006}.
+~\cite{poial2006}.
 
-\section{Type-System Perspective}
+\section{Connections to Type Systems}
 
 The calculus also has related approaches in static typing for stack-based
 low-level languages. Bytecode verification for the JVM tracks stack height and
@@ -227,7 +225,7 @@ DP DP C@ 0= KEEPIF
 The generated log records the inferred effects of the new definitions:
 
 \begin{verbatim}
-PEEK2 ( a-addr[1] --  a-addr[1] a-addr[1] )
+PEEK2 ( a-addr[1] --  X[2] X )
 MAYSWAP ( X[1] X[1] flag --  X[1] X[1] )
 NLOOP ( n[1] --  n[1] )
 ULOOP ( n[1] --  n[1] )
