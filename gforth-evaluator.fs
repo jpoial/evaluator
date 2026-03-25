@@ -514,7 +514,7 @@ variable ev-current-source-lines
   begin
     dup ev-sc-at-end? 0=
   while
-    dup ev-sc-char@ 10 = if exit then
+    dup ev-sc-char@ 10 = if drop exit then
     dup ev-sc-advance
   repeat
   drop ;
@@ -524,7 +524,7 @@ variable ev-current-source-lines
     dup ev-sc-at-end? 0=
   while
     dup ev-sc-char@ ev-char-space?
-    0= if exit then
+    0= if drop exit then
     dup ev-sc-advance
   repeat
   drop ;
@@ -540,7 +540,7 @@ variable ev-current-source-lines
       ch [char] \ = if
         dup ev-sc-line-comment
       else
-        exit
+        drop exit
       then
     then
   repeat
@@ -2637,7 +2637,7 @@ variable ev-eval-result
   spec ev-spec-defines-word? if
     spec ev-spec.define-mode + @ ev-define.colon = if
       ev-current-program-token @ { badtok }
-      badtok dup if badtok ev-word-text@ ss ev-ss-word@ else 0 then { badspec }
+      badtok if badtok ev-word-text@ ss ev-ss-word@ else 0 then { badspec }
       sc badtok badspec ss ev-recover-definition
     then
     exit
@@ -2940,7 +2940,7 @@ is ev-parse-definition-structure
     code ev-error# = if
       ev-report-current-diagnostic
       ev-current-program-token @ { badtok }
-      badtok dup if badtok ev-word-text@ ss ev-ss-word@ else 0 then { badspec }
+      badtok if badtok ev-word-text@ ss ev-ss-word@ else 0 then { badspec }
       sc badtok badspec ss ev-recover-definition
       exit
     then
@@ -3006,6 +3006,8 @@ is ev-parse-definition-structure
   prog ts ['] ev-prog-current-effect catch dup if
     { code }
     prog ev-prog-discard-last
+    \ A handled diagnostic must not leak `ts` back to the caller.
+    drop
     code ev-error# = if
       ev-report-current-diagnostic
       exit

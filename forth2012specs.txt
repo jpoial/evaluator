@@ -34,6 +34,7 @@ C" parse until "\"" ( -- c-addr )
 S" parse until "\"" ( -- c-addr u )
 CHAR parse word state interpret ( -- char )
 [CHAR] parse word state compile ( -- char )
+"{" parse until "}" state compile ( -- )
 ' parse word state interpret ( -- xt )
 ['] parse word state compile ( -- xt )
 : parse word define colon ( -- )
@@ -162,6 +163,16 @@ MOVE ( addr addr u -- )
 >BODY ( xt -- a-addr )
 BASE ( -- a-addr )
 STATE ( -- a-addr )
+
+\ Exception and memory-allocation words
+\ `THROW` is approximated as its linear stack effect only; the evaluator does
+\ not model the standard's non-local control transfer.
+THROW ( n -- )
+ALLOCATE ( n -- a-addr ior )
+RESIZE ( a-addr n -- a-addr ior )
+\ Common system extension: Forth 2012 defines `CELL+` and `CELLS`, but not a
+\ standalone `CELL` word. Keep this for gforth compatibility.
+CELL ( -- n )
 
 \ Core I/O words
 ACCEPT ( c-addr n -- +n )
