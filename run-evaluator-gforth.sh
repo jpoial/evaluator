@@ -20,6 +20,9 @@ if [ -z "$gforth_bin" ]; then
    exit 1
 fi
 
+repo_image=$script_dir/gforth.fi
+gforth_image=
+
 libcc_dir=$script_dir/../gforth/lib/gforth/0.7.9_20260224/amd64/libcc-named
 if [ -d "$libcc_dir" ]; then
    export libccnameddir=$libcc_dir/
@@ -27,6 +30,17 @@ fi
 
 export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/gforth-cache}
 mkdir -p "$XDG_CACHE_HOME"
+
+# Keep the repo-local image on machines where it matches the selected engine,
+# but otherwise pin the engine's own default image so ./gforth.fi does not
+# shadow it just because the launcher runs from this directory.
+if [ -f "$repo_image" ] && "$gforth_bin" --image-file="$repo_image" -e bye >/dev/null 2>&1; then
+   gforth_image=$repo_image
+else
+   if debug_output=$(cd "$XDG_CACHE_HOME" && "$gforth_bin" --debug -e bye 2>&1); then
+      gforth_image=$(printf '%s\n' "$debug_output" | sed -n 's/^Opened image file: //p' | sed -n '1p')
+   fi
+fi
 
 profile=forth2012
 case "${1-}" in
@@ -57,6 +71,14 @@ esac
 if [ "$#" -eq 1 ] && [ -f "$1" ]; then
    prog_file=$1
    shift
+fi
+
+if [ -n "$gforth_image" ]; then
+   exec "$gforth_bin" --image-file="$gforth_image" "$script_dir/gforth-evaluator.fs" \
+      --types "$types_file" \
+      --specs "$specs_file" \
+      --prog "$prog_file" \
+      "$@"
 fi
 
 exec "$gforth_bin" "$script_dir/gforth-evaluator.fs" \

@@ -1560,6 +1560,21 @@ variable ev-eval-result
   result tmp ev-vec-push
   tmp result ev-spec-list-normalize ;
 
+: ev-spec-unify-side { count result-vec tc-vec result tc tcmax ts -- tcmax' ok }
+  count 0 ?do
+    i result-vec ev-vec@ { m1 }
+    i tc-vec ev-vec@ { m2 }
+    m1 ev-sym.type + @ m2 ev-sym.type + @ ts ev-ts-relation { rel }
+    rel 0= if tcmax false unloop exit then
+    m1 m2 rel tcmax ev-new-merged-sym { fresh newmax }
+    newmax to tcmax
+    m1 fresh result ev-spec-substitute drop
+    m2 fresh result ev-spec-substitute drop
+    m1 fresh tc ev-spec-substitute drop
+    m2 fresh tc ev-spec-substitute drop
+  loop
+  tcmax true ;
+
 : ev-spec-unify { s1 s2 ts -- spec|0 }
   s2 0= if 0 exit then
   s1 ev-spec-left-count { p1 }
@@ -1574,30 +1589,16 @@ variable ev-eval-result
   s2 ev-spec-clone { tc }
   tcmax tc ev-spec-increment-wild
   tc ev-spec-max-pos to tcmax
-  q1 0 ?do
-    i result ev-spec.left + @ ev-vec@ { m1 }
-    i tc ev-spec.left + @ ev-vec@ { m2 }
-    m1 ev-sym.type + @ m2 ev-sym.type + @ ts ev-ts-relation { rel }
-    rel 0= if 0 unloop exit then
-    m1 m2 rel tcmax ev-new-merged-sym { fresh newmax }
-    newmax to tcmax
-    m1 fresh result ev-spec-substitute drop
-    m2 fresh result ev-spec-substitute drop
-    m1 fresh tc ev-spec-substitute drop
-    m2 fresh tc ev-spec-substitute drop
-  loop
-  q2 0 ?do
-    i result ev-spec.right + @ ev-vec@ { m1 }
-    i tc ev-spec.right + @ ev-vec@ { m2 }
-    m1 ev-sym.type + @ m2 ev-sym.type + @ ts ev-ts-relation { rel }
-    rel 0= if 0 unloop exit then
-    m1 m2 rel tcmax ev-new-merged-sym { fresh newmax }
-    newmax to tcmax
-    m1 fresh result ev-spec-substitute drop
-    m2 fresh result ev-spec-substitute drop
-    m1 fresh tc ev-spec-substitute drop
-    m2 fresh tc ev-spec-substitute drop
-  loop
+  q1 result ev-spec.left + @ tc ev-spec.left + @ result tc tcmax ts ev-spec-unify-side if
+    to tcmax
+  else
+    drop 0 exit
+  then
+  q2 result ev-spec.right + @ tc ev-spec.right + @ result tc tcmax ts ev-spec-unify-side if
+    to tcmax
+  else
+    drop 0 exit
+  then
   tcmax result ev-spec.max-pos + !
   4 ev-vec-new { tmp }
   result tmp ev-vec-push
@@ -2071,7 +2072,7 @@ variable ev-eval-result
   ss drop ;
 
 \ Seeds the legacy IF/BEGIN/DO families so old spec files still work without syntax blocks.
-: ev-ss-install-builtins { ss -- }
+: ev-ss-install-builtin-if { ss -- }
   1 ev-vec-new { b1 } 1 ev-vec-new { o1 } 2 ev-vec-new { s1 } 2 ev-vec-new { p1 }
   s" ELSE" ev-scopy b1 ev-vec-push
   1 o1 ev-vec-push
@@ -2083,8 +2084,9 @@ variable ev-eval-result
   p1 ev-vec-push
   p1 ev-seq-expr { m1 }
   s" IF" ev-scopy s" IF" ev-scopy b1 o1 s" FI" ev-scopy s1 m1
-  ev-struct-new ss ev-ss-add-structure
+  ev-struct-new ss ev-ss-add-structure ;
 
+: ev-ss-install-builtin-while { ss -- }
   1 ev-vec-new { b2 } 1 ev-vec-new { o2 } 2 ev-vec-new { s2 }
   2 ev-vec-new { p2 } 2 ev-vec-new { p2prefix }
   s" WHILE" ev-scopy b2 ev-vec-push
@@ -2097,22 +2099,25 @@ variable ev-eval-result
   s" LOOP_BODY" ev-scopy ev-canon-segment-name ev-segment-expr ev-star-expr p2 ev-vec-push
   p2 ev-seq-expr { m2 }
   s" BUILTIN_WHILE" ev-scopy s" BEGIN" ev-scopy b2 o2 s" REPEAT" ev-scopy s2 m2
-  ev-struct-new ss ev-ss-add-structure
+  ev-struct-new ss ev-ss-add-structure ;
 
+: ev-ss-install-builtin-again { ss -- }
   0 ev-vec-new { b3 } 0 ev-vec-new { o3 } 1 ev-vec-new { s3 }
   s" LOOP_BODY" ev-scopy ev-canon-segment-name s3 ev-vec-push
   s" LOOP_BODY" ev-scopy ev-canon-segment-name ev-segment-expr ev-star-expr { m3 }
   s" BUILTIN_AGAIN" ev-scopy s" BEGIN" ev-scopy b3 o3 s" AGAIN" ev-scopy s3 m3
-  ev-struct-new ss ev-ss-add-structure
+  ev-struct-new ss ev-ss-add-structure ;
 
+: ev-ss-install-builtin-until { ss -- }
   0 ev-vec-new { b4 } 0 ev-vec-new { o4 } 1 ev-vec-new { s4 } 2 ev-vec-new { p4 }
   s" LOOP_BODY" ev-scopy ev-canon-segment-name s4 ev-vec-push
   s" LOOP_BODY" ev-scopy ev-canon-segment-name ev-segment-expr p4 ev-vec-push
   s" UNTIL" ev-scopy ev-control-expr p4 ev-vec-push
   p4 ev-seq-expr ev-star-expr { m4 }
   s" BUILTIN_UNTIL" ev-scopy s" BEGIN" ev-scopy b4 o4 s" UNTIL" ev-scopy s4 m4
-  ev-struct-new ss ev-ss-add-structure
+  ev-struct-new ss ev-ss-add-structure ;
 
+: ev-ss-install-builtin-do { ss -- }
   0 ev-vec-new { b5 } 0 ev-vec-new { o5 } 1 ev-vec-new { s5 } 2 ev-vec-new { p5 }
   s" LOOP_BODY" ev-scopy ev-canon-segment-name s5 ev-vec-push
   s" DO" ev-scopy ev-control-expr p5 ev-vec-push
@@ -2120,6 +2125,13 @@ variable ev-eval-result
   p5 ev-seq-expr { m5 }
   s" BUILTIN_DO" ev-scopy s" DO" ev-scopy b5 o5 s" LOOP" ev-scopy s5 m5
   ev-struct-new ss ev-ss-add-structure ;
+
+: ev-ss-install-builtins { ss -- }
+  ss ev-ss-install-builtin-if
+  ss ev-ss-install-builtin-while
+  ss ev-ss-install-builtin-again
+  ss ev-ss-install-builtin-until
+  ss ev-ss-install-builtin-do ;
 
 \ ----------------------------------------------------------------------
 \ Native spec-set loader
@@ -2206,7 +2218,6 @@ variable ev-eval-result
 \ Parses one ordinary word specification line, including parser/define/control metadata.
 : ev-parse-word-spec-line { line ts ss -- }
   0 line ev-vec@ { word }
-  word ev-word-text@ ev-s@ { waddr wu }
   -1 { openi }
   line ev-vec-count@ 1 ?do
     i line ev-vec@ s" (" ev-token-unquoted= if
@@ -2757,8 +2768,7 @@ defer ev-parse-definition-structure
           seq defname ts ev-seq-evaluate { final }
           final exit
         then
-        spec ev-spec.control-mode + @ ss ev-ss-open-structures { opens }
-        opens ev-vec-count@ 0> if
+        spec ev-spec.control-mode + @ ss ev-ss-open-structures ev-vec-count@ 0> if
           tok spec defname sc ts ss do-depth ev-parse-definition-structure
           tok ev-word-text@ tok ev-word-span@ rot seq defname ts
             ev-seq-add-checked
@@ -2829,8 +2839,7 @@ defer ev-parse-definition-structure
           by-boundary to candidates
           stage 1+ to stage
         else
-          role ss ev-ss-open-structures { opens }
-          opens ev-vec-count@ 0> if
+          role ss ev-ss-open-structures ev-vec-count@ 0> if
             tok tspec defname sc ts ss inner-depth recurse
             tok ev-word-text@ tok ev-word-span@ rot current defname ts
               ev-seq-add-checked
