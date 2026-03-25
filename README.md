@@ -85,8 +85,7 @@ helper for stack-effect experiments.
 ### Word metadata
 
 Spec files may describe parser words explicitly with metadata such as
-`parse until`, `parse word`, `parse definition`, `define`, `control`, and
-`state`.
+`parse until`, `parse word`, `define`, `control`, and `state`.
 
 Examples:
 
@@ -127,17 +126,9 @@ In this metadata language:
 - for `; control end ( -- )`, the `( -- )` comment describes no runtime stack
   effect in the analyzed program; it does not mean `;` has no compile-time job
 
-For compatibility, the evaluator still accepts older forms such as:
-
-- delimiter shorthand like `"(" ")" ( -- )`
-- the older explicit `scan` form
-- `: parse definition ";" define colon`
-- `context outer` and `context definition`
-- an explicit `immediate` marker when it adds information
-
 ### Control-structure declarations
 
-Control structures may also be declared with a top-level `syntax:` block and an
+Custom control structures are declared with a top-level `syntax:` block and an
 indented `effect:` block.
 
 Example shape:
@@ -159,20 +150,18 @@ The current control-effect algebra supports:
 - bare control words such as `IF` or `DO`
 - segment names taken from `<...>` metasymbols in `syntax`
 
-For example, `repeat <loop body> UNTIL` means the repeated effect of the loop
-body followed by the stack effect of `UNTIL` on each pass. This makes flag
-consumption visible directly in declarations such as `IF ... ( flag -- )` or
-`UNTIL ... ( flag -- )`.
+Loop example:
 
-`compilation:` and `run-time:` blocks are still accepted as documentation, but
-they are not used for checking.
+```text
+syntax:
+  BEGIN <loop body> UNTIL
+effect:
+  repeat <loop body> UNTIL
+```
 
-Compatibility is preserved for older structure forms, including:
-
-- `structure ... endstructure`
-- algebraic effect forms such as `sequence(...)`, `glb(...)`, `star(...)`,
-  `word(...)`, and the older `meaning:` spelling
-- the older `open` / `mid` / `close` structure form
+Here `repeat` means the loop body and the closing `UNTIL` test are taken as the
+idempotent repeated part, so the declaration still makes the per-iteration
+`flag` consumption explicit.
 
 A `syntax` line may also capture more than two parts, for example a fixed
 switch-like form such as:
@@ -181,9 +170,9 @@ switch-like form such as:
 SWITCH <selector> OF <first branch> OF <second branch> [DEFAULT <default branch>] ENDSWITCH
 ```
 
-If no structure block is given, the legacy `IF` / `BEGIN` / `DO` families are
-still loaded implicitly for compatibility. The bundled profiles also treat
-`THEN` and `FI` as synonyms.
+If no structure block is given, the evaluator provides the built-in
+`IF` / `BEGIN` / `DO` families used by the bundled `real` and `legacy`
+profiles. The bundled profiles also treat `THEN` and `FI` as synonyms.
 
 The standard-like profile additionally includes practical source words such as
 backslash line comments, `CHAR`, `[CHAR]`, tick words `'` and `[']`,
@@ -195,8 +184,8 @@ extensions and approximations:
 
 - `ALLOCATE`, `RESIZE`, and `THROW`
 - a parser entry that consumes Gforth-style `{ ... }` locals declarations
-- the compatibility word `CELL`, even though Forth 2012 standardizes `CELL+`
-  and `CELLS` rather than a standalone `CELL`
+- the extra word `CELL`, even though Forth 2012 standardizes `CELL+` and
+  `CELLS` rather than a standalone `CELL`
 - a linear approximation for `THROW`; the evaluator does not model the
   standard's non-local control transfer semantics
 
