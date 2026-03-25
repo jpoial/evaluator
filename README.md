@@ -75,9 +75,10 @@ The shipped demo specs cover a small Forth-like core, including:
 - memory words such as `@`, `C@`, `!`, `C!`, `HERE`, and `ALLOT`
 - I/O words such as `.`, `KEY`, `EMIT`, `CR`, `SPACE`, `SPACES`, and `TYPE`
 
-`.` is still modeled as a generic sink with stack effect `( X -- )`, so it can
-print any one symbolic value. The non-standard `PLUS` word is retained only as
-a same-type demo helper for stack-effect experiments.
+Some details are profile-specific. In `real` and `legacy`, `.` is still modeled
+as a generic sink with stack effect `( X -- )`, while `forth2012` narrows it to
+`( n -- )`. The non-standard `PLUS` word is retained only as a same-type demo
+helper for stack-effect experiments.
 
 ## Spec Files
 
@@ -117,6 +118,14 @@ state and compilation state:
 - bare `define` infers simple constant-like `( x -- )` and variable-like
   `( -- y )` definers from the declared stack effect
 - colon definitions still use `define colon`
+
+In this metadata language:
+
+- `define colon` means "this word starts a `: NAME ... ;` style definition"
+- `control end` means "this word closes the current colon definition or control
+  form"
+- for `; control end ( -- )`, the `( -- )` comment describes no runtime stack
+  effect in the analyzed program; it does not mean `;` has no compile-time job
 
 For compatibility, the evaluator still accepts older forms such as:
 
@@ -180,6 +189,17 @@ The standard-like profile additionally includes practical source words such as
 backslash line comments, `CHAR`, `[CHAR]`, tick words `'` and `[']`,
 `ABORT"`, `C"`, and defining words such as `CREATE`.
 
+The bundled `forth2012` profile is still a demo profile rather than a complete
+Forth 2012 or `gforth` environment. It also includes a few practical
+extensions and approximations:
+
+- `ALLOCATE`, `RESIZE`, and `THROW`
+- a parser entry that consumes Gforth-style `{ ... }` locals declarations
+- the compatibility word `CELL`, even though Forth 2012 standardizes `CELL+`
+  and `CELLS` rather than a standalone `CELL`
+- a linear approximation for `THROW`; the evaluator does not model the
+  standard's non-local control transfer semantics
+
 ### Literal classes
 
 Spec files may define literal classes with no inputs, for example:
@@ -208,6 +228,8 @@ Program text supports linear colon definitions through the outer interpreter:
 `:` starts compilation and `;` finishes it. The bundled profiles also declare
 `CONSTANT` and `VARIABLE` as defining words in the outer interpreter, so they
 can be used at top level to introduce new words before later program text.
+In the spec files, this is expressed with `: parse word define colon ( -- )`
+and `; control end ( -- )`.
 
 Word lookup is case-insensitive throughout the evaluator. Source text is left
 as written, but names are treated internally as if all letters were uppercase.
@@ -275,13 +297,14 @@ The type system is profile-dependent.
 
 - `real` is a more Forth-like convenience profile: flags are numbers,
   characters are numbers, and the top stack-cell type is also aliased as
-  `cell`.
+  `cell`. It also keeps `.` as the generic sink `( X -- )`.
 - `legacy` preserves the older stricter separation where `flag` is not a
-  subtype of `n`.
+  subtype of `n`, and it also keeps `.` as `( X -- )`.
 - `forth2012` follows the Forth-2012 subtype lattice more closely: `flag` is
   separate from numeric types, addresses sit under `u`, `char` sits under `+n`,
-  `.` is typed as `( n -- )`, and string-producing scanner words use the
-  standard stack form `c-addr u`.
+  `.` is typed as `( n -- )`, string-producing scanner words use the standard
+  stack form `c-addr u`, and the bundled spec set includes a few practical
+  extensions such as `{ ... }`, `CELL`, and approximated `THROW`.
 
 ## Test Data
 
