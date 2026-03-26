@@ -38,15 +38,15 @@ This paper describes a static type checker for a Forth(-like) language whose sem
 \end{abstract}
 
 \section{Introduction}
-Concatenative languages place computation on the operand stack. A word is naturally described by the stack cells it consumes and the cells it produces, so the obvious static abstraction is a \emph{stack effect}. In simple cases, informal comments such as \texttt{( n n -- n )} are already useful documentation. The goal of the checker described here is to turn such annotations into an executable static semantics.
+Concatenative languages place computation on the operand stack. A word is naturally described by the stack cells it consumes and the cells it produces, so the obvious static abstraction is a \emph{stack effect}. In simple cases, informal comments such as \texttt{( n n -- n )} are already useful documentation in Forth practice and standardization documents \cite{rather1996evolution,forth2012standard}. The goal of the checker described here is to turn such annotations into an executable static semantics.
 
-The checker takes three external inputs. A \texttt{types} file defines a finite subtype hierarchy. A \texttt{specs} file assigns effects and parsing behavior to words, literals, defining words, and control roles. A program file is then parsed and analyzed against those specifications. Instead of running the program for its concrete result, the checker computes the abstract stack effect of each token and of each user-defined word. The same mechanism also produces source-aware diagnostics when adjacent effects cannot be composed.
+The checker takes three external inputs. A \texttt{types} file defines a finite subtype hierarchy. A \texttt{specs} file assigns effects and parsing behavior to words, literals, defining words, and control roles. A program file is then parsed and analyzed against those specifications. Instead of running the program for its concrete result, the checker computes the abstract stack effect of each token and of each user-defined word. The same mechanism also produces source-aware diagnostics when adjacent effects cannot be composed. In that sense, the implementation follows the abstract-interpretation idea of executing programs over a finite abstract domain rather than over concrete values \cite{cousot1977abstract}.
 
-Two design choices make the system concise and extensible. First, types are not hard-coded; they are loaded as a small finite lattice-like structure. Second, control flow is not built into the checker alone; it can be described declaratively with \texttt{syntax:} and \texttt{effect:} blocks. The mathematical content of the checker is therefore concentrated in a small effect algebra.
+Two design choices make the system concise and extensible. First, types are not hard-coded; they are loaded as a small finite lattice-like structure. Second, control flow is not built into the checker alone; it can be described declaratively with \texttt{syntax:} and \texttt{effect:} blocks. The mathematical content of the checker is therefore concentrated in a small effect algebra. This approach is informed by earlier work on algebraic specifications of stack effects, multiple stack effects, wildcard-based polymorphism, and compositional type systems for stack-oriented languages \cite{poial1991algebraic,poial1992multiple,stoddart1993type,poial2002wildcards,saabas2006compositional,poial2006typing}.
 
 \section{Type Domain}
 \subsection{Type hierarchy}
-Let $\Types$ be a finite set of type names equipped with a precision order $\leq$. We read $\tau_1 \leq \tau_2$ as ``$\tau_1$ is at least as precise as $\tau_2$,'' matching the sample declarations
+Let $\Types$ be a finite set of type names equipped with a precision order $\leq$ \cite{davey2002lattices}. We read $\tau_1 \leq \tau_2$ as ``$\tau_1$ is at least as precise as $\tau_2$,'' matching the sample declarations
 \begin{lstlisting}
 rel a-addr < c-addr
 rel c-addr < addr
@@ -71,7 +71,7 @@ For $\tau,\upsilon \in \Types$, define
 \]
 \end{definition}
 
-When the order is viewed as a finite lattice, this operation is the greatest lower bound on chains. Incomparable pairs have no usable meet for this checker and therefore cause a type clash.
+When the order is viewed as a finite lattice, this operation is the greatest lower bound on chains \cite{davey2002lattices}. Incomparable pairs have no usable meet for this checker and therefore cause a type clash.
 
 \subsection{Stack symbols}
 A \emph{stack symbol} is a type optionally annotated with a positive index, written $\tau$ or $\tau[i]$. The type denotes an abstract class of stack cells. The index denotes correlation across positions: if the same indexed symbol appears twice, those occurrences refer to the same abstract value constraint, not merely two values of the same coarse type.
@@ -158,7 +158,7 @@ Modulo normalization of fresh indices, compatible effects form a partial semigro
 \end{proposition}
 
 \noindent
-This proposition explains why the implementation may evaluate a sequence left to right: whenever every adjacent composition is defined, the final result does not depend on accidental wildcard names.
+This proposition explains why the implementation may evaluate a sequence left to right: whenever every adjacent composition is defined, the final result does not depend on accidental wildcard names. The terminology comes from semigroup theory, but the operation is partial because some boundary unifications fail \cite{howie1995semigroup}.
 
 \section{Branching and Greatest Lower Bounds of Effects}
 Sequential composition is not enough for control flow. A branch requires a single summary effect that safely represents multiple alternatives.
@@ -188,7 +188,7 @@ a\text{-}addr \glb c\text{-}addr = a\text{-}addr.
 The merged effect therefore preserves the stronger address requirement.
 
 \section{Iteration and Idempotence}
-Loops require a stable summary of repeated execution. The checker does not attempt a general fixed-point engine. Instead it uses a compact algebraic criterion based on idempotence.
+Loops require a stable summary of repeated execution. The checker does not attempt a general fixed-point engine of the kind common in abstract interpretation \cite{cousot1977abstract}. Instead it uses a compact algebraic criterion based on idempotence.
 
 \begin{definition}[Repeated effect]
 For an effect $\pi$, define
@@ -232,10 +232,10 @@ Additional clauses refine the operational role of a word.
 \item \texttt{immediate}, \texttt{state interpret}, and \texttt{state compile} constrain where the word is legal.
 \end{itemize}
 
-Thus the checker is not only typing tokens; it also models the source-level behavior needed to parse Forth-like syntax.
+Thus the checker is not only typing tokens; it also models the source-level behavior needed to parse Forth-like syntax in a way that aligns with standard Forth parsing disciplines \cite{forth2012standard}.
 
 \subsection{Control structures}
-Control structures are specified with paired \texttt{syntax:} and \texttt{effect:} blocks. For example, the sample repository contains:
+Control structures are specified with paired \texttt{syntax:} and \texttt{effect:} blocks. This gives a compact declarative account of source-level control words, a topic that has also been studied in formal models of Forth control structures \cite{power2004formal}. For example, the sample repository contains:
 \begin{lstlisting}
 syntax: IF <then branch> [ELSE <else branch>] FI
   effect:
@@ -275,7 +275,7 @@ At top level, the checker interprets defining words immediately. A colon definit
 \texttt{CONSTANT} : (x --), \qquad \texttt{VARIABLE} : (-- a\text{-}addr).
 \]
 
-The implementation therefore supports the standard Forth workflow in which the specification dictionary grows during analysis. Inferred definitions are written to a log file; for the sample program the checker records:
+The implementation therefore supports the standard Forth workflow in which the specification dictionary grows during analysis \cite{forth2012standard}. Inferred definitions are written to a log file; for the sample program the checker records:
 \begin{lstlisting}
 MYLOOP   ( flag[1] flag[1] -- flag[1] flag[1] )
 MYCHOICE ( x a-addr flag -- )
@@ -300,10 +300,13 @@ The checker is designed as a static evaluator rather than a full runtime. It rep
 The current implementation intentionally stays small. It relies on the declared specification set, rejects nested defining words inside definitions, enforces interpretation-state restrictions, and treats the external type hierarchy as the semantic authority. These restrictions are acceptable for a checker whose purpose is to validate stack discipline and infer word summaries, not to execute arbitrary Forth code.
 
 \section{Conclusion}
-The type checker described in this paper shows that a useful static analysis for a Forth(-like) language can be built from a very small mathematical core. A finite type lattice supplies precision information; indexed stack symbols express correlations; sequential composition forms an inverse semigroup of effects; branch summaries are greatest lower bounds of effects; and loop summaries are accepted when repeated execution stabilizes to an idempotent effect. Because the checker loads both the type hierarchy and the word specifications from external files, the same implementation can be retargeted to other vocabularies and dialects with little or no change to the core.
+The type checker described in this paper shows that a useful static analysis for a Forth(-like) language can be built from a very small mathematical core. A finite type lattice supplies precision information; indexed stack symbols express correlations; sequential composition forms a partial semigroup of effects; branch summaries are greatest lower bounds of effects; and loop summaries are accepted when repeated execution stabilizes to an idempotent effect. Because the checker loads both the type hierarchy and the word specifications from external files, the same implementation can be retargeted to other vocabularies and dialects with little or no change to the core.
 
 In that sense, the paper's main lesson is methodological: many of the dynamic-looking features of a concatenative language become statically tractable once they are phrased as operations in an effect algebra.
 
-The type checker successfully analyzed its own source using Forth 2012 standard type system.
+The type checker successfully analyzed its own source using the Forth 2012 standard type system \cite{forth2012standard}.
+
+\bibliographystyle{plain}
+\bibliography{typechecker-paper}
 
 \end{document}
