@@ -34,7 +34,7 @@
 \maketitle
 
 \begin{abstract}
-This paper describes a static type checker for a Forth(-like) language whose semantics are expressed as typed stack effects. The checker is implemented as a single Gforth program, but its core ideas are language independent: a finite type lattice is loaded from an external file, word specifications are given declaratively, and user-defined words are inferred by composing abstract stack transformations instead of executing the program. The central technical device is a partial algebra of stack effects. Sequential composition unifies adjacent stack symbols by taking the greatest lower bound of comparable types; branching computes a greatest lower bound of whole effects; and iteration is accepted only when repeated execution stabilizes to an idempotent effect. The result is a compact checker that supports ordinary words, literals, parser words, defining words, and declaratively specified control structures such as \texttt{IF ... ELSE ... FI} and \texttt{BEGIN ... WHILE ... REPEAT}. We present the mathematical model, the operations implemented by the checker, and worked examples taken from the bundled specification and program files.
+This paper describes a static type checker for a Forth(-like) language whose semantics is expressed as typed stack effects. The checker is implemented as a single Gforth program, but its core ideas are language independent: a finite type lattice is loaded from an external file, word specifications are given declaratively, and user-defined words are inferred by composing abstract stack transformations instead of executing the program. The central technical device is a partial algebra of stack effects. Sequential composition unifies adjacent stack symbols by taking the greatest lower bound of comparable types; branching computes a greatest lower bound of whole effects; and iteration is accepted only when repeated execution stabilizes to an idempotent effect. The result is a compact checker that supports ordinary words, literals, parser words, defining words, and control structures such as \texttt{IF ... ELSE ... FI} and \texttt{BEGIN ... WHILE ... REPEAT}. We present the mathematical model, the operations implemented by the checker, and worked examples taken from the bundled specification and program files.
 \end{abstract}
 
 \section{Introduction}
@@ -154,7 +154,7 @@ and concludes that the whole program has effect
 \]
 
 \begin{proposition}
-Modulo normalization of fresh indices, compatible effects form a partial semigroup under $\compose$.
+Modulo normalization of fresh indices, compatible effects form an inverse semigroup under $\compose$.
 \end{proposition}
 
 \noindent
