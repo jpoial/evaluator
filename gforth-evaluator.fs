@@ -3663,6 +3663,214 @@ variable ev-ese.seqvec
   type right ev-vec-push-implicit-sym
   left right ev-spec-new dup ev-spec-max-pos drop ;
 
+\ ----------------------------------------------------------------------
+\ Forward declaration seeding from source text
+
+: ev-generic-placeholder-spec { inputs outputs -- spec }
+  inputs 4 ev-max ev-vec-new { left }
+  outputs 4 ev-max ev-vec-new { right }
+  inputs 0 ?do s" x" ev-scopy left ev-vec-push-implicit-sym loop
+  outputs 0 ?do s" x" ev-scopy right ev-vec-push-implicit-sym loop
+  left right ev-spec-new dup ev-spec-max-pos drop ;
+
+: ev-local-doc-counts { text -- inputs outputs }
+  s" <locals-doc>" ev-scopy text ev-sc-new { sc }
+  0 { inputs }
+  0 { outputs }
+  true { left-side? }
+  false { done }
+  begin done 0= while
+    0 0 sc ev-sc-next-word { tok }
+    tok 0= if
+      true to done
+    else
+      tok ev-word-text@ s" --" ev-key= if
+        false to left-side?
+      else
+        tok ev-word-text@ s" |" ev-key= 0= if
+          left-side? if
+            inputs 1+ to inputs
+          else
+            outputs 1+ to outputs
+          then
+        then
+      then
+    then
+  repeat
+  inputs outputs ;
+
+: ev-sc-clone { sc -- copy }
+  /ev-sc ev-xalloc { copy }
+  sc ev-sc.name + @ copy ev-sc.name + !
+  sc ev-sc.text + @ copy ev-sc.text + !
+  sc ev-sc.addr + @ copy ev-sc.addr + !
+  sc ev-sc.len + @ copy ev-sc.len + !
+  sc ev-sc.lines + @ copy ev-sc.lines + !
+  sc ev-sc.off + @ copy ev-sc.off + !
+  sc ev-sc.line + @ copy ev-sc.line + !
+  sc ev-sc.col + @ copy ev-sc.col + !
+  sc ev-sc.lastline + @ copy ev-sc.lastline + !
+  sc ev-sc.lastcol + @ copy ev-sc.lastcol + !
+  copy ;
+
+: ev-forward-next-prog-word { sc -- word|0 }
+  0 0 sc ev-sc-next-program-word ;
+
+: ev-documented-definition-placeholder { sc ts ss -- spec|0 }
+  sc ev-sc-clone { preview }
+  preview ev-forward-next-prog-word { tok }
+  tok 0= if
+    0
+  else
+    tok ev-word-text@ ss ev-ss-word@ { spec }
+    tok spec ev-local-declaration? if
+      spec ev-spec.parse-string + @ preview ev-sc-parse-until { body }
+      body 0= if
+        0
+      else
+        body ev-word-text@ ev-local-doc-counts { inputs outputs }
+        inputs outputs ev-generic-placeholder-spec
+      then
+    else
+      tok s" (" ev-token-unquoted= spec 0<> and spec ev-spec-consumes-until? and if
+        spec ev-spec.parse-string + @ preview ev-sc-parse-until { body }
+        body 0= if
+          0
+        else
+          body ev-word-text@ ev-local-doc-counts { inputs outputs }
+          inputs outputs ev-generic-placeholder-spec
+        then
+      else
+        0
+      then
+    then
+  then ;
+
+: ev-forward-placeholder { name defspec sc ts ss -- spec|0 }
+  0 { placeholder }
+  name ev-word-text@ ss ev-ss-word@ 0= if
+    defspec ev-spec.define-mode + @ ev-define.colon = if
+      sc ts ss ev-documented-definition-placeholder to placeholder
+    else
+      defspec ev-spec.define-mode + @ ev-define.constant = if
+        0 defspec ev-spec-left-count ev-generic-placeholder-spec to placeholder
+      else
+        defspec ev-spec.define-mode + @ ev-define.variable = if
+          0 defspec ev-spec-right-count ev-generic-placeholder-spec to placeholder
+        then
+      then
+    then
+    placeholder 0<> if
+      placeholder name ev-word-span@ name ev-word-text@ ev-spec-with-origin
+      to placeholder
+    then
+  then
+  placeholder ;
+
+: ev-definition-terminator { defspec -- s|0 }
+  defspec ev-spec.parse-mode + @ ev-parse.definition = if
+    defspec ev-spec.parse-string + @ dup 0= if
+      drop s" ;" ev-scopy
+    else
+      ev-canon-sptr
+    then
+  else
+    0
+  then ;
+
+: ev-definition-close-token? { tok spec terminator -- flag }
+  spec ev-definition-end-spec? if
+    true
+  else
+    terminator 0= if
+      false
+    else
+      tok ev-word-text@ ev-canon-sptr terminator ev-s=
+    then
+  then ;
+
+: ev-forward-skip-immediate { spec sc -- }
+  spec 0= if exit then
+  spec ev-spec-consumes-word? if
+    sc ev-forward-next-prog-word drop
+  else
+    spec ev-spec-consumes-until? if
+      sc ev-sc-skip-whitespace
+      spec ev-spec.parse-string + @ sc ev-sc-parse-until drop
+    then
+  then ;
+
+: ev-skip-forward-definition-body { sc defspec ss -- }
+  defspec ev-definition-terminator { terminator }
+  0 { nested }
+  false { done }
+  begin done 0= while
+    sc ev-forward-next-prog-word { tok }
+    tok 0= if
+      true to done
+    else
+      tok ev-word-text@ ss ev-ss-word@ { spec }
+      spec 0<> if
+        spec ev-spec-defines-word? if
+          spec ev-spec.define-mode + @ ev-define.colon = if
+            nested 1+ to nested
+          then
+          sc ev-forward-next-prog-word drop
+        else
+          tok spec terminator ev-definition-close-token? if
+            nested 0> if
+              nested 1- to nested
+            else
+              true to done
+            then
+          else
+            spec ev-spec-is-immediate? if
+              spec sc ev-forward-skip-immediate
+            then
+          then
+        then
+      else
+        tok 0 terminator ev-definition-close-token? if
+          nested 0> if
+            nested 1- to nested
+          else
+            true to done
+          then
+        then
+      then
+    then
+  repeat ;
+
+: ev-seed-forward-definitions { name text ts ss -- }
+  name text ev-sc-new { sc }
+  false { done }
+  begin done 0= while
+    sc ev-forward-next-prog-word { tok }
+    tok 0= if
+      true to done
+    else
+      tok ev-word-text@ ss ev-ss-word@ { spec }
+      spec 0<> if
+        spec ev-spec-defines-word? if
+          sc ev-forward-next-prog-word { defname }
+          defname 0<> if
+            defname spec sc ts ss ev-forward-placeholder { placeholder }
+            placeholder 0<> if
+              defname ev-word-text@ placeholder ss ev-ss-set-word
+            then
+          then
+          spec ev-spec.define-mode + @ ev-define.colon = if
+            sc spec ss ev-skip-forward-definition-body
+          then
+        else
+          spec ev-spec-is-immediate? if
+            spec sc ev-forward-skip-immediate
+          then
+        then
+      then
+    then
+  repeat ;
+
 \ Adds a hidden bookkeeping effect to the top-level program sequence.
 : ev-prog-add-hidden { label span spec prog -- }
   ev-sempty prog ev-prog.words + @ ev-vec-push
@@ -3679,11 +3887,19 @@ variable ev-ese.seqvec
   spec ev-spec-left-count 0<> spec ev-spec-right-count 0<> or if
     s" Colon definition word must have stack effect ( -- )" ev-scopy 0 token ev-word-span@ ev-error-msg
   then
+  sc token ss ev-next-defined-name { name }
+  sc ts ss ev-documented-definition-placeholder { documented }
+  documented 0<> if
+    documented name ev-word-span@ name ev-word-text@ ev-spec-with-origin { docspec }
+    name ev-word-text@ docspec ss ev-ss-set-word
+    sc spec ss ev-skip-forward-definition-body
+    name ev-word-text@ docspec ev-log-definition
+    exit
+  then
   ev-current-locals @ { savedlocals }
   ev-current-local-pos @ { savedlocalpos }
   ev-current-local-seed @ { savedlocalseed }
   ev-current-local-seed-index @ { savedlocalseedindex }
-  sc token ss ev-next-defined-name { name }
   s" END" ev-scopy { end-role }
   token ev-word-text@ drop
   name ev-word-text@ ev-pds.defname !
@@ -3860,6 +4076,7 @@ variable ev-ppt.prog
 
 \ Outer interpreter for program text: execute top-level defining words immediately and collect runtime effects.
 : ev-parse-program { name text ts ss -- prog }
+  name text ts ss ev-seed-forward-definitions
   name text ev-sc-new { sc }
   sc ev-sc.lines + @ ev-current-source-lines !
   name text sc ev-sc.lines + @ ev-prog-new { prog }

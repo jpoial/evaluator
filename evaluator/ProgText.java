@@ -168,6 +168,7 @@ public class ProgText extends LinkedList<String> {
          TextScanner scanner = TextScanner.fromFile (fileName);
          sourceText = scanner.sourceText();
          sourceLines = scanner.sourceLines();
+         seedForwardDefinitions (fileName, sourceText, ts, ss);
          interpretSource (scanner, ts, ss, fileName);
       } catch (IOException e) {
          throw new ProgramException (new ProgramDiagnostic (
@@ -195,6 +196,7 @@ public class ProgText extends LinkedList<String> {
          source.toString());
       sourceText = scanner.sourceText();
       sourceLines = scanner.sourceLines();
+      seedForwardDefinitions ("<command line>", sourceText, ts, ss);
       interpretSource (scanner, ts, ss, "<command line>");
    } // end of constructor
 
@@ -818,6 +820,229 @@ public class ProgText extends LinkedList<String> {
       result.maxPos();
       return result;
    } // end of localAssignmentSpec()
+
+   /**
+    * Clones one source scanner so a preview pass can inspect upcoming text
+    * without consuming the real parser state.
+    * @param scanner scanner to clone
+    * @return independent scanner positioned at the same source location
+    */
+   TextScanner cloneScanner (TextScanner scanner) {
+      TextScanner copy = new TextScanner (scanner.sourceName,
+         scanner.sourceText());
+      copy.offset = scanner.offset;
+      copy.line = scanner.line;
+      copy.column = scanner.column;
+      copy.lastLine = scanner.lastLine;
+      copy.lastColumn = scanner.lastColumn;
+      return copy;
+   } // end of cloneScanner()
+
+   /**
+    * Builds a generic placeholder effect using only input/output arity.
+    * The placeholder stays permissive (`x`) until the real definition body is
+    * parsed later in the main pass.
+    * @param inputs documented input count
+    * @param outputs documented output count
+    * @param ts current type system
+    * @return generic placeholder effect
+    */
+   Spec genericPlaceholderSpec (int inputs, int outputs, TypeSystem ts) {
+      Spec result = new Spec (ts);
+      for (int i = 0; i < inputs; i++) {
+         result.leftSide.add (new TypeSymbol ("x", 0));
+      }
+      for (int i = 0; i < outputs; i++) {
+         result.rightSide.add (new TypeSymbol ("x", 0));
+      }
+      result.maxPos();
+      return result;
+   } // end of genericPlaceholderSpec()
+
+   /**
+    * Counts documented stack slots in one locals-style header comment.
+    * Text before `--` is treated as input documentation, and text after `--`
+    * as output documentation. `|` keeps its usual locals meaning and is
+    * ignored on both sides.
+    * @param text raw text inside `{ ... }`
+    * @return two-element array: inputs, outputs
+    */
+   int[] documentedEffectCounts (String text) {
+      int[] result = new int[] {0, 0};
+      if (text == null) return result;
+      String normalized = text.replace ('\r', ' ').replace ('\n', ' ').trim();
+      if (normalized.length() == 0) return result;
+      String[] tokens = normalized.split ("\\s+");
+      boolean leftSide = true;
+      for (int i = 0; i < tokens.length; i++) {
+         String token = tokens [i] == null ? "" : tokens [i].trim();
+         if (token.length() == 0) continue;
+         if ("--".equals (token)) {
+            leftSide = false;
+            continue;
+         }
+         if ("|".equals (token)) continue;
+         result [leftSide ? 0 : 1]++;
+      }
+      return result;
+   } // end of documentedEffectCounts()
+
+   /**
+    * Infers a provisional effect for one colon definition from an immediately
+    * following locals-style documentation header.
+    * @param scanner scanner positioned at the start of the body
+    * @param ts current type system
+    * @param ss current specification set
+    * @return placeholder effect or null when no documented header is present
+    */
+   Spec documentedDefinitionPlaceholder (TextScanner scanner, TypeSystem ts,
+      SpecSet ss) {
+      TextScanner preview = cloneScanner (scanner);
+      SourceWord head = preview.nextProgramWord();
+      if (head == null) return null;
+      Spec headSpec = (Spec)ss.get (head.text);
+      if (!isLocalDeclarationWord (head, headSpec)) return null;
+      SourceWord body = consumeLocalDeclarationText (head, headSpec, preview);
+      int[] counts = documentedEffectCounts (body == null ? "" : body.text);
+      return genericPlaceholderSpec (counts [0], counts [1], ts);
+   } // end of documentedDefinitionPlaceholder()
+
+   /**
+    * Infers a placeholder effect for one word defined later in the same source.
+    * @param nameToken defined word name
+    * @param definerSpec defining-word metadata
+    * @param scanner scanner positioned after the name token
+    * @param ts current type system
+    * @param ss current specification set
+    * @return provisional effect or null when no safe placeholder is known
+    */
+   Spec forwardDefinitionPlaceholder (SourceWord nameToken, Spec definerSpec,
+      TextScanner scanner, TypeSystem ts, SpecSet ss) {
+      if ((nameToken == null) || (definerSpec == null)) return null;
+      if (ss.containsKey (nameToken.text)) return null;
+      if (Spec.DEFINE_COLON.equals (definerSpec.defineMode)) {
+         Spec documented = documentedDefinitionPlaceholder (scanner, ts, ss);
+         if (documented == null) return null;
+         return documented.withOrigin (nameToken.span, nameToken.text);
+      }
+      if (Spec.DEFINE_CONSTANT.equals (definerSpec.defineMode)) {
+         int outputs = definerSpec.leftSide == null ? 0 :
+            definerSpec.leftSide.size();
+         if (outputs <= 0) outputs = 1;
+         return genericPlaceholderSpec (0, outputs, ts).withOrigin (
+            nameToken.span, nameToken.text);
+      }
+      if (Spec.DEFINE_VARIABLE.equals (definerSpec.defineMode)) {
+         int outputs = definerSpec.rightSide == null ? 0 :
+            definerSpec.rightSide.size();
+         if (outputs <= 0) outputs = 1;
+         return genericPlaceholderSpec (0, outputs, ts).withOrigin (
+            nameToken.span, nameToken.text);
+      }
+      return null;
+   } // end of forwardDefinitionPlaceholder()
+
+   /**
+    * Best-effort forward declaration pass over the source.
+    * It seeds provisional effects for later definitions using source-local
+    * documentation, so the main pass can resolve forward references without
+    * hard-coding any particular input file.
+    * @param sourceName source label
+    * @param text full source text
+    * @param ts current type system
+    * @param ss current specification set
+    */
+   void seedForwardDefinitions (String sourceName, String text, TypeSystem ts,
+      SpecSet ss) {
+      if ((text == null) || (text.length() == 0)) return;
+      TextScanner scanner = new TextScanner (sourceName, text);
+      try {
+         SourceWord token;
+         while ((token = scanner.nextProgramWord()) != null) {
+            Spec spec = (Spec)ss.get (token.text);
+            if ((spec != null) && spec.definesWord()) {
+               SourceWord nameToken = nextDefinedName (scanner, token,
+                  token.text, ss);
+               Spec placeholder = forwardDefinitionPlaceholder (nameToken,
+                  spec, scanner, ts, ss);
+               if (placeholder != null) ss.put (nameToken.text, placeholder);
+               if (Spec.DEFINE_COLON.equals (spec.defineMode))
+                  skipForwardDefinitionBody (scanner, spec, ss);
+               continue;
+            }
+            if ((spec != null) && spec.isImmediate()) {
+               skipForwardPayload (token, spec, scanner, ss);
+            }
+         }
+      } catch (ProgramException e) {
+         // The real parsing pass will report the actual user-facing error.
+      }
+   } // end of seedForwardDefinitions()
+
+   /**
+    * Skips a parser/immediate payload during the forward-declaration pass.
+    * @param token already scanned head word
+    * @param spec resolved specification
+    * @param scanner source scanner
+    * @param ss current specification set
+    */
+   void skipForwardPayload (SourceWord token, Spec spec, TextScanner scanner,
+      SpecSet ss) {
+      try {
+         if (spec == null) return;
+         if (spec.definesWord()) {
+            nextDefinedName (scanner, token, token.text, ss);
+            return;
+         }
+         if (spec.isImmediate()) consumeImmediateInput (token, spec, scanner);
+      } catch (ProgramException e) {
+         if (scanner.atEnd()) return;
+      }
+   } // end of skipForwardPayload()
+
+   /**
+    * Skips one colon definition body during the forward-declaration pass.
+    * Nested definitions are skipped conservatively so scanning resumes at the
+    * next top-level token.
+    * @param scanner source scanner positioned at the body start
+    * @param definerSpec definition opener metadata
+    * @param ss current specification set
+    */
+   void skipForwardDefinitionBody (TextScanner scanner, Spec definerSpec,
+      SpecSet ss) {
+      if (scanner == null) return;
+      String terminator = null;
+      if ((definerSpec != null) && Spec.PARSE_DEFINITION.equals (
+          definerSpec.parseMode)) {
+         terminator = definitionTerminator (definerSpec);
+      }
+      int nestedDefinitions = 0;
+      SourceWord token;
+      while ((token = scanner.nextProgramWord()) != null) {
+         Spec spec = (Spec)ss.get (token.text);
+         if ((spec != null) && spec.definesWord()) {
+            if (Spec.DEFINE_COLON.equals (spec.defineMode))
+               nestedDefinitions++;
+            skipForwardPayload (token, spec, scanner, ss);
+            continue;
+         }
+         boolean closes = (spec != null) && spec.hasControlMode (
+            Spec.CONTROL_END);
+         if (!closes && (terminator != null) &&
+             terminator.equals (canonicalWord (token.text))) {
+            closes = true;
+         }
+         if (closes) {
+            if (nestedDefinitions > 0) {
+               nestedDefinitions--;
+               continue;
+            }
+            return;
+         }
+         if ((spec != null) && spec.isImmediate())
+            skipForwardPayload (token, spec, scanner, ss);
+      }
+   } // end of skipForwardDefinitionBody()
 
    /**
     * Resolves the runtime effect of one source word in the current state.
