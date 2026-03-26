@@ -4,6 +4,7 @@ package evaluator;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
 
@@ -43,6 +44,7 @@ public class ProgText extends LinkedList<String> {
       String legacyTerminator = null;
       SpecList rootSeq = new SpecList();
       LinkedList<CompileFrame> controlStack = new LinkedList<CompileFrame>();
+      Map<String, Spec> localSpecs = new LinkedHashMap<String, Spec>();
 
       CompileContext (String name, SourceWord defWord, SourceWord defName,
          String terminator) {
@@ -384,6 +386,13 @@ public class ProgText extends LinkedList<String> {
     */
    CompileContext compileOneWord (SourceWord token, TextScanner scanner,
       CompileContext compile, TypeSystem ts, SpecSet ss, String sourceName) {
+      Spec localRuntime = localWordSpec (token.text, compile);
+      if (localRuntime != null) {
+         appendCompiledWord (compile, token.text, token.span, localRuntime);
+         return compile;
+      }
+      if (isRecurseWord (token))
+         return compileRecursiveWord (token, compile, ss);
       Spec spec = (Spec)ss.get (token.text);
       if (isLegacyDefinitionTerminator (token, spec, compile)) {
          if (compile.controlStack.size() > 0)
@@ -406,6 +415,36 @@ public class ProgText extends LinkedList<String> {
       appendCompiledWord (compile, token.text, token.span, runtime);
       return compile;
    } // end of compileOneWord()
+
+   /**
+    * Tells whether the current compile-time token is RECURSE.
+    * @param token source token
+    * @return true for RECURSE
+    */
+   boolean isRecurseWord (SourceWord token) {
+      return (token != null) && "RECURSE".equals (canonicalWord (token.text));
+   } // end of isRecurseWord()
+
+   /**
+    * Compiles RECURSE using a predeclared specification of the current word.
+    * This keeps recursive words type-checkable before their final inferred
+    * specification has been computed.
+    * @param token RECURSE token
+    * @param compile current compile context
+    * @param ss current specification set
+    * @return updated compile context
+    */
+   CompileContext compileRecursiveWord (SourceWord token,
+      CompileContext compile, SpecSet ss) {
+      String key = canonicalWord (compile.wordName);
+      Spec spec = (Spec)ss.get (key);
+      if (spec == null)
+         throw programError ("parse.missing-recurse-spec",
+            "No specification found for recursive word " + compile.wordName +
+            " in definition of " + compile.wordName, "", token.span);
+      appendCompiledWord (compile, token.text, token.span, spec);
+      return compile;
+   } // end of compileRecursiveWord()
 
    /**
     * Executes one immediate word in interpretation state.
@@ -456,6 +495,10 @@ public class ProgText extends LinkedList<String> {
    CompileContext executeImmediateCompileWord (SourceWord token, Spec spec,
       TextScanner scanner, CompileContext compile, TypeSystem ts, SpecSet ss,
       String sourceName) {
+      if (isLocalDeclarationWord (token, spec))
+         return declareLocalWords (token, spec, scanner, compile, ts);
+      if (isLocalAssignmentWord (token, spec))
+         return assignLocalWord (token, spec, scanner, compile, ts);
       if (spec.definesWord())
          throw programError ("parse.unsupported-defining-word",
             token.text + " is not supported inside definition of " +
@@ -597,6 +640,184 @@ public class ProgText extends LinkedList<String> {
       }
       return result;
    } // end of currentDoDepth()
+
+   /**
+    * Returns the runtime effect of one compile-time local reference.
+    * Gforth-style locals are treated as cell-sized values that can be
+    * re-pushed later by name inside the same definition.
+    * @param word source token text
+    * @param compile current compile context
+    * @return local runtime effect or null when the name is not local
+    */
+   Spec localWordSpec (String word, CompileContext compile) {
+      if ((compile == null) || (word == null) || (word.length() == 0))
+         return null;
+      return (Spec)compile.localSpecs.get (canonicalWord (word));
+   } // end of localWordSpec()
+
+   /**
+    * Tells whether the current immediate word is the Gforth locals opener.
+    * The forth2012 demo profile models `{` as a compile-only parser word.
+    * @param token source token
+    * @param spec resolved specification
+    * @return true for `{ ... }`
+    */
+   boolean isLocalDeclarationWord (SourceWord token, Spec spec) {
+      if ((token == null) || (spec == null)) return false;
+      return "{".equals (token.text) && spec.consumesUntil() &&
+         "}".equals (spec.parseString);
+   } // end of isLocalDeclarationWord()
+
+   /**
+    * Tells whether the current immediate word assigns to one local by name.
+    * `TO` is standardized for VALUE-like words and is also used by Gforth
+    * locals for writable local variables.
+    * @param token source token
+    * @param spec resolved specification
+    * @return true for compile-time TO
+    */
+   boolean isLocalAssignmentWord (SourceWord token, Spec spec) {
+      if ((token == null) || (spec == null)) return false;
+      return "TO".equals (canonicalWord (token.text)) &&
+         spec.consumesNextWord();
+   } // end of isLocalAssignmentWord()
+
+   /**
+    * Consumes one Gforth locals declaration and records the declared names.
+    * Everything after `--` inside the braces is treated as comment text, which
+    * matches Gforth's common locals style used by this source file.
+    * @param token already scanned `{`
+    * @param spec `{` specification
+    * @param scanner source scanner
+    * @param compile current compile context
+    * @param ts current type system
+    * @return updated compile context
+    */
+   CompileContext declareLocalWords (SourceWord token, Spec spec,
+      TextScanner scanner, CompileContext compile, TypeSystem ts) {
+      SourceWord body = consumeLocalDeclarationText (token, spec, scanner);
+      LinkedList<String> names = parseLocalNames (body == null ? "" :
+         body.text);
+      if (names.size() == 0) return compile;
+      appendCompiledWord (compile, token.text, SourceSpan.covering (
+         token.span, scanner.lastConsumedSpan()), localBindSpec (
+         names.size(), ts));
+      Iterator<String> it = names.iterator();
+      while (it.hasNext()) {
+         String name = (String)it.next();
+         compile.localSpecs.put (name, localReferenceSpec (ts));
+      }
+      return compile;
+   } // end of declareLocalWords()
+
+   /**
+    * Compiles one local assignment such as `value TO x`.
+    * The current approximation only accepts TO for names introduced through
+    * `{ ... }` inside the same definition.
+    * @param token already scanned TO
+    * @param spec resolved TO specification
+    * @param scanner source scanner
+    * @param compile current compile context
+    * @param ts current type system
+    * @return updated compile context
+    */
+   CompileContext assignLocalWord (SourceWord token, Spec spec,
+      TextScanner scanner, CompileContext compile, TypeSystem ts) {
+      SourceWord nameToken = scanner.nextProgramWord();
+      if (nameToken == null)
+         throw programError ("parse.missing-local-target",
+            "Missing name after " + token.text + " in definition of " +
+            compile.wordName, "", token.span);
+      String key = canonicalWord (nameToken.text);
+      if (!compile.localSpecs.containsKey (key))
+         throw programError ("parse.unknown-local-target",
+            "Unknown local name " + nameToken.text + " after " + token.text +
+            " in definition of " + compile.wordName, "",
+            nameToken.span);
+      appendCompiledWord (compile, token.text, SourceSpan.covering (
+         token.span, nameToken.span), localAssignmentSpec (ts));
+      return compile;
+   } // end of assignLocalWord()
+
+   /**
+    * Consumes the text body of one `{ ... }` declaration.
+    * @param token already scanned `{`
+    * @param spec parser-word specification
+    * @param scanner source scanner
+    * @return parsed inner text
+    */
+   SourceWord consumeLocalDeclarationText (SourceWord token, Spec spec,
+      TextScanner scanner) {
+      scanner.skipWhitespace();
+      SourceWord parsed = scanner.parseUntil (spec.parseString);
+      if (parsed == null)
+         throw programError ("parse.missing-local-end",
+            "Missing closing " + TextScanner.quotedText (spec.parseString) +
+            " for locals declaration", "", token.span);
+      return parsed;
+   } // end of consumeLocalDeclarationText()
+
+   /**
+    * Extracts declared local names from one `{ ... }` body.
+    * Names after `--` are documentation only for the current source file and
+    * are therefore ignored by the checker.
+    * @param text raw text between `{` and `}`
+    * @return canonical local names
+    */
+   LinkedList<String> parseLocalNames (String text) {
+      LinkedList<String> result = new LinkedList<String>();
+      if (text == null) return result;
+      String head = text.replace ('\r', ' ').replace ('\n', ' ');
+      int arrow = head.indexOf ("--");
+      if (arrow >= 0) head = head.substring (0, arrow);
+      String trimmed = head.trim();
+      if (trimmed.length() == 0) return result;
+      String[] tokens = trimmed.split ("\\s+");
+      for (int i = 0; i < tokens.length; i++) {
+         String token = tokens [i] == null ? "" : tokens [i].trim();
+         if ((token.length() == 0) || "|".equals (token)) continue;
+         result.add (canonicalWord (token));
+      }
+      return result;
+   } // end of parseLocalNames()
+
+   /**
+    * Builds the stack effect of binding N incoming stack items to locals.
+    * @param count number of local names
+    * @param ts current type system
+    * @return consuming effect
+    */
+   Spec localBindSpec (int count, TypeSystem ts) {
+      Spec result = new Spec (ts);
+      for (int i = 0; i < count; i++)
+         result.leftSide.add (new TypeSymbol ("x", 0));
+      result.maxPos();
+      return result;
+   } // end of localBindSpec()
+
+   /**
+    * Builds the runtime effect of reading one local.
+    * @param ts current type system
+    * @return local-read effect
+    */
+   Spec localReferenceSpec (TypeSystem ts) {
+      Spec result = new Spec (ts);
+      result.rightSide.add (new TypeSymbol ("x", 0));
+      result.maxPos();
+      return result;
+   } // end of localReferenceSpec()
+
+   /**
+    * Builds the runtime effect of assigning one local with TO.
+    * @param ts current type system
+    * @return local-write effect
+    */
+   Spec localAssignmentSpec (TypeSystem ts) {
+      Spec result = new Spec (ts);
+      result.leftSide.add (new TypeSymbol ("x", 0));
+      result.maxPos();
+      return result;
+   } // end of localAssignmentSpec()
 
    /**
     * Resolves the runtime effect of one source word in the current state.

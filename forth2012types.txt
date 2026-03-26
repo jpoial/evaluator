@@ -27,6 +27,7 @@ type ud
 
 rel +n < n
 rel +n < u
+rel u < n
 rel n < x
 rel u < x
 rel char < +n
@@ -39,8 +40,10 @@ rel ior < n
 rel fam < x
 rel fileid < x
 rel wid < x
+rel xd < x
 rel +d < d
 rel +d < ud
+rel ud < d
 rel d < xd
 rel ud < xd
 
