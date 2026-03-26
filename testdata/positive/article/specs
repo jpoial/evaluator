@@ -1,0 +1,98 @@
+
+PLUS ( x[1] x[1] -- x[1] )   \ polymorphic plus, just example
+
+\ Core stack words
+OVER ( x[2] x[1] -- x[2] x[1] x[2] )
+SWAP ( x[2] x[1] -- x[1] x[2] )
+DUP ( x[1] -- x[1] x[1] )
+DROP ( x -- )
+ROT ( x[3] x[2] x[1] -- x[2] x[1] x[3] )
+@ ( a-addr -- x )
+HERE ( -- a-addr )
+DP ( -- a-addr )
+C@ ( c-addr -- char )
+! ( x a-addr -- )
+C! ( x c-addr -- )
++ ( n n -- n )
+- ( n n -- n )
+* ( n n -- n )
+/MOD ( n n -- n n )
+*/ ( n n n -- n )
+*/MOD ( n n n -- n n )
+/ ( n n -- n )
+MOD ( n n -- n )
+1+ ( n -- n )
+1- ( n -- n )
+2* ( n -- n )
+2/ ( n -- n )
+NEGATE ( n -- n )
+ABS ( n -- n )
+MAX ( n n -- n )
+MIN ( n n -- n )
+0= ( n -- flag )
+0< ( n -- flag )
+0> ( n -- flag )
+0>= ( n -- flag )
+0<> ( n -- flag )
+= ( x x -- flag )
+<> ( x x -- flag )
+< ( n n -- flag )
+> ( n n -- flag )
+<= ( n n -- flag )
+>= ( n n -- flag )
+AND ( flag flag -- flag )
+OR ( flag flag -- flag )
+XOR ( flag flag -- flag )
+INVERT ( flag -- flag )
+NOT ( x -- x )
+
+\ Core parser and literal words
+"(" parse until ")" ( -- )
+"\\" parse until eol ( -- )
+." parse until "\"" ( -- )
+: parse word define colon ( -- )
+; control end ( -- )
+CONSTANT parse word define ( x -- )
+VARIABLE parse word define ( -- a-addr )
+literal integer ( -- n )
+
+IF control if ( flag -- )
+ELSE control else ( -- )
+FI control fi ( -- )
+
+syntax: IF <then branch> [ELSE <else branch>] FI
+  effect:
+    IF
+    either <then branch> <else branch>
+
+BEGIN control begin ( -- )
+WHILE control while ( flag -- )
+REPEAT control repeat ( -- )
+
+syntax: BEGIN <loop prefix> WHILE <loop body> REPEAT
+  effect:
+    repeat <loop prefix> WHILE
+    repeat <loop body>
+
+AGAIN control again ( -- )
+
+syntax: BEGIN <loop body> AGAIN
+  effect:
+    repeat <loop body>
+
+UNTIL control until ( flag -- )
+
+syntax: BEGIN <loop body> UNTIL
+  effect:
+    repeat <loop body> UNTIL
+
+DO control do ( n[2] n[1] -- )
+?DO control do ( n[2] n[1] -- )
+LOOP control loop ( -- )
+I control index ( -- n )
+
+syntax: DO <loop body> LOOP
+  effect:
+    DO
+    repeat <loop body>
+

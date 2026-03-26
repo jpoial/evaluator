@@ -1,0 +1,16 @@
+type a-addr
+type c-addr
+type addr
+type x
+type n
+type flag
+type char
+rel a-addr < c-addr
+rel c-addr < addr
+rel addr < x
+rel flag < x
+rel char < n
+rel n < x
+
+scanner EOL "\n"
+
