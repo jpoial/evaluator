@@ -17,6 +17,7 @@
 
 \newtheorem{definition}{Definition}
 \newtheorem{proposition}{Proposition}
+\newtheorem{theorem}{Theorem}
 
 \newcommand{\Types}{\mathcal{T}}
 \newcommand{\Effects}{\mathcal{E}}
@@ -26,33 +27,38 @@
 \newcommand{\id}{\mathbf{1}}
 \newcommand{\sem}[1]{[\![#1]\!]}
 
-\title{A Declarative Stack-Effect Type Checker for a Forth-like Language}
+\title{Declarative Stack-Effect Checking for a Forth-like Language}
 \author{Anonymous Author(s)}
 \renewcommand{\shortauthors}{Anonymous Author(s)}
 
 \begin{document}
 
 \begin{abstract}
-This paper describes a static type checker for a Forth(-like) language whose semantics is expressed as typed stack effects. The checker is implemented as a single Gforth program, but its core ideas are language independent: a finite type lattice is loaded from an external file, word specifications are given declaratively, and user-defined words are inferred by composing abstract stack transformations instead of executing the program. The central technical device is a collection of partial operations on stack effects. Sequential composition unifies adjacent stack symbols by taking the greatest lower bound of comparable types; branching uses a partial greatest-lower-bound operator on whole effects; and iteration is accepted only when repeated execution stabilizes to an idempotent effect. The implementation supports ordinary words, literals, parser words, defining words, and control structures such as \texttt{IF ... ELSE ... FI} and \texttt{BEGIN ... WHILE ... REPEAT}. We present the mathematical model, the operations implemented by the checker, and worked examples taken from the bundled specification and program files.
+This paper presents a static checker for a Forth(-like) language based on typed stack effects. The checker is parameterized by a finite type hierarchy together with declarative specifications for ordinary words, literals, defining words, parser words, and control constructs. Its core operations are sequential composition of effects, branch merging by greatest lower bound in a must-analysis order, and loop summarization by a local idempotence criterion. Control forms are described by paired \texttt{syntax:}/\texttt{effect:} declarations, so source-level parsing and effect computation are expressed in one framework. For a fixed parsed program and finite specification environment, checking admits a finite constraint characterization: acceptance is equivalent to solvability of an induced system of effect inequalities, and a successful run computes the least non-clashing solution. The implementation, written in Gforth, supports conditionals, loops, and user-defined words. We present the effect calculus, the constraint view, and worked examples drawn from the bundled specifications and programs.
 \end{abstract}
 
 \maketitle
 
 \section{Introduction}
-Concatenative languages place computation on the operand stack. A word is naturally described by the stack cells it consumes and the cells it produces, so a natural static abstraction is a \emph{stack effect}. In simple cases, informal comments such as \texttt{( n n -- n )} are already useful documentation in Forth practice and standardization documents \cite{rather1996evolution,forth2012standard}. The goal of the checker described here is to turn such annotations into an executable static semantics.
+Concatenative languages compose programs by placing words next to one another, so juxtaposition itself denotes composition. In stack-based instances such as Forth, words perform computation by transforming an implicit operand stack. A word is therefore naturally described by the stack cells it consumes and the cells it produces, so a natural static abstraction is a \emph{stack effect}. In simple cases, informal comments such as \texttt{( n n -- n )} are already useful documentation in Forth practice and standardization documents \cite{rather1996evolution,forth2012standard}. The goal of the checker described here is to turn such annotations into an executable static semantics.
 
-The checker takes three external inputs. A \texttt{types} file defines a finite subtype hierarchy. A \texttt{specs} file assigns effects and parsing behavior to words, literals, defining words, and control roles. A program file is then parsed and analyzed against those specifications. Instead of running the program for its concrete result, the checker computes the abstract stack effect of each token and of each user-defined word. The same mechanism also produces source-aware diagnostics when adjacent effects cannot be composed. In that sense, the implementation follows the abstract-interpretation idea of executing programs over a finite abstract domain rather than over concrete values \cite{cousot1977abstract}.
+The checker takes three external inputs. A \texttt{types} file defines a finite subtype hierarchy. A \texttt{specs} file assigns effects and parsing behavior to words, literals, defining words, and control roles. A program file is then parsed and analyzed against those specifications. Instead of running the program for its concrete result, the checker computes the abstract stack effect of each token and of each user-defined word. The same mechanism produces source-aware diagnostics when adjacent effects cannot be composed. In that sense, the implementation follows the abstract-interpretation idea of executing programs over a finite abstract domain rather than over concrete values \cite{cousot1977abstract}.
+
+A central technical result is that this operational account has an equivalent declarative reading. Once parsing has segmented the source, checking can be phrased as solving a finite system of inequalities over segment summaries. The soundness-and-completeness result proved later states that a program is accepted exactly when that induced constraint system has a non-clashing solution, and that the checker computes the pointwise least such solution. This gives a constraint-based characterization of the checking procedure.
 
 Two design choices make the system concise and extensible. First, types are not hard-coded; they are loaded as a small finite lattice-like structure. Second, control flow is not built into the checker alone; it can be described declaratively with \texttt{syntax:} and \texttt{effect:} blocks. The mathematical content of the checker is therefore concentrated in a small effect algebra. This approach is informed by earlier work on algebraic specifications of stack effects, typed wildcards, must-analysis for stack-oriented languages, and compositional type systems for stack-oriented languages \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,saabas2006compositional,poial2006typing}.
 
-Earlier papers in this line developed the ingredients separately: algebraic composition of stack effects \cite{poial1994algebraic}, typed wildcards and subtype-sensitive symbolic refinement \cite{stoddart1993type,poial2002wildcards}, and must-analysis formulations based on greatest lower bounds and idempotents \cite{poial2006typing}. The present paper packages these ideas into one executable account for whole source programs rather than isolated equations.
+Earlier papers in this line developed the ingredients separately: algebraic composition of stack effects \cite{poial1994algebraic}, typed wildcards and subtype-sensitive symbolic refinement \cite{stoddart1993type,poial2002wildcards}, and must-analysis formulations based on greatest lower bounds and idempotents \cite{poial2006typing}. The present paper is concerned with combining these ingredients into one account for whole source programs and relating that account to the older inequality-based view of stack-effect specifications \cite{poial1991algebraic,poial1992multiple}.
 
-Concretely, the paper makes three contributions.
+Concretely, the paper makes four contributions.
 \begin{enumerate}
 \item It presents a declarative effect calculus in which stack symbols carry both subtype information and identity constraints, so stack shuffles can be reasoned about compositionally.
 \item It gives a must-analysis interpretation of branching and looping in the same effect domain: branches merge by greatest lower bound, while loops are accepted by a lightweight idempotence test.
+\item It proves a finite constraint characterization of checking: the checker accepts exactly the programs whose induced effect-inequality system has a non-clashing solution, and on success computes the pointwise most informative one.
 \item It shows that the calculus is practical as a retargetable checker: the type hierarchy, vocabulary, parser behavior, and control structures are all loaded from external specifications, and user-defined words are inferred during analysis.
 \end{enumerate}
+
+Sections~2--5 define the abstract domain and its core operations. Section~6 describes declarative control specifications and the constraint view. The remaining sections discuss inference of user-defined words, relation to prior work, implementation scope, and conclusion.
 
 \section{Type Domain}
 \subsection{Type hierarchy}
@@ -317,6 +323,42 @@ The denotational semantics is:
 
 This arrangement separates parsing from typing. Once a source fragment has been segmented according to a \texttt{syntax:} declaration, its meaning is calculated entirely by the effect algebra above.
 
+\subsection{Constraint view}
+\label{sec:constraint-view}
+The declarative presentation can also be read as a finite constraint system, making explicit a connection to earlier algebraic work on stack-effect specifications \cite{poial1991algebraic,poial1992multiple}. Fix a parsed source program $P$ under a finite \texttt{types}/\texttt{specs} environment $\Gamma$. Every parsed segment $A$---a linear fragment, a branch arm, a loop body, or a whole definition body---is assigned an unknown summary effect $X_A$. For the purpose of constraint generation, the partial operations $\compose$, effect-level $\glb$, and $(\cdot)^\star$ are totalized with a clash element $0$: write $\operatorname{tot}(F)$ for $F$ when $F$ is defined and for $0$ otherwise.
+
+Constraints are then generated bottom-up from the parsed source tree.
+\begin{enumerate}
+\item A leaf token with declared effect $\pi$ contributes $X_A \preceq \pi$.
+\item A sequential node with children $B$ and $C$ contributes
+\[
+X_A \preceq \operatorname{tot}(X_B \compose X_C).
+\]
+\item A control node whose \texttt{effect:} template is $E$ contributes
+\[
+X_A \preceq \operatorname{tot}(\sem{E}_X),
+\]
+where each segment reference $\langle B \rangle$ in $E$ is interpreted as the corresponding unknown $X_B$.
+\item A user-defined word contributes an equality between the word's installed summary and the unknown attached to its parsed body.
+\end{enumerate}
+Let $I(P,\Gamma)$ denote the resulting finite system of inequalities.
+Because $P$ has only finitely many parsed segments and effects are compared modulo normalization of fresh indices, the normalized non-clashing summaries available to each segment form a finite poset under $\preceq$. Each generated constraint has the form $X_A \preceq F_A(\vec{X})$ for a monotone operator $F_A$ on that finite poset.
+
+\begin{theorem}[Soundness and completeness of constraint solving]
+Assume that the type domain and the parsed source tree are finite. Then:
+\begin{enumerate}
+\item If the checker accepts $P$ and returns normalized summaries $\pi_A$ for every parsed segment $A$, then the assignment $X_A \mapsto \pi_A$ is a non-clashing solution of $I(P,\Gamma)$.
+\item If $I(P,\Gamma)$ has a non-clashing solution, then the checker accepts $P$ and returns a family of normalized summaries $\pi_A$ that is pointwise least under $\preceq$ among all non-clashing solutions.
+\end{enumerate}
+Hence the checker accepts $P$ if and only if $I(P,\Gamma)$ is solvable in non-clashing effects, and on success it computes the most informative solution.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+For soundness, follow the successful checker run bottom-up over the parsed tree. Leaf summaries satisfy their declared specifications by construction; sequential nodes satisfy the constraint generated from boundary composition; and control nodes satisfy the constraint generated from the denotation of their \texttt{effect:} templates. Therefore the summaries returned by the checker satisfy every inequality in $I(P,\Gamma)$.
+
+For completeness, view the checker as iterative refinement on the finite product of per-segment summary posets. Every transfer operator $F_A$ is monotone in the must-analysis order: replacing an argument by a more informative summary can only preserve or strengthen the resulting guarantee. Starting from the maximally permissive summaries and repeatedly applying these operators therefore descends to the pointwise least common prefixed point. If a non-clashing solution exists, that least prefixed point is non-clashing and satisfies all constraints, so the checker succeeds and returns it. This is the program-local reformulation of the earlier FORML inequality-solvability view of stack-effect specifications.
+\end{proof}
+
 \section{Inference of User-Defined Words}
 At top level, the checker interprets defining words immediately. A colon definition starts a new sequence, parses until its terminating control word, computes the effect of the body, and installs the resulting effect as the specification of the new word. Constants and variables are handled similarly but with special defining shapes:
 \[
@@ -343,21 +385,19 @@ These examples demonstrate several features of the checker at once.
 \end{itemize}
 
 \section{Relation to Prior Work}
-This paper sits at the intersection of several lines of work on stack-oriented typing. Early algebraic treatments of Forth stack effects emphasized sequential composition and its semigroup structure \cite{poial1994algebraic}. Typed wildcards and subtype-sensitive matching then made it possible to preserve both abstract type precision and symbolic identity across stack shuffles \cite{stoddart1993type,poial2002wildcards}. Later work reframed the analysis explicitly as must-analysis, motivating greatest lower bounds for branches and idempotents for loops \cite{poial2006typing}.
+This paper sits at the intersection of several lines of work on stack-oriented typing. Early algebraic treatments of Forth stack effects studied sequential composition, multiple stack effects, and solvability via systems of inequalities \cite{poial1991algebraic,poial1992multiple,poial1994algebraic}. Typed wildcards and subtype-sensitive matching then provided a way to track both abstract type precision and symbolic identity across stack shuffles \cite{stoddart1993type,poial2002wildcards}. Later work described branch merging and loop summaries in must-analysis terms, using greatest lower bounds and idempotence criteria \cite{poial2006typing}. These papers supply most of the individual ingredients used here.
 
-The present checker differs in emphasis. Rather than propagating explicit sets of alternatives through the whole analysis, it collapses alternatives eagerly to a single guaranteed effect via $\glb$. This loses may-information but keeps the domain small enough to support source-level parsing, user-defined words, and declaratively specified control structures in one implementation. In that respect the work is close in spirit to compositional type systems for stack-oriented low-level languages \cite{saabas2006compositional}, while staying within the source-level idiom of Forth stack effects and parser disciplines \cite{forth2012standard,power2004formal}.
+The present paper is concerned mainly with how those ingredients can be combined in a single checker for whole source programs. The checker reads the type hierarchy and word specifications from external files, allows control constructs to be given by declarative \texttt{syntax:}/\texttt{effect:} descriptions, infers summaries for user-defined words during analysis, and admits a finite constraint characterization of acceptance. In this formulation, branch alternatives are collapsed to one guaranteed summary effect in the must-analysis order rather than represented as persistent sets of alternatives. That choice keeps the abstract domain small enough to support source-level parsing and control handling in one implementation. In that respect the work is close in spirit to compositional type systems for stack-oriented low-level languages \cite{saabas2006compositional}, while remaining in the source-level idiom of Forth stack effects and parser disciplines \cite{forth2012standard,power2004formal}.
 
 \section{Diagnostics and Practical Scope}
 The checker is designed as a static evaluator rather than a full runtime. It reports source spans for malformed specifications, unknown types, missing parser delimiters, illegal control words, and type clashes in both top-level programs and definitions. When composition fails, the checker reports the surrounding context and the conflicting symbols at the composition boundary.
 
-The current implementation intentionally stays small. It relies on the declared specification set, rejects nested defining words inside definitions, enforces interpretation-state restrictions, and treats the external type hierarchy as the semantic authority. These restrictions are acceptable for a checker whose purpose is to validate stack discipline and infer word summaries, not to execute arbitrary Forth code.
+The current implementation intentionally stays small. It relies on the declared specification set, rejects nested defining words inside definitions, enforces interpretation-state restrictions, and treats the external type hierarchy as the semantic authority. These restrictions delimit the scope of the checker: it is intended to validate stack discipline and infer word summaries, not to model arbitrary reflective or run-time features of Forth.
 
 \section{Conclusion}
-The type checker described in this paper shows that this form of static analysis for a Forth(-like) language can be organized around a small mathematical core. A finite type lattice supplies precision information; indexed stack symbols express correlations; sequential composition gives a partial product on effects and, after totalization, a monoid with zero on the linear fragment; branch summaries are greatest lower bounds of effects; and loop summaries are accepted when repeated execution stabilizes to an idempotent effect. Because the checker loads both the type hierarchy and the word specifications from external files, the same implementation can be retargeted to other vocabularies and dialects with little or no change to the core.
+The paper makes two main points. First, typed stack-effect checking for a Forth(-like) language can be organized around a small collection of operations on symbolic effects: sequential composition, branch merging by greatest lower bound, and a local idempotence test for loops. Second, for fixed parsed programs under finite specifications, this operational checker has an equivalent constraint-based characterization: acceptance coincides with solvability of a finite system of effect inequalities, and a successful run yields the least non-clashing solution.
 
-The broader methodological point is that many of the dynamic-looking features of a concatenative language become statically tractable once they are phrased as operations in an effect algebra.
-
-The type checker successfully analyzed its own source using the Forth 2012 standard type system \cite{forth2012standard}.
+Because the type hierarchy and the word and control specifications are external to the core algorithm, the same implementation can be retargeted to different vocabularies and dialects with relatively little change to the checker itself. Within its intended scope, the implementation analyzes the bundled examples and its own source under the Forth 2012 type discipline \cite{forth2012standard}. The broader methodological point is that many source-level features of a concatenative language become amenable to static reasoning once they are phrased as operations in a finite effect domain.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{typechecker-paper-popl-public}
