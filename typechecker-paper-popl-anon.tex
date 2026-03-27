@@ -1,0 +1,365 @@
+\documentclass[acmsmall,screen,review,anonymous,nonacm]{acmart}
+
+\usepackage{amsmath,amsthm}
+\usepackage{mathtools}
+\usepackage{listings}
+
+\settopmatter{printfolios=true,printccs=false,printacmref=false}
+\citestyle{acmnumeric}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single
+}
+
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+
+\newcommand{\Types}{\mathcal{T}}
+\newcommand{\Effects}{\mathcal{E}}
+\newcommand{\glb}{\mathbin{\sqcap}}
+\newcommand{\compose}{\mathbin{\cdot}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\id}{\mathbf{1}}
+\newcommand{\sem}[1]{[\![#1]\!]}
+
+\title{A Declarative Stack-Effect Type Checker for a Forth-like Language}
+\author{Anonymous Author(s)}
+\renewcommand{\shortauthors}{Anonymous Author(s)}
+
+\begin{document}
+
+\begin{abstract}
+This paper describes a static type checker for a Forth(-like) language whose semantics is expressed as typed stack effects. The checker is implemented as a single Gforth program, but its core ideas are language independent: a finite type lattice is loaded from an external file, word specifications are given declaratively, and user-defined words are inferred by composing abstract stack transformations instead of executing the program. The central technical device is a collection of partial operations on stack effects. Sequential composition unifies adjacent stack symbols by taking the greatest lower bound of comparable types; branching uses a partial greatest-lower-bound operator on whole effects; and iteration is accepted only when repeated execution stabilizes to an idempotent effect. The implementation supports ordinary words, literals, parser words, defining words, and control structures such as \texttt{IF ... ELSE ... FI} and \texttt{BEGIN ... WHILE ... REPEAT}. We present the mathematical model, the operations implemented by the checker, and worked examples taken from the bundled specification and program files.
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}
+Concatenative languages place computation on the operand stack. A word is naturally described by the stack cells it consumes and the cells it produces, so a natural static abstraction is a \emph{stack effect}. In simple cases, informal comments such as \texttt{( n n -- n )} are already useful documentation in Forth practice and standardization documents \cite{rather1996evolution,forth2012standard}. The goal of the checker described here is to turn such annotations into an executable static semantics.
+
+The checker takes three external inputs. A \texttt{types} file defines a finite subtype hierarchy. A \texttt{specs} file assigns effects and parsing behavior to words, literals, defining words, and control roles. A program file is then parsed and analyzed against those specifications. Instead of running the program for its concrete result, the checker computes the abstract stack effect of each token and of each user-defined word. The same mechanism also produces source-aware diagnostics when adjacent effects cannot be composed. In that sense, the implementation follows the abstract-interpretation idea of executing programs over a finite abstract domain rather than over concrete values \cite{cousot1977abstract}.
+
+Two design choices make the system concise and extensible. First, types are not hard-coded; they are loaded as a small finite lattice-like structure. Second, control flow is not built into the checker alone; it can be described declaratively with \texttt{syntax:} and \texttt{effect:} blocks. The mathematical content of the checker is therefore concentrated in a small effect algebra. This approach is informed by earlier work on algebraic specifications of stack effects, typed wildcards, must-analysis for stack-oriented languages, and compositional type systems for stack-oriented languages \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,saabas2006compositional,poial2006typing}.
+
+Earlier papers in this line developed the ingredients separately: algebraic composition of stack effects \cite{poial1994algebraic}, typed wildcards and subtype-sensitive symbolic refinement \cite{stoddart1993type,poial2002wildcards}, and must-analysis formulations based on greatest lower bounds and idempotents \cite{poial2006typing}. The present paper packages these ideas into one executable account for whole source programs rather than isolated equations.
+
+Concretely, the paper makes three contributions.
+\begin{enumerate}
+\item It presents a declarative effect calculus in which stack symbols carry both subtype information and identity constraints, so stack shuffles can be reasoned about compositionally.
+\item It gives a must-analysis interpretation of branching and looping in the same effect domain: branches merge by greatest lower bound, while loops are accepted by a lightweight idempotence test.
+\item It shows that the calculus is practical as a retargetable checker: the type hierarchy, vocabulary, parser behavior, and control structures are all loaded from external specifications, and user-defined words are inferred during analysis.
+\end{enumerate}
+
+\section{Type Domain}
+\subsection{Type hierarchy}
+Let $\Types$ be a finite set of type names equipped with a precision order $\leq$ \cite{davey2002lattices}. We read $\tau_1 \leq \tau_2$ as ``$\tau_1$ is at least as precise as $\tau_2$,'' matching the sample declarations
+\begin{lstlisting}
+rel a-addr < c-addr
+rel c-addr < addr
+rel addr < x
+rel flag < x
+rel char < n
+rel n < x
+\end{lstlisting}
+from the repository. Thus \texttt{a-addr} is more precise than \texttt{c-addr}, which is more precise than \texttt{addr}, and so on.
+
+The implementation stores this relation as a finite transitive closure. Operationally, the checker only needs the meet of \emph{comparable} types.
+
+\begin{definition}[Comparable meet]
+For $\tau,\upsilon \in \Types$, define
+\[
+\tau \glb \upsilon =
+\begin{cases}
+\tau & \text{if } \tau \leq \upsilon,\\
+\upsilon & \text{if } \upsilon \leq \tau,\\
+\text{undefined} & \text{otherwise.}
+\end{cases}
+\]
+\end{definition}
+
+When the order is viewed as a finite lattice, this operation coincides with the lattice meet on comparable pairs \cite{davey2002lattices}. Incomparable pairs have no defined result here and therefore cause a type clash.
+
+\subsection{Stack symbols}
+A \emph{stack symbol} is a type optionally annotated with a positive index, written $\tau$ or $\tau[i]$. The type denotes an abstract class of stack cells. The index denotes correlation across positions: if the same indexed symbol appears twice, those occurrences refer to the same abstract value constraint, not merely two values of the same coarse type.
+
+For example, the bundled specification
+\begin{lstlisting}
+PLUS ( x[1] x[1] -- x[1] )
+\end{lstlisting}
+states that both arguments to \texttt{PLUS} and its result are tied to the same abstract type variable. Likewise,
+\begin{lstlisting}
+DUP ( x[1] -- x[1] x[1] )
+\end{lstlisting}
+states that duplication preserves the abstract identity of the top stack element.
+
+Unnamed symbols are treated as implicitly fresh. After evaluation, the checker renumbers indices into a compact normal form, so effects are compared modulo alpha-renaming.
+
+\section{Stack Effects}
+\subsection{Syntax}
+Let $\Sigma$ be the set of stack symbols. A stack effect is a pair of finite sequences
+\[
+\pi = (L \; -- \; R), \qquad L,R \in \Sigma^\ast.
+\]
+The sequence is written in ordinary Forth order: the rightmost element is the top of the stack. For example,
+\[
+(x[2]\;x[1]\; -- \; x[2]\;x[1]\;x[2])
+\]
+is the effect of \texttt{OVER}.
+
+The empty effect
+\[
+\id = (\, -- \,)
+\]
+acts as the identity transformation.
+
+\subsection{Normalization}
+Two effects that differ only by a renaming of fresh indices should be considered equal. The implementation therefore normalizes inferred effects after every successful sequence evaluation. Symbols that occur only once and were never explicitly indexed are printed without an index; correlated or explicitly named symbols are assigned compact indices in a deterministic order.
+
+This normalization step is not cosmetic. It lets the checker treat effects as abstract objects rather than artifacts of a particular evaluation order.
+
+\subsection{Information order}
+The branch operator used later is best understood as a meet in a must-analysis order. Let $\gamma(\pi)$ be the set of concrete stack transformations compatible with an abstract effect $\pi$. Define
+\[
+\pi_1 \preceq \pi_2
+\quad\text{iff}\quad
+\gamma(\pi_1) \subseteq \gamma(\pi_2).
+\]
+Lower elements in this order are more informative: they rule out more concrete behaviors and therefore provide stronger guarantees. This is the order-theoretic viewpoint of abstract interpretation specialized to symbolic stack transformations \cite{cousot1977abstract,poial2006typing}.
+
+Under this reading, sequential composition propagates guaranteed information through a linear segment, while branch merging must compute the strongest effect guaranteed by every alternative rather than the union of effects that may arise on some path.
+
+\section{Sequential Composition}
+The primary operation of the checker is sequential composition of effects.
+
+\begin{definition}[Boundary composition]
+Let
+\[
+\pi_1=(L_1 -- R_1), \qquad \pi_2=(L_2 -- R_2).
+\]
+Their composition $\pi_1 \compose \pi_2$ is computed from the touching boundary between the output stack $R_1$ and the input stack $L_2$:
+\begin{enumerate}
+\item If $R_1$ is empty, the result is $(L_2L_1 -- R_2)$.
+\item If $L_2$ is empty, the result is $(L_1 -- R_1R_2)$.
+\item Otherwise let $a$ be the top element of $R_1$ and $b$ the top element of $L_2$.
+  If $a.\mathsf{type} \glb b.\mathsf{type}$ is undefined, composition fails.
+  If it is defined, replace both symbols everywhere by a fresh symbol whose type is that meet, remove the matched boundary pair, and continue recursively.
+\end{enumerate}
+\end{definition}
+
+The fresh symbol keeps the more specific of the two type constraints. Since lower elements in the order are more precise, the meet is the more informative symbol. This is why a branch that expects \texttt{c-addr} can still compose with one that only proves \texttt{a-addr}: the merged requirement becomes \texttt{a-addr}.
+
+The command-line example from the repository illustrates the rule:
+\begin{lstlisting}
+1 2 + DUP
+\end{lstlisting}
+with specifications
+\begin{lstlisting}
+literal integer ( -- n )
++ ( n n -- n )
+DUP ( x[1] -- x[1] x[1] )
+\end{lstlisting}
+The checker prints
+\begin{lstlisting}
+1   ( --  n[2] )
+2   ( --  n[2] )
++   ( n[2] n[2] --  n[1] )
+DUP ( n[1] --  n[1] n[1] )
+\end{lstlisting}
+and concludes that the whole program has effect
+\[
+( -- n[1]\;n[1]).
+\]
+
+\begin{definition}[Multiplication of linear effects]
+Let $\Pi_{\mathsf{lin}}$ be the set of normalized linear stack effects and let
+\[
+\widehat{\Pi}_{\mathsf{lin}} = \Pi_{\mathsf{lin}} \cup \{0\},
+\]
+where $0$ is a clash element. Define multiplication $\odot$ on $\widehat{\Pi}_{\mathsf{lin}}$ by
+\[
+0 \odot \pi = \pi \odot 0 = 0,
+\]
+and for $\pi_1,\pi_2 \in \Pi_{\mathsf{lin}}$,
+\[
+\pi_1 \odot \pi_2 =
+\begin{cases}
+\text{the normalization of } \pi_1 \compose \pi_2 & \text{if } \pi_1 \compose \pi_2 \text{ is defined},\\
+0 & \text{otherwise.}
+\end{cases}
+\]
+The identity element is $\id = (\, -- \,)$. This multiplication models concatenation of linear program fragments: if $\alpha$ and $\beta$ are linear sequences of words, then
+\[
+\sem{\alpha\beta} = \sem{\alpha} \odot \sem{\beta}.
+\]
+\end{definition}
+
+Viewed this way, $\odot$ is the typed version of the product used in earlier algebraic presentations of stack effects. It makes the sequential fragment explicit as a monoid with zero, while preserving the implementation-oriented partial view through the underlying operation $\compose$ \cite{poial1994algebraic,poial2006typing}. In that form it fits the polycyclic-monoid tradition from inverse-semigroup theory \cite{lawson2007orthogonal}.
+
+\begin{proposition}
+Modulo normalization of fresh indices, $(\widehat{\Pi}_{\mathsf{lin}}, \odot)$ is a $0$-bisimple inverse monoid with zero $0$ and unit $\id$, that is, a typed generalization of the polycyclic monoid \cite{perrot1972bisimple,howie1995semigroup,lawson2007orthogonal}.
+\end{proposition}
+
+\noindent
+The proposition explains why the implementation may evaluate a sequence left to right: whenever every adjacent composition is defined, the final result does not depend on accidental wildcard names. In the body of the checker we keep the partial formulation because it leads directly to diagnostics, but the totalized view gives a more exact algebraic description.
+
+\section{Branching and Greatest Lower Bounds of Effects}
+Sequential composition is not enough for control flow. A branch requires a single summary effect that safely represents multiple alternatives.
+
+For branching, the checker uses a partial greatest-lower-bound operation on whole effects. Intuitively, it merges branch summaries pointwise after accounting for stack cells that are preserved unchanged across both input and output. This is necessary because different branches may manipulate different depths of the stack while still agreeing on a common surrounding context.
+
+More concretely, if one effect has $k$ more inputs than another, it must also have $k$ more outputs. The implementation then extracts a preserved prefix of length $k$ from the larger effect by requiring each corresponding input/output pair in that prefix to be comparable. After that prefix has been merged, the remaining active slices are unified pointwise. If any comparison fails, the branch summaries are incompatible.
+
+In the information order above, this operator is a meet when defined. Accordingly, the checker uses greatest lower bound rather than least upper bound: it computes the strongest summary guaranteed on all paths of a conditional, not an over-approximation of behaviors that may occur on some path \cite{poial2006typing}.
+
+This operator is used by the \texttt{either} constructor in declarative control semantics. The example
+\begin{lstlisting}
+: MYCHOICE IF ! ELSE C! FI ;
+\end{lstlisting}
+is inferred as
+\begin{lstlisting}
+MYCHOICE ( x a-addr flag -- )
+\end{lstlisting}
+because the two branches have effects
+\[
+(x\;a\text{-}addr -- )
+\qquad\text{and}\qquad
+(x\;c\text{-}addr -- ),
+\]
+and
+\[
+a\text{-}addr \glb c\text{-}addr = a\text{-}addr.
+\]
+The merged effect therefore preserves the more specific address requirement.
+
+\section{Iteration and Idempotence}
+Loops require a stable summary of repeated execution. The checker does not attempt a general fixed-point engine of the kind common in abstract interpretation \cite{cousot1977abstract}. Instead it uses a local algebraic criterion based on idempotence.
+
+\begin{definition}[Repeated effect]
+For an effect $\pi$, define
+\[
+\pi^\star = \pi \glb (\pi \compose \pi),
+\]
+when both the composition and the greatest lower bound are defined.
+\end{definition}
+
+Operationally, this is a one-step stabilization test. If one iteration and two iterations admit a common lower bound, that lower bound is taken as the loop summary. If no such lower bound exists, the body is rejected as a non-idempotent repeated effect.
+
+In control specifications, the \texttt{repeat} constructor uses this operator. Algebraically, the checker is looking for an effect that is stable under another round of execution. The intended reading is not full Kleene closure, but rather a compact approximation of a loop invariant on the stack.
+
+The bundled program
+\begin{lstlisting}
+: MYLOOP BEGIN SWAP OVER WHILE INVERT REPEAT ;
+\end{lstlisting}
+is inferred as
+\begin{lstlisting}
+MYLOOP ( flag[1] flag[1] -- flag[1] flag[1] )
+\end{lstlisting}
+which is precisely an idempotent invariant: repeating the body preserves the same abstract pair of flags.
+
+\section{Declarative Specifications}
+\subsection{Ordinary words, literals, and parser words}
+The \texttt{specs} file associates stack effects with words and adds parsing metadata. Representative examples are:
+\begin{lstlisting}
+OVER ( x[2] x[1] -- x[2] x[1] x[2] )
+@ ( a-addr -- x )
+CONSTANT parse word define ( x -- )
+VARIABLE parse word define ( -- a-addr )
+literal integer ( -- n )
+\end{lstlisting}
+
+Additional clauses refine the operational role of a word.
+\begin{itemize}
+\item \texttt{parse word} means the word consumes the next token from the source.
+\item \texttt{parse until DELIM} means the word consumes source text until a delimiter.
+\item \texttt{define}, \texttt{define colon}, \texttt{define constant}, and \texttt{define variable} mark defining words.
+\item \texttt{control ROLE} assigns a control-flow role such as \texttt{if}, \texttt{else}, \texttt{fi}, \texttt{begin}, or \texttt{while}.
+\item \texttt{immediate}, \texttt{state interpret}, and \texttt{state compile} constrain where the word is legal.
+\end{itemize}
+
+Thus the checker is not only typing tokens; it also models the source-level behavior needed to parse Forth-like syntax in a way that aligns with standard Forth parsing disciplines \cite{forth2012standard}.
+
+\subsection{Control structures}
+Control structures are specified with paired \texttt{syntax:} and \texttt{effect:} blocks. This gives a declarative account of source-level control words, a topic that has also been studied in formal models of Forth control structures \cite{power2004formal}. For example, the sample repository contains:
+\begin{lstlisting}
+syntax: IF <then branch> [ELSE <else branch>] FI
+  effect:
+    IF
+    either <then branch> <else branch>
+\end{lstlisting}
+
+and
+\begin{lstlisting}
+syntax: BEGIN <loop prefix> WHILE <loop body> REPEAT
+  effect:
+    repeat <loop prefix> WHILE
+    repeat <loop body>
+\end{lstlisting}
+
+The \texttt{syntax:} clause describes a control-language pattern using concrete boundary words and metavariables for internal segments. Optional parts are written with square brackets. The \texttt{effect:} block is then compiled into an expression language with the grammar
+\[
+E ::= \eps \mid \langle s \rangle \mid c \mid E\,E \mid \textsf{either}(E,E) \mid \textsf{repeat}(E),
+\]
+where $\langle s \rangle$ denotes a named program segment and $c$ denotes the runtime effect of a control word such as \texttt{IF}, \texttt{WHILE}, or \texttt{DO}.
+
+The denotational semantics is:
+\begin{align*}
+\sem{\eps} &= \id,\\
+\sem{\langle s \rangle} &= \text{the inferred effect of segment } s,\\
+\sem{c} &= \text{the declared runtime effect of control role } c,\\
+\sem{E_1 E_2} &= \sem{E_1} \compose \sem{E_2},\\
+\sem{\textsf{either}(E_1,E_2)} &= \sem{E_1} \glb \sem{E_2},\\
+\sem{\textsf{repeat}(E)} &= \sem{E}^\star.
+\end{align*}
+
+This arrangement separates parsing from typing. Once a source fragment has been segmented according to a \texttt{syntax:} declaration, its meaning is calculated entirely by the effect algebra above.
+
+\section{Inference of User-Defined Words}
+At top level, the checker interprets defining words immediately. A colon definition starts a new sequence, parses until its terminating control word, computes the effect of the body, and installs the resulting effect as the specification of the new word. Constants and variables are handled similarly but with special defining shapes:
+\[
+\texttt{CONSTANT} : (x --), \qquad \texttt{VARIABLE} : (-- a\text{-}addr).
+\]
+
+The implementation therefore supports the standard Forth workflow in which the specification dictionary grows during analysis \cite{forth2012standard}. Inferred definitions are written to a log file; for the sample program the checker records:
+\begin{lstlisting}
+MYLOOP   ( flag[1] flag[1] -- flag[1] flag[1] )
+MYCHOICE ( x a-addr flag -- )
+MYTEST   ( a-addr[2] x[1] flag -- a-addr[2] x[1] a-addr[2] )
+MYFI     ( x[1] x[1] flag -- x[1] x[1] )
+MYAGAIN  ( a-addr[1] -- a-addr[1] )
+MYSEQ    ( a-addr[2] x[1] -- x[1] a-addr[2] a-addr[2] )
+MYSEQ2   ( a-addr[1] a-addr[1] -- )
+\end{lstlisting}
+
+These examples demonstrate several features of the checker at once.
+\begin{itemize}
+\item \texttt{MYCHOICE} uses branch merging over comparable address types.
+\item \texttt{MYTEST} shows prefix-aware branch merging when the alternatives manipulate different active depths of the stack.
+\item \texttt{MYLOOP} and \texttt{MYAGAIN} show loop summaries computed through repeated-effect stabilization.
+\item \texttt{MYSEQ2} uses the polymorphic example word \texttt{PLUS}, showing that indexed symbols propagate through a larger composition.
+\end{itemize}
+
+\section{Relation to Prior Work}
+This paper sits at the intersection of several lines of work on stack-oriented typing. Early algebraic treatments of Forth stack effects emphasized sequential composition and its semigroup structure \cite{poial1994algebraic}. Typed wildcards and subtype-sensitive matching then made it possible to preserve both abstract type precision and symbolic identity across stack shuffles \cite{stoddart1993type,poial2002wildcards}. Later work reframed the analysis explicitly as must-analysis, motivating greatest lower bounds for branches and idempotents for loops \cite{poial2006typing}.
+
+The present checker differs in emphasis. Rather than propagating explicit sets of alternatives through the whole analysis, it collapses alternatives eagerly to a single guaranteed effect via $\glb$. This loses may-information but keeps the domain small enough to support source-level parsing, user-defined words, and declaratively specified control structures in one implementation. In that respect the work is close in spirit to compositional type systems for stack-oriented low-level languages \cite{saabas2006compositional}, while staying within the source-level idiom of Forth stack effects and parser disciplines \cite{forth2012standard,power2004formal}.
+
+\section{Diagnostics and Practical Scope}
+The checker is designed as a static evaluator rather than a full runtime. It reports source spans for malformed specifications, unknown types, missing parser delimiters, illegal control words, and type clashes in both top-level programs and definitions. When composition fails, the checker reports the surrounding context and the conflicting symbols at the composition boundary.
+
+The current implementation intentionally stays small. It relies on the declared specification set, rejects nested defining words inside definitions, enforces interpretation-state restrictions, and treats the external type hierarchy as the semantic authority. These restrictions are acceptable for a checker whose purpose is to validate stack discipline and infer word summaries, not to execute arbitrary Forth code.
+
+\section{Conclusion}
+The type checker described in this paper shows that this form of static analysis for a Forth(-like) language can be organized around a small mathematical core. A finite type lattice supplies precision information; indexed stack symbols express correlations; sequential composition gives a partial product on effects and, after totalization, a monoid with zero on the linear fragment; branch summaries are greatest lower bounds of effects; and loop summaries are accepted when repeated execution stabilizes to an idempotent effect. Because the checker loads both the type hierarchy and the word specifications from external files, the same implementation can be retargeted to other vocabularies and dialects with little or no change to the core.
+
+The broader methodological point is that many of the dynamic-looking features of a concatenative language become statically tractable once they are phrased as operations in an effect algebra.
+
+The type checker successfully analyzed its own source using the Forth 2012 standard type system \cite{forth2012standard}.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{typechecker-paper-popl-public}
+
+\end{document}
