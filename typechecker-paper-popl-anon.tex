@@ -36,20 +36,19 @@
 \begin{document}
 
 \begin{abstract}
-This paper studies static type checking for a Forth-like language in which the type hierarchy,
-vocabulary, and control syntax are supplied externally. We present a typed stack-effect
-calculus whose core operators are sequential composition, must-style branch merging by 
-a lower-bound operator, and loop summarization by a local one-step stabilization test. 
-Control structures are described by paired \texttt{syntax:}/\texttt{effect:} declarations, 
-so the same framework accounts for both source-level parsing and effect computation. 
-The main technical result concerns the core body-evaluation phase of the checker: for 
-a fixed parsed source tree whose leaves already have declared summaries, each parsed segment 
-receives a unique reported summary obtained by recursively evaluating leaf effects, 
-sequential composition, and declarative control templates, and acceptance is exactly 
-the absence of clash in that evaluation. The artifact contains both a Gforth implementation 
-and an independent Java prototype that consume the same input file formats. We present 
-the effect calculus, the exactness theorem, and an evaluation on a 29-program regression 
-corpus, retargetable custom profiles, and a 4{,}255-line application.
+This paper studies static type checking for a Forth-like language whose type hierarchy,
+vocabulary, and control syntax are supplied externally. The checker uses a symbolic
+stack-effect calculus with sequential composition, must-style branch merge by a
+lower-bound operator, and a one-step loop summary. Control structures are described by
+declarative syntax and effect specifications, so parsing and effect computation
+share one specification framework. For a single source body, once parsing has identified
+its control structure and once each basic word, literal, or other undecomposed token
+already has an assigned effect, body checking computes a unique symbolic effect for every
+larger source fragment. The body is accepted exactly when this computation encounters no
+type clash. We implemented the checker in Gforth and independently in Java;
+both implementations read the same input formats. We present the calculus, the exactness
+theorem, and an evaluation on 29 checked-in tests, custom profiles, and a 4{,}255-line
+application.
 \end{abstract}
 
 \maketitle
@@ -73,44 +72,33 @@ when adjacent effects cannot be composed. In that sense, the implementation foll
 abstract-interpretation idea of executing programs over a finite abstract domain rather than over 
 concrete values \cite{cousot1977abstract}.
 
-Existing work already supplies many of the needed ingredients in isolation: algebraic composition of
-stack effects, typed wildcards for symbolic equality constraints, and must-analysis operators for 
-branches and loops \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,poial2006typing}. 
-What is missing is a single source-level account that also covers parser behavior and declaratively 
-specified control syntax, and whose metatheory states exactly what the implementation computes.
+Existing work already supplies the main ingredients in isolation: algebraic composition of
+stack effects, typed wildcards for symbolic equality constraints, and must-analysis operators
+for branches and loops \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,poial2006typing}.
+This paper combines them in one checker for source programs with declarative parser and
+control specifications.
 
-A central technical result is therefore that the core body-evaluation phase of this checker has an exact 
-declarative reading. Once parsing has segmented a source body and the referenced words have fixed summaries, 
-every parsed segment is assigned a unique abstract effect by a finite family of equations over the source tree. 
-The theorem proved later states that the checker accepts exactly when these equations evaluate without clash, 
-and that on success the reported compacted summaries are precisely the induced ones. This gives a compositional 
-characterization of the implemented checker that matches the artifact more closely than a global fixpoint story.
+The core theorem matches the implementation. Once a source body has been parsed and once
+each basic word, literal, or other undecomposed token occurrence already has an assigned
+effect, the checker assigns a unique abstract effect to every larger fragment of that
+body. It accepts exactly when the induced finite equation system can be evaluated without
+clash, and on success the stored summaries are the resulting compacted effects.
 
-Two design choices keep the system concise and extensible. First, types are not hard-coded; they are loaded 
-as a finite partial order subtype graph. Second, control flow is not built into the checker core alone; it can be 
-described declaratively with \texttt{syntax:} and \texttt{effect:} blocks. The mathematical content of the checker 
-is therefore concentrated in a small abstract domain together with a few deterministic effect operators. 
-This approach is informed by earlier work on algebraic specifications of stack effects, typed wildcards, 
-must-analysis for stack-oriented languages, and compositional type systems for stack-oriented 
-languages \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,saabas2006compositional,poial2006typing}.
-
-Earlier papers in this line developed the ingredients separately: algebraic composition of stack 
-effects \cite{poial1994algebraic}, typed wildcards and subtype-sensitive symbolic 
-refinement \cite{stoddart1993type,poial2002wildcards}, and must-analysis formulations based 
-on greatest lower bounds together with loop summaries extracted from repeated effects \cite{poial2006typing}. 
-The present paper is concerned with combining these ingredients into one account for whole source programs 
-and relating that account to the older inequality-based view of stack-effect 
-specifications \cite{poial1991algebraic,poial1992multiple}.
+Two design choices keep the checker small. Types are loaded from an external subtype graph,
+and control behavior is described by \texttt{syntax:}/\texttt{effect:} blocks rather than
+hard-coded rules. The mathematical content is therefore concentrated in a small symbolic
+domain and a few deterministic operators. This approach builds on earlier work on algebraic
+stack effects, typed wildcards, must-analysis for stack-oriented languages, and compositional
+type systems for stack-oriented languages
+\cite{poial1994algebraic,stoddart1993type,poial2002wildcards,saabas2006compositional,poial2006typing}.
 
 Concretely, the paper makes four contributions.
 \begin{enumerate}
 \item It presents a symbolic effect calculus in which stack symbols carry both subtype information and identity constraints, so stack shuffles can be reasoned about compositionally.
 \item It gives a uniform must-style account of branching and looping in that same effect domain: branches merge by a lower-bound operator, while loops are summarized by a lightweight local stabilization test.
-\item It proves an exact compositional theorem for fixed parsed trees: the checker accepts exactly when the induced segment equations are clash-free, and on success returns the unique family of summaries satisfying them.
-\item It evaluates the calculus as a retargetable checker: the type hierarchy, vocabulary, parser behavior, and control structures are all loaded from external specifications, user-defined words are inferred during analysis, and the artifact is exercised on a 29-program regression corpus, several custom profiles, and a 4{,}255-line application.
+\item It proves an exact compositional theorem: once a source body has been parsed and each undecomposed token occurrence already has an assigned effect, the checker accepts exactly when the induced segment equations are clash-free, and on success returns the unique family of summaries satisfying them.
+\item It evaluates the calculus as a retargetable checker: the type hierarchy, vocabulary, parser behavior, and control structures are all loaded from external specifications, user-defined words are inferred during analysis, and the artifact is exercised on 29 checked-in tests, several custom profiles, and a 4{,}255-line application.
 \end{enumerate}
-
-The contribution is therefore not a new primitive stack-effect operator or a global fixpoint account of arbitrary Forth. It is a source-level integration result: a compact symbolic calculus, declarative parsing and control specifications, and an exact theorem for the body-evaluation phase that the checker repeatedly invokes.
 
 The rest of the paper follows the structure of the checker itself. Sections~2--5 define the symbolic domain and the effect operators used during checking. Section~6 shows how declarative control specifications turn parsed source fragments into equations over those operators and states the exactness theorem. The remaining sections discuss inference of user-defined words, relation to prior work, evaluation, and conclusion.
 
@@ -418,7 +406,19 @@ This arrangement separates parsing from typing. Once a source fragment has been 
 
 \subsection{Compositional characterization}
 \label{sec:constraint-view}
-We can now state the paper's main exactness result at the granularity the artifact actually implements: one already parsed body evaluated under fixed leaf summaries. The declarative presentation is best read as a system of equations over the compacted summaries that the checker actually computes. Fix a finite parsed source tree $T$ for one already-segmented source body under a finite \texttt{types}/\texttt{specs} environment $\Gamma$, and assume that every leaf token has a fixed declared summary effect in $\Gamma$. Each parsed segment $A$---a leaf token, a linear fragment, a branch arm, a loop body, or a whole definition body---is assigned an unknown summary effect $X_A$ ranging over compacted non-clashing effects together with a clash element $0$.
+We can now state the main theorem at the granularity implemented by the checker: one
+already parsed body in which each basic token occurrence already has an assigned effect. Fix a finite parsed source tree
+$T$ for one source body under a finite \texttt{types}/\texttt{specs} environment $\Gamma$.
+Here $T$ is the tree obtained after parsing has already recognized sequential fragments and
+control structures: internal nodes are compound source fragments, and leaves are token
+occurrences that the checker does not decompose further. Assume that every leaf in $T$
+already has a known summary effect in $\Gamma$, for example from a word specification, a
+literal class, or a previously inferred definition. Let
+$D$ be the set of compacted non-clashing effects together with a distinguished clash value
+$0$. For each parsed segment $A$, let $X_A \in D$ be its unknown summary. For a control
+template $E$ and an assignment $X$ of summary values to segments, $\widehat{\sem{E}}_X$
+denotes evaluation of $E$ under $X$. We write $X^\ast$ for the unique solution of the
+segment equations introduced below.
 
 Write $\overline{\compose}$, $\overline{\glb}$, and $\overline{\star}$ for the totalized implemented operators derived from raw composition, raw branch merge, and raw one-step stabilization: whenever the corresponding raw partial operator is defined, the checker returns its compacted result; otherwise the totalized operator returns $0$, and any occurrence of $0$ in an argument propagates to $0$. These are the operators that actually appear during checking. For a control template $E$, define its totalized denotation by
 \begin{align*}
@@ -433,7 +433,7 @@ Write $\overline{\compose}$, $\overline{\glb}$, and $\overline{\star}$ for the t
 
 Segment equations are then generated bottom-up from $T$.
 \begin{enumerate}
-\item A leaf token with declared effect $\pi$ contributes $X_A = \pi$.
+\item A leaf with known effect $\pi$ contributes $X_A = \pi$.
 \item A sequential node with children $B$ and $C$ contributes
 \[
 X_A = \overline{\compose}(X_B,X_C).
@@ -448,7 +448,7 @@ Let $S(T,\Gamma)$ denote the resulting finite system of segment equations. Becau
 
 \begin{theorem}[Exactness of segment equations]
 \label{thm:segment-equations}
-Assume that the parsed source tree $T$ is finite and that every leaf token in $T$ has a fixed declared effect under $\Gamma$. Then:
+Assume that the parsed source tree $T$ is finite and that every leaf of $T$ already has a fixed summary effect under $\Gamma$. Then:
 \begin{enumerate}
 \item The acyclic system $S(T,\Gamma)$ has a unique solution $X^\ast$ in compacted effects plus $0$.
 \item For every parsed segment $A$, the checker returns a clash exactly when $X^\ast_A = 0$; otherwise it returns the compacted effect $X^\ast_A$.
@@ -475,11 +475,11 @@ We prove simultaneously, by induction on $m \in \mathbb{N}$, the following state
 \item \emph{the checker returns a clash on $A$ exactly when $d_A=0$, and otherwise returns the compacted effect $d_A$.}
 \end{enumerate}
 \textbf{Base case $m=0$.}
-If $h(A)=0$, then $A$ is a leaf token. By construction of $S(T,\Gamma)$, its equation is
+If $h(A)=0$, then $A$ is a leaf. By construction of $S(T,\Gamma)$, its equation is
 \[
 X_A=\pi
 \]
-for the fixed declared effect $\pi$ supplied by $\Gamma$. Hence there is exactly one possible value, namely $d_A=\pi \in D$, proving clause~(1). The checker treats a leaf in exactly the same way: it looks up the declared effect of the token and returns that effect. Therefore it does not report a clash, and its return value is exactly $d_A$, proving clause~(2).
+for the fixed known effect $\pi$ supplied by $\Gamma$. Hence there is exactly one possible value, namely $d_A=\pi \in D$, proving clause~(1). The checker treats a leaf in exactly the same way: it looks up the effect attached to that token occurrence and returns it. Therefore it does not report a clash, and its return value is exactly $d_A$, proving clause~(2).
 
 \textbf{Inductive step.}
 Assume $P(m)$ and let $A$ be any parsed segment with $h(A)=m+1$. Every proper descendant of $A$ then has height at most $m$, so the induction hypothesis already gives a unique value $d_B \in D$ for each child or descendant segment $B$ of $A$, together with the fact that the checker returns exactly that value or clash according to whether $d_B$ is nonzero or zero.
@@ -529,10 +529,25 @@ Now let $M=\max\{h(A)\mid A \text{ is a segment of } T\}$. Applying $P(M)$ to ev
 Clause~(2) is exactly the second part of $P(M)$. Finally, the whole parsed body is the root segment of $T$, so clause~(3) follows immediately from clause~(2): the checker accepts the body exactly when the root value is nonzero, that is, exactly when $X^\ast_{\mathsf{root}} \neq 0$.
 \end{proof}
 
-The older FORML-style inequality view can still be recovered as a relaxation of the raw, uncompacted operators by replacing each equation $X_A = F_A(\vec{X})$ with an inequality $X_A \preceq F_A(\vec{X})$ \cite{poial1991algebraic,poial1992multiple}. For the present checker, however, the exact theorem concerns the compacted implemented summaries and is the acyclic equation characterization above rather than a least-fixpoint result over inequalities.
+The older inequality-based presentation of stack effects in
+\cite{poial1991algebraic,poial1992multiple} can still be recovered as a
+relaxation of the raw, uncompacted operators:
+replace each equation $X_A = F_A(\vec{X})$ by an inequality
+$X_A \preceq F_A(\vec{X})$ \cite{poial1991algebraic,poial1992multiple}. For the
+present checker, however, the exact theorem concerns the compacted implemented
+summaries and is the acyclic equation characterization above rather than a
+least-fixpoint result over inequalities.
 
 \paragraph{Scope of the theorem.}
-Theorem~\ref{thm:segment-equations} is intentionally local. It characterizes one already parsed body once the summaries of all referenced leaves are fixed. The full top-level checker does more than that local semantics alone: it grows the specification dictionary as definitions are encountered, may seed provisional summaries for forward references, and supports a dedicated \texttt{RECURSE} path during definition checking. Those implementation conveniences are used to make whole-source checking practical, but they are not part of the statement of Theorem~\ref{thm:segment-equations}. The theorem covers the core body-evaluation phase that those outer mechanisms repeatedly invoke.
+Theorem~\ref{thm:segment-equations} is intentionally local. It characterizes one body
+after parsing has already built its tree of source fragments and after every token
+occurrence that the checker treats as basic already has an assigned effect. The full top-level checker does more than that local
+semantics alone: it grows the specification dictionary as definitions are encountered, may
+seed provisional summaries for forward references, and supports a dedicated
+\texttt{RECURSE} path during definition checking. Those implementation conveniences are
+used to make whole-source checking practical, but they are not part of the statement of
+Theorem~\ref{thm:segment-equations}. The theorem covers the body-evaluation phase that
+those outer mechanisms repeatedly invoke.
 
 \section{Inference of User-Defined Words}
 The local theorem above is enough to explain how the checker grows its dictionary during a whole-file pass. At top level, defining words are interpreted immediately, and the body semantics of Theorem~\ref{thm:segment-equations} is used to assign a summary to each newly introduced word. A colon definition starts a new sequence, parses until its terminating control word, computes the effect of the body, and installs the resulting effect as the specification of the new word. Constants and variables are handled similarly but with special defining shapes:
@@ -566,38 +581,60 @@ This paper sits at the intersection of several lines of work on stack-oriented t
 
 \begin{table}[t]
 \centering
-\caption{How the present paper differs from the closest cited lines of work.}
+\caption{Selected related work.}
 \label{tab:prior-comparison}
 \small
 \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.20\linewidth}>{\raggedright\arraybackslash}p{0.26\linewidth}>{\raggedright\arraybackslash}p{0.44\linewidth}@{}}
 \hline
-Line of work & Main emphasis there & Difference here \\
+Line of work & Main emphasis & Relation to this paper \\
 \hline
 Algebraic stack-effect specifications \cite{poial1991algebraic,poial1992multiple,poial1994algebraic} & Sequential composition, alternative effects, and inequality-style solvability & Integrates these operations into a source-level checker with declarative parser and control specifications, and replaces the global inequality claim by an exact parsed-tree characterization of what the checker computes \\
 Typed wildcard and inheritance effects \cite{stoddart1993type,poial2002wildcards} & Symbolic identity tracking and subtype-sensitive polymorphism & Uses these symbolic effects as the executable summary language for whole parsed bodies, user-defined-word inference, and source-level diagnostics \\
 Must-analysis typing tools \cite{poial2006typing} & Branch greatest lower bounds and loop stabilization for stack languages & Externalizes control syntax through \texttt{syntax:}/\texttt{effect:} declarations and proves exactness for the implemented parsed-body evaluator \\
 Compositional low-level stack typing \cite{saabas2006compositional} & Compositional typing judgments for stack-based low-level code & Works at Forth source level, where parser words, defining words, and retargetable vocabularies are first-class inputs rather than fixed instruction forms \\
-WebAssembly validation and stack-polymorphic typing \cite{webassembly2026spec,mcdermott2022wasm} & Validation of structured stack-machine bytecode with fixed control instructions and stack polymorphism around unreachable code and branches & Stays at source level rather than bytecode, treats control syntax as externally declared input, and tracks symbolic identities plus source spans for inferred word summaries and diagnostics \\
+WebAssembly validation and stack-polymorphic typing \cite{webassembly2026spec,mcdermott2022wasm,watt2018wasm} & Validation of structured stack-machine bytecode, mechanised soundness, and stack polymorphism around unreachable code and branches & Stays at source level rather than bytecode, treats control syntax as externally declared input, and tracks symbolic identities plus source spans for inferred word summaries and diagnostics \\
 Formal control semantics \cite{power2004formal} & Semantic account of Forth control words & Targets static checking, inference, and diagnostics rather than general operational semantics \\
 \hline
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:prior-comparison} makes the comparison explicit. The present paper is concerned mainly with how the earlier ingredients can be combined in a single checker for whole source programs. Relative to the algebraic and wildcard-based Forth papers, the novelty is not a new primitive operator but a new level of integration: declarative control specifications, parser behavior, and user-defined-word inference all live in one source-level implementation. Relative to the tooling-oriented must-analysis paper \cite{poial2006typing}, the main additional claim is an exact theorem for parsed-body checking rather than only a description of useful operators. Relative to \cite{saabas2006compositional}, the overlap is compositional reasoning for stack-oriented code, but the present work remains in the source-language idiom of Forth stack effects and parser disciplines \cite{forth2012standard}, where control syntax itself is part of the specification interface.
+Table~\ref{tab:prior-comparison} places the paper among the closest lines of work.
+The main connection is compositional typing for stack-oriented languages. The main
+difference is the combination of declarative control specifications, parser behavior,
+user-defined-word inference, and an exact theorem for parsed-body checking in one
+checker. In particular, relative to \cite{saabas2006compositional}, the present work
+stays in the source-language idiom of Forth \cite{forth2012standard}, where control
+syntax itself is part of the specification interface.
 
-The WebAssembly comparison is useful for a broader programming-languages audience. Modern Wasm validation also assigns stack-machine typings compositionally and uses stack polymorphism to account for structured control flow \cite{webassembly2026spec,mcdermott2022wasm}. However, the setting is importantly different: WebAssembly validates a fixed bytecode language with built-in structured control operators, whereas the present checker analyzes source text whose parser words, defining words, and control forms are themselves supplied by external specifications. That is why this paper emphasizes declarative \texttt{syntax:}/\texttt{effect:} descriptions and source-aware diagnostics rather than only bytecode validation rules.
+WebAssembly is a natural comparison point. Modern Wasm work includes official validation
+rules, mechanised metatheory, and refined accounts of stack polymorphism
+\cite{webassembly2026spec,watt2018wasm,mcdermott2022wasm}. The setting is different:
+WebAssembly validates a fixed bytecode language with built-in structured control
+operators, whereas the present checker analyzes source text whose parser words, defining
+words, and control forms are supplied by external specifications. The emphasis here is
+therefore on declarative \texttt{syntax:}/\texttt{effect:} descriptions and source-aware
+diagnostics rather than bytecode validation alone.
 
-Relative to \cite{power2004formal}, the goal is static source checking rather than a full semantic model of control-word execution.
+Compared with \cite{power2004formal}, the focus here is static source checking rather
+than a full semantic model of control-word execution.
 
 \section{Evaluation}
-The evaluation is organized around the paper's main claims: that the checker behaves correctly on its intended regression corpus, produces useful diagnostics, retargets across declarative profiles, and scales beyond toy examples while making its current limits visible. The repository contains both the Gforth implementation discussed throughout the paper and an independent Java reimplementation that consumes the same \texttt{types}/\texttt{specs}/\texttt{prog} formats. That second implementation is useful reviewer-facing evidence in its own right: it exercises the same declarative inputs through an independent codebase rather than merely replaying results from one implementation. All quantitative results reported below were obtained by batch-running the checked-in corpus through the Java implementation.
+We evaluate four claims: the checker behaves correctly on the checked-in tests,
+produces useful diagnostics, retargets across declarative profiles, and scales beyond
+toy examples. The repository contains both the Gforth implementation discussed throughout
+the paper and an independent Java implementation that consumes the same
+\texttt{types}/\texttt{specs}/\texttt{prog} formats. All quantitative results below come
+from batch-running the checked-in tests through the Java implementation.
 
-\paragraph{Setup and corpus.}
-The bundled corpus contains 29 programs. Of these, 13 are positive programs expected to type-check successfully and 16 are negative programs expected to produce diagnostics. The positive set consists of 7 programs under the bundled Forth 2012 profile, 5 programs under custom type/specification profiles, and 1 article-sized example profile used in this paper. Table~\ref{tab:corpus-results} summarizes the current batch results.
+\paragraph{Tests.}
+The repository contains 29 tests. Thirteen are expected to type-check successfully and
+16 are expected to produce diagnostics. The positive set consists of 7 tests under the
+bundled Forth 2012 profile, 5 under custom type/specification profiles, and 1 article
+example used in this paper. Table~\ref{tab:corpus-results} summarizes the results.
 
 \begin{table}[t]
 \centering
-\caption{Bundled regression corpus and Java batch results.}
+\caption{Checked-in tests and Java results.}
 \label{tab:corpus-results}
 \begin{tabular}{lrr}
 \hline
@@ -606,51 +643,67 @@ Category & Programs & Java outcome \\
 Forth 2012 positives & 7 & 7 accepted \\
 Custom-profile positives & 5 & 5 accepted \\
 Article profile & 1 & 1 accepted \\
-Negative regressions & 16 & 14 rejected \\
+Negative tests & 16 & 14 rejected \\
 \hline
 Total & 29 & 27 as expected \\
 \hline
 \end{tabular}
 \end{table}
 
-\paragraph{Regression results.}
-The Java implementation accepts all 13 positive programs and rejects 14 of the 16 negative programs as expected. The two remaining negative cases are \texttt{linear\_clash.fs} and \texttt{top\_level\_clash.fs}, both of which consist of linear numeric/address clashes involving \texttt{DP 1+}. These cases expose current edge cases in top-level linear reasoning rather than failures of the declarative control machinery developed earlier in the paper. Even so, they are valuable regression tests because they identify precisely where the current implementation is still incomplete.
+\paragraph{Results.}
+The Java implementation accepts all 13 positive tests and rejects 14 of the 16 negative
+tests. The two remaining misses are \texttt{linear\_clash.fs} and
+\texttt{top\_level\_clash.fs}, both linear numeric/address clashes involving
+\texttt{DP 1+}. These cases expose gaps in top-level linear reasoning rather than in the
+declarative control machinery.
 
 \paragraph{Diagnostics.}
-The negative corpus covers several distinct failure modes: malformed control nesting (\texttt{missing\_fi}, \texttt{missing\_repeat}, \texttt{unexpected\_else}), unknown words, branch-summary incompatibility, loop-body incompatibility, nested-definition rejection, unterminated definitions, and multiple-error recovery. Diagnostics include file positions and the offending source span. For example, on \texttt{if\_clash.fs} the checker reports that the two \texttt{IF} alternatives have effects \texttt{( -- a-addr )} and \texttt{( -- char )} and highlights the exact \texttt{IF ... ELSE ... FI} region. This is the level of feedback needed to debug a declarative stack-effect clash rather than merely observe that checking failed.
+The negative tests cover malformed control nesting (\texttt{missing\_fi},
+\texttt{missing\_repeat}, \texttt{unexpected\_else}), unknown words, branch-summary
+incompatibility, loop-body incompatibility, nested-definition rejection, unterminated
+definitions, and multiple-error recovery. Diagnostics include file positions and the
+offending source span. For example, on \texttt{if\_clash.fs} the checker reports that the
+two \texttt{IF} alternatives have effects \texttt{( -- a-addr )} and
+\texttt{( -- char )} and highlights the exact \texttt{IF ... ELSE ... FI} region.
 
 \paragraph{Retargetability.}
 The custom-profile tests exercise features that are not hard-coded into the checker core: custom literal handling, custom type hierarchies, aliasing profiles, and declaratively specified control structures. In particular, the bundled \texttt{WHEN ... OTHERWISE ... ENDWHEN} example and the switch-like example in \texttt{positive/custom\_types/} are described through \texttt{syntax:}/\texttt{effect:} declarations rather than evaluator-specific control code. Together with the literal-alias, literal-count, and literal-scanner examples, these tests show that the same effect calculus can be reused across profiles with substantially different vocabularies and surface syntax.
 
-\paragraph{Scale and running time.}
-Table~\ref{tab:artifact-scale} summarizes the main scale indicators in the artifact. The repository's bundled Forth 2012 environment consists of a 50-line type file and a 278-line specification file, for 328 lines of declarative typing and control information in total. Under that environment, the checker analyzes the single-file implementation \texttt{gforth-evaluator.fs}, which has 4{,}255 lines. The artifact also contains an independent Java implementation totaling 12{,}138 lines across its checked-in \texttt{.java} sources, giving a second executable realization of the same input language. In one representative run on a recent development machine, the Java runtime analyzes the bundled \texttt{string\_scanner.fs} demo in about 0.13 seconds, the article profile in about 0.19 seconds, and the full 29-program regression corpus in about 0.69 seconds.
-
-\begin{table}[t]
-\centering
-\caption{Representative artifact scale and Java running times.}
-\label{tab:artifact-scale}
-\begin{tabular}{lr}
-\hline
-Item & Size / time \\
-\hline
-Forth 2012 type declarations & 50 lines \\
-Forth 2012 specifications & 278 lines \\
-Bundled analyzed application & 4{,}255 lines \\
-Independent Java implementation & 12{,}138 LOC \\
-\texttt{string\_scanner.fs} demo & 0.13 s \\
-Article profile & 0.19 s \\
-Full 29-program corpus & 0.69 s \\
-\hline
-\end{tabular}
-\end{table}
+\paragraph{Scale.}
+The main scale indicators are straightforward. The bundled
+Forth 2012 environment consists of a 50-line type file and a 278-line specification file,
+for 328 lines of declarative typing and control information in total. Under that
+environment, the checker analyzes the single-file implementation
+\texttt{gforth-evaluator.fs}, which has 4{,}255 lines. The artifact also contains an
+independent Java implementation totaling 12{,}138 lines across its checked-in
+\texttt{.java} sources. These figures are enough to show that the checker is being applied
+to a nontrivial specification environment and a multi-thousand-line program rather than
+only to toy fragments.
 
 \paragraph{Limitations and scope.}
-The checker is designed as a static evaluator rather than a full runtime. It relies on the declared specification set, rejects nested defining words inside definitions, enforces interpretation-state restrictions, treats the external type hierarchy as the semantic authority, and uses the one-step repeated-summary criterion of Section~5 rather than a general loop fixpoint. The regression corpus is therefore best read as evidence of coverage for the intended source-language fragment, not as a claim of broad industrial benchmarking. Within that scope, however, the evaluation shows that the same checker core supports both the paper's theory examples and larger bundled artifacts, while also surfacing two concrete remaining precision gaps.
+The checker is a static evaluator, not a full runtime. It relies on the declared
+specification set, rejects nested defining words inside definitions, enforces
+interpretation-state restrictions, treats the external type hierarchy as authoritative,
+and uses the one-step repeated-summary criterion of Section~5 rather than a general loop
+fixpoint. The tests therefore demonstrate coverage of the intended source-language
+fragment, not industrial benchmarking. Within that scope, they show both the range of
+supported examples and two remaining precision gaps.
 
 \section{Conclusion}
-The paper makes two main points. First, typed stack-effect checking for a Forth-like language can be organized around a small collection of operations on symbolic effects: sequential composition, must-style branch merging, and a local loop-summary operator for repeated control flow. Second, for fixed parsed bodies under finite specifications and fixed leaf summaries, this operational checker has an exact compositional characterization over the parsed source tree: acceptance coincides with the absence of clashes in the induced segment equations, and a successful run yields their unique non-clashing summaries.
+The current formulation isolates a small symbolic core for typed stack-effect
+checking in a Forth-like setting. The case studies suggest that declarative
+control descriptions and symbolic effects are expressive enough to support
+source-level checking across several profiles while still producing useful
+diagnostics.
 
-Because the type hierarchy and the word and control specifications are external to the core algorithm, the same implementation can be retargeted to different vocabularies and dialects with relatively little change to the checker itself. The evaluation shows this on three scales at once: a 29-program regression corpus, several custom control and literal profiles, and the larger bundled Forth 2012 artifact discussed above \cite{forth2012standard}. The contribution is therefore best understood as a precise source-level integration result rather than as a new primitive operator or a global fixpoint framework for concatenative languages. More broadly, the paper argues that many source-level features of a concatenative language become amenable to static reasoning once parsing and control behavior are exposed as operators over a finite symbolic effect domain.
+Several directions remain open. The local loop-summary operator of
+Section~5 could be replaced by stronger invariant generation or abstract-interpretation
+techniques. The present theorem is also deliberately local to one parsed body with
+known leaf effects; extending it to recursive definitions, forward references, and
+top-level dictionary growth would give a more complete account of the implementation.
+More broadly, it would be useful to mechanize the metatheory and to compare the
+resulting framework more systematically with other typed stack languages, e.g.
+WebAssembly.
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{typechecker-paper-popl-public}
