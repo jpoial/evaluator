@@ -37,59 +37,91 @@
 
 \begin{abstract}
 This paper studies static type checking for a Forth-like language whose type hierarchy,
-vocabulary, and control syntax are supplied externally. The checker uses a symbolic
-stack-effect calculus with sequential composition, must-style branch merge by a
-lower-bound operator, and a one-step loop summary. Control structures are described by
-declarative syntax and effect specifications, so parsing and effect computation
-share one specification framework. For a single source body, once parsing has identified
-its control structure and once each basic word, literal, or other undecomposed token
-already has an assigned effect, body checking computes a unique symbolic effect for every
-larger source fragment. The body is accepted exactly when this computation encounters no
-type clash. We implemented the checker in Gforth and independently in Java;
-both implementations read the same input formats. We present the calculus, the exactness
-theorem, and an evaluation on 29 checked-in tests, custom profiles, and a 4{,}255-line
-application.
+vocabulary, and control syntax are loaded from external specification files. Instead of
+executing a program for concrete values, the checker computes symbolic stack effects. Its
+core calculus has three operators: sequential composition, branch merging by a
+lower-bound operator, and a lightweight one-step loop summary. Control structures are
+also specified declaratively, so parsing and effect computation share one specification
+framework. Once parsing has identified the control structure of a body and each basic
+token occurrence already has an assigned effect, the checker computes a unique symbolic
+summary for every larger source fragment. The body is accepted exactly when that
+bottom-up computation encounters no clash. We implemented the checker in Gforth and
+independently in Java; both implementations read the same input formats. We present the
+calculus, prove an exactness theorem for parsed bodies, and evaluate the approach on 29
+checked-in tests, custom profiles, and a 4{,}255-line application.
 \end{abstract}
 
 \maketitle
 
 \section{Introduction}
-Concatenative languages compose programs by placing words next to one another, so 
-juxtaposition itself denotes composition. In stack-based instances such as Forth, 
-words perform computation by transforming an implicit operand stack. A word is therefore 
-naturally described by the stack cells it consumes and the cells it produces, so a natural 
-static abstraction is a \emph{stack effect}. In simple cases, informal comments such 
-as \texttt{( n n -- n )} are already useful documentation in Forth practice and 
-standardization documents \cite{rather1996evolution,forth2012standard}. The goal of 
-the checker described here is to turn such annotations into an executable static semantics.
+Concatenative languages compose programs by juxtaposition. In stack-based variants such
+as Forth, each word transforms an implicit operand stack. A natural static summary is
+therefore a \emph{stack effect}: it records which stack cells a word consumes and which
+cells it produces. In simple cases, informal comments such as \texttt{( n n -- n )} are
+already useful documentation in Forth practice and standardization documents
+\cite{rather1996evolution,forth2012standard}. The goal of this paper is to give such
+annotations an executable static semantics.
 
-The checker takes three external inputs. A \texttt{types} file defines a finite partial subtype relation. 
-A \texttt{specs} file assigns effects and parsing behavior to ordinary words, literals, defining words, 
-and control roles. A program file is then parsed and analyzed against those specifications. 
-Instead of running the program for its concrete result, the checker computes the abstract stack effect 
-of each token and each user-defined word. The same mechanism also produces source-aware diagnostics 
-when adjacent effects cannot be composed. In that sense, the implementation follows the 
-abstract-interpretation idea of executing programs over a finite abstract domain rather than over 
-concrete values \cite{cousot1977abstract}.
+The challenge is that the target language is not fixed. A checker must account for an
+externally declared type hierarchy, symbolic equality constraints created by stack
+shuffles, and control forms whose syntax and behavior may vary by profile. Existing work
+provides these ingredients separately: algebraic composition of stack effects, typed
+wildcards for symbolic equality constraints, and must-analysis operators for branches and
+loops \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,poial2006typing}. This
+paper combines them in one source-level checker with declarative parser and control
+specifications.
 
-Existing work already supplies the main ingredients in isolation: algebraic composition of
-stack effects, typed wildcards for symbolic equality constraints, and must-analysis operators
-for branches and loops \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,poial2006typing}.
-This paper combines them in one checker for source programs with declarative parser and
-control specifications.
+The checker takes three external inputs. A \texttt{types} file defines a finite partial
+subtype relation. A \texttt{specs} file assigns effects and parsing behavior to ordinary
+words, literals, defining words, and control roles. A program file is then parsed and
+analyzed against those specifications. Rather than executing the program for concrete
+results, the checker computes a symbolic stack-effect summary for each parsed fragment and
+each user-defined word. The same mechanism also produces source-aware diagnostics when
+adjacent summaries cannot be composed. In that sense, the implementation follows the
+abstract-interpretation idea of executing programs over a finite abstract domain rather
+than over concrete values \cite{cousot1977abstract}.
 
-The core theorem matches the implementation. Once a source body has been parsed and once
-each basic word, literal, or other undecomposed token occurrence already has an assigned
-effect, the checker assigns a unique abstract effect to every larger fragment of that
-body. It accepts exactly when the induced finite equation system can be evaluated without
-clash, and on success the stored summaries are the resulting compacted effects.
+\paragraph{Running example.}
+It helps to keep one small linear fragment in mind:
+\begin{lstlisting}
+1 2 + DUP
+\end{lstlisting}
+using the specifications
+\begin{lstlisting}
+literal integer ( -- n )
++ ( n n -- n )
+DUP ( x[1] -- x[1] x[1] )
+\end{lstlisting}
+Starting from an empty stack, the fragment leaves two equal \texttt{n} values on top, so
+the checker infers the overall effect
+\[
+( -- n[1]\;n[1]).
+\]
+The later sections explain how the same composition machinery extends from this simple
+example to branches and loops.
 
-Two design choices keep the checker small. Types are loaded from an external subtype graph,
-and control behavior is described by \texttt{syntax:}/\texttt{effect:} blocks rather than
-hard-coded rules. The mathematical content is therefore concentrated in a small symbolic
-domain and a few deterministic operators. This approach builds on earlier work on algebraic
-stack effects, typed wildcards, must-analysis for stack-oriented languages, and compositional
-type systems for stack-oriented languages
+\paragraph{Key concepts.}
+A \emph{stack symbol} is a typed placeholder such as \texttt{n} or \texttt{x[1]}; reusing
+an index records that two positions denote the same abstract value. A \emph{raw effect} is
+the internal symbolic result before index cleanup. A \emph{compacted effect} is the
+shorter summary that the implementation stores and reports after deterministic
+renumbering and optional suppression of some implicit pairwise indices. Branching uses a
+partial meet on effects, so it keeps only the information guaranteed by every branch. The
+loop operator uses the same order, but compares one execution of a body with two
+executions instead of running a global fixpoint engine.
+
+The core theorem matches the implementation. Once a source body has been parsed and each
+basic token occurrence already has an assigned effect, the checker computes one unique
+summary for every larger fragment of that body. It accepts exactly when the induced
+acyclic equation system can be evaluated without clash, and on success the stored
+summaries are the resulting compacted effects.
+
+Two design choices keep the checker small. Types are loaded from an external subtype
+graph, and control behavior is described by \texttt{syntax:}/\texttt{effect:} blocks
+rather than hard-coded rules. The mathematical content is therefore concentrated in a
+small symbolic domain and a few deterministic operators. This approach builds on earlier
+work on algebraic stack effects, typed wildcards, must-analysis for stack-oriented
+languages, and compositional type systems for stack-oriented languages
 \cite{poial1994algebraic,stoddart1993type,poial2002wildcards,saabas2006compositional,poial2006typing}.
 
 Concretely, the paper makes four contributions.
@@ -100,11 +132,17 @@ Concretely, the paper makes four contributions.
 \item It evaluates the calculus as a retargetable checker: the type hierarchy, vocabulary, parser behavior, and control structures are all loaded from external specifications, user-defined words are inferred during analysis, and the artifact is exercised on 29 checked-in tests, several custom profiles, and a 4{,}255-line application.
 \end{enumerate}
 
-The rest of the paper follows the structure of the checker itself. Sections~2--5 define the symbolic domain and the effect operators used during checking. Section~6 shows how declarative control specifications turn parsed source fragments into equations over those operators and states the exactness theorem. The remaining sections discuss inference of user-defined words, relation to prior work, evaluation, and conclusion.
+The rest of the paper follows the structure of the checker itself. Sections~2--5 define
+the symbolic domain and the effect operators used during checking. Section~6 shows how
+declarative control specifications turn parsed source fragments into equations over those
+operators and states the exactness theorem. The remaining sections discuss inference of
+user-defined words, relation to prior work, evaluation, and conclusion.
 
 \section{Type Domain}
 \label{sec:type-domain}
-We begin by fixing the symbolic vocabulary used throughout the paper. The important point is that the checker does not assume a built-in universe of machine types: the type language comes from the external specification files, and the later effect operators only consult the finite relation declared there.
+This section fixes the symbolic vocabulary used throughout the paper. Types are not
+built into the checker. They come from the external specification files, and the later
+effect operators consult only the finite subtype relation declared there.
 
 \subsection{Type hierarchy}
 Let $\Types$ be a finite set of canonical type names equipped with an acyclic subtype relation $\leq$. We read $\tau_1 \leq \tau_2$ as ``$\tau_1$ is at least as precise as $\tau_2$,'' matching the sample declarations
@@ -132,7 +170,13 @@ For $\tau,\upsilon \in \Types$, define
 \]
 \end{definition}
 
-This operation simply returns the more precise of the two comparable types. Incomparable pairs have no defined result here and therefore cause a type clash.
+This operation simply returns the more precise of the two comparable types. Incomparable
+pairs have no defined result here and therefore cause a type clash.
+
+\paragraph{Intuition.}
+Composition and branch merging only need one local question at a stack boundary: can a
+single concrete cell satisfy both type constraints? If so, the comparable meet keeps the
+strongest shared type information; otherwise checking fails at that boundary.
 
 \subsection{Stack symbols}
 Stack effects need to express not only which types appear on the stack, but also when two positions are known to denote the same abstract value. To do that, the checker uses typed stack symbols. A \emph{stack symbol} is a type optionally annotated with a positive index, written $\tau$ or $\tau[i]$. The type denotes an abstract class of stack cells. The index denotes correlation across positions: if the same indexed symbol appears twice, those occurrences refer to the same abstract value constraint, not merely two values of the same coarse type.
@@ -170,10 +214,20 @@ The empty effect
 \]
 acts as the identity transformation.
 
-\subsection{Index compaction}
-Raw evaluation introduces fresh indices whenever a specification omits them. The implementation does not report those raw effects directly. After each successful operator application, it runs a deterministic index-compaction pass: remaining indices are renumbered, explicit indices are preserved, and an implicit index is suppressed when it occurs at most twice. This keeps reported summaries short and is the convention used throughout the artifact.
+\subsection{Raw and compacted effects}
+Evaluation first builds \emph{raw effects}. These retain every fresh index introduced
+during composition, branch merging, and loop summarization. The implementation does not
+report those raw effects directly. After each successful operator application, it runs a
+deterministic compaction pass: remaining indices are renumbered, explicit indices are
+preserved, and an implicit index is suppressed when it occurs at most twice. The result
+is a \emph{compacted effect}.
 
-Compaction is not semantics-preserving for the raw identity constraints introduced during evaluation: suppressing an implicit pairwise index forgets that two positions were correlated. Accordingly, the relational statements below are about raw effects before compaction, while the exactness theorem in Section~\ref{sec:constraint-view} characterizes the compacted summaries that the checker actually stores and reports.
+Raw and compacted effects serve different roles in the paper. Raw effects are the precise
+semantic objects used in the relational statements below. Compacted effects are the
+shorter summaries that the checker actually stores and reports. Compaction is therefore
+not fully semantics-preserving for identity constraints: suppressing an implicit pairwise
+index forgets that two positions were correlated. When that happens, the compacted effect
+is a conservative weakening of the corresponding raw one.
 
 \subsection{Relational intuition for raw effects}
 The branch and loop operators are best understood as must-style summaries over concrete stack behavior. To make that intuition precise, fix an infinite set $\mathcal{A}$ of concrete atoms. A \emph{concrete stack cell} is a pair $(a,\tau)$ with $a \in \mathcal{A}$ and $\tau \in \Types$; we read $\tau$ as the cell's exact type. A \emph{concrete stack} is a finite sequence of such cells.
@@ -203,10 +257,20 @@ Define
 \]
 Lower elements in this order are more informative: they rule out more concrete behaviors and therefore provide stronger guarantees. This is the order-theoretic viewpoint of abstract interpretation specialized to symbolic stack transformations \cite{cousot1977abstract,poial2006typing}.
 
+\paragraph{Notation guide.}
+We read $\gamma(\pi)$ as the concrete meaning of $\pi$, $\pi_1 \preceq \pi_2$ as ``$\pi_1$
+is at least as informative as $\pi_2$,'' and $\glb$ as ``keep only the information both
+sides guarantee.'' These readings are the intuition behind the branch and loop operators
+defined later.
+
 Under this reading, sequential composition propagates guaranteed information through a linear segment, while branch merging seeks information guaranteed by every alternative rather than the union of effects that may arise on some path. Because the checker compacts successful summaries before storing them, the reported effect may be a conservative weakening of the corresponding raw effect in this order.
 
 \section{Sequential Composition}
-Juxtaposition is the basic program former in Forth, so sequential composition is the basic operator of the checker. The rule below explains how information flows across the boundary between two adjacent fragments.
+Juxtaposition is the basic program former in Forth, so sequential composition is the
+basic operator of the checker. Intuitively, the checker walks across the touching
+boundary between two adjacent effects from top to bottom. At each matched position, it
+asks whether one concrete stack cell could satisfy both local constraints and, if so,
+keeps the more informative shared symbol.
 
 \begin{definition}[Boundary composition]
 Let
@@ -223,7 +287,11 @@ Their composition $\pi_1 \compose \pi_2$ is computed from the touching boundary 
 \end{enumerate}
 \end{definition}
 
-The fresh symbol keeps the more specific of the two type constraints. Since lower elements in the order are more precise, the meet is the more informative symbol. This is why an output proved as \texttt{a-addr} can still satisfy a later input that only requires \texttt{c-addr}: the joined boundary keeps the stronger fact \texttt{a-addr}.
+\paragraph{Intuition.}
+The fresh symbol keeps the more specific of the two type constraints. Since lower
+elements in the order are more precise, the meet is the more informative symbol. This is
+why an output proved as \texttt{a-addr} can still satisfy a later input that only
+requires \texttt{c-addr}: the joined boundary keeps the stronger fact \texttt{a-addr}.
 
 Write relational composition of concrete stack transformations as
 \[
@@ -241,9 +309,11 @@ If $\pi_1 \compose \pi_2$ is defined, then
 The recursive boundary algorithm does exactly the matching needed to eliminate an existentially quantified intermediate stack. At each matched boundary position it replaces the two adjacent symbols by their comparable meet, which is precisely the strongest type constraint satisfied by every concrete intermediate cell that could serve both sides. Shared indices are propagated by the same substitution on both effects, so equality constraints across the boundary are preserved as well. Recursing over the boundary therefore removes the intermediate stack one cell at a time without changing the represented input/output relation.
 \end{proof}
 
-This proposition concerns the raw composition operator before compaction. The checker applies $\compact$ to every successful intermediate result before reusing it.
+This proposition concerns the raw composition operator before compaction. The checker
+applies $\compact$ to every successful intermediate result before reusing it.
 
-The command-line example from the repository illustrates the rule:
+Returning to the running example, the command-line trace from the repository illustrates
+the rule:
 \begin{lstlisting}
 1 2 + DUP
 \end{lstlisting}
@@ -290,14 +360,23 @@ The identity element is $\id = (\, -- \,)$. This multiplication models concatena
 
 Viewed this way, $\odot$ is the typed version of the product used in earlier algebraic presentations of stack effects \cite{poial1994algebraic,poial2006typing}. It packages sequencing as a total operation with a clash element, while the checker itself continues to use the underlying partial composition $\compose$ because that formulation matches error reporting and local reasoning more directly. The totalized view is useful mainly as a compact algebraic summary of the linear fragment; the metatheoretic results used later rely only on the operational definition of composition above.
 
-\section{Branching as Must-Style Merging}
+\section{Branching as Meet on Effects}
 Sequential composition alone is not enough for control flow. A conditional must summarize several alternatives with one effect that is safe no matter which branch executes.
 
-For branching, the checker therefore uses a partial greatest-lower-bound operation on whole effects. Intuitively, it merges branch summaries pointwise after accounting for stack cells that are preserved unchanged across both input and output. This is necessary because different branches may manipulate different depths of the stack while still agreeing on a common surrounding context.
+For branching, the checker therefore uses a partial greatest-lower-bound operation on
+whole effects. In lattice terminology, this is a partial meet on compatible effects. We
+also call it \emph{must-style}: it keeps only the information that every branch
+guarantees. Intuitively, the checker merges branch summaries pointwise after accounting
+for stack cells that are preserved unchanged across both input and output. This is
+necessary because different branches may manipulate different depths of the stack while
+still agreeing on a common surrounding context.
 
 More concretely, if one effect has $k$ more inputs than another, it must also have $k$ more outputs. The implementation then extracts a preserved prefix of length $k$ from the larger effect by requiring each corresponding input/output pair in that prefix to be comparable. After that prefix has been merged, the remaining active slices are unified pointwise. If any comparison fails, the branch summaries are incompatible. On raw effects, this construction yields a common lower-bound-style summary whenever it succeeds. The implementation then applies $\compact$ to the merged effect before storing or reporting it, so the reported branch summary may be weaker than the raw meet when an implicit pairwise correlation is suppressed.
 
-Accordingly, the checker uses a lower-bound-style merge rather than least upper bound: it searches for information common to all paths of a conditional, not the union of behaviors that may arise on some path \cite{poial2006typing}. This is the branching counterpart of the relational reading from Section~\ref{sec:stack-effects}.
+Accordingly, the checker uses a meet rather than a join: it searches for information
+common to all paths of a conditional, not the union of behaviors that may arise on some
+path \cite{poial2006typing}. This is the branching counterpart of the relational reading
+from Section~\ref{sec:stack-effects}.
 
 This operator is used by the \texttt{either} constructor in declarative control semantics. The example
 \begin{lstlisting}
@@ -320,7 +399,12 @@ a\text{-}addr \glb c\text{-}addr = a\text{-}addr.
 The merged effect therefore preserves the more specific address requirement.
 
 \section{Iteration via One-Step Stabilization}
-Iteration is the point where a full abstract interpreter would usually introduce a fixpoint computation. The current checker deliberately stops short of that. It does not build a global control-flow graph or run a general fixpoint engine \cite{cousot1977abstract}. Instead, the \texttt{repeat} constructor uses a local repeated-effect operator that compares one execution of a body with two executions. This is the exact loop-related contract implemented by the checker.
+Iteration is the point where a full abstract interpreter would usually introduce a
+fixpoint computation. The current checker deliberately stops short of that. It does not
+build a global control-flow graph or run a general fixpoint engine
+\cite{cousot1977abstract}. Instead, the \texttt{repeat} constructor uses a local
+repeated-effect operator that compares one execution of a body with two executions. This
+is the exact loop-related contract implemented by the checker.
 
 \begin{definition}[One-step repeated summary]
 For an effect $\pi$, define
@@ -330,7 +414,12 @@ For an effect $\pi$, define
 when both the composition and the greatest lower bound are defined.
 \end{definition}
 
-Operationally, this is a one-step stabilization test. The effect $\pi$ summarizes one execution of the repeated body, while $\pi \compose \pi$ summarizes two executions. If those two summaries admit a common lower bound, the checker keeps that lower bound as the information guaranteed by both one round and one further round of the body. If no such lower bound exists, the checker declines to assign a repeated-summary effect.
+\paragraph{Intuition.}
+Operationally, this is a one-step stabilization test. The effect $\pi$ summarizes one
+execution of the repeated body, while $\pi \compose \pi$ summarizes two executions. If
+those two summaries admit a common lower bound, the checker keeps that lower bound as the
+information guaranteed by both one round and one further round of the body. If no such
+lower bound exists, the checker declines to assign a repeated-summary effect.
 
 At the raw level, $\pi^\star$ is the common lower-bound-style summary of one and two executions whenever it is defined. The implementation then applies $\compact$ to the result. In control specifications, the \texttt{repeat} constructor uses exactly this one-step criterion. Its intended reading is not full Kleene closure and does not, by itself, claim correctness for all finite iteration counts. Rather, \texttt{repeat} accepts exactly when the one-step and two-step summaries admit a common guaranteed effect.
 
@@ -406,19 +495,21 @@ This arrangement separates parsing from typing. Once a source fragment has been 
 
 \subsection{Compositional characterization}
 \label{sec:constraint-view}
-We can now state the main theorem at the granularity implemented by the checker: one
-already parsed body in which each basic token occurrence already has an assigned effect. Fix a finite parsed source tree
-$T$ for one source body under a finite \texttt{types}/\texttt{specs} environment $\Gamma$.
-Here $T$ is the tree obtained after parsing has already recognized sequential fragments and
-control structures: internal nodes are compound source fragments, and leaves are token
-occurrences that the checker does not decompose further. Assume that every leaf in $T$
-already has a known summary effect in $\Gamma$, for example from a word specification, a
-literal class, or a previously inferred definition. Let
-$D$ be the set of compacted non-clashing effects together with a distinguished clash value
-$0$. For each parsed segment $A$, let $X_A \in D$ be its unknown summary. For a control
-template $E$ and an assignment $X$ of summary values to segments, $\widehat{\sem{E}}_X$
-denotes evaluation of $E$ under $X$. We write $X^\ast$ for the unique solution of the
-segment equations introduced below.
+We can now state the main theorem in the same granularity as the implementation: one
+already parsed body in which each basic token occurrence already has an assigned effect.
+Fix a finite parsed source tree $T$ for one source body under a finite
+\texttt{types}/\texttt{specs} environment $\Gamma$. The tree $T$ is obtained after
+parsing has already recognized sequential fragments and control structures. Its internal
+nodes are compound source fragments, and its leaves are token occurrences that the
+checker does not decompose further. Assume that every leaf in $T$ already has a known
+summary effect in $\Gamma$, for example from a word specification, a literal class, or a
+previously inferred definition.
+
+Let $D$ be the set of compacted non-clashing effects together with a distinguished clash
+value $0$. For each parsed segment $A$, let $X_A \in D$ be its unknown summary. For a
+control template $E$ and an assignment $X$ of summary values to segments,
+$\widehat{\sem{E}}_X$ denotes evaluation of $E$ under $X$. We write $X^\ast$ for the
+unique solution of the segment equations introduced below.
 
 Write $\overline{\compose}$, $\overline{\glb}$, and $\overline{\star}$ for the totalized implemented operators derived from raw composition, raw branch merge, and raw one-step stabilization: whenever the corresponding raw partial operator is defined, the checker returns its compacted result; otherwise the totalized operator returns $0$, and any occurrence of $0$ in an argument propagates to $0$. These are the operators that actually appear during checking. For a control template $E$, define its totalized denotation by
 \begin{align*}
@@ -446,6 +537,13 @@ where each segment reference $\langle B \rangle$ in $E$ is interpreted as the co
 \end{enumerate}
 Let $S(T,\Gamma)$ denote the resulting finite system of segment equations. Because every right-hand side refers only to proper descendants of $A$, the dependency graph of $S(T,\Gamma)$ is acyclic. The theorem below states that bottom-up execution of the core body evaluator computes exactly the unique solution of this system.
 
+\paragraph{Intuition.}
+The theorem says that the checker is not doing anything mysterious beyond the operators
+already defined. Parsing produces a tree of source fragments. The equations above attach
+one deterministic summary equation to each node of that tree. Because every node depends
+only on smaller nodes, the whole system can be solved bottom-up, and that bottom-up
+solution is exactly what the implementation returns.
+
 \begin{theorem}[Exactness of segment equations]
 \label{thm:segment-equations}
 Assume that the parsed source tree $T$ is finite and that every leaf of $T$ already has a fixed summary effect under $\Gamma$. Then:
@@ -456,77 +554,50 @@ Assume that the parsed source tree $T$ is finite and that every leaf of $T$ alre
 \end{enumerate}
 \end{theorem}
 
-\begin{proof}
+\begin{proof}[Proof sketch]
 Let
 \[
 D = \{\text{compacted non-clashing effects}\} \cup \{0\}.
 \]
-For every parsed segment $A$ in $T$, write $h(A)$ for its height in the parsed tree:
-$h(A)=0$ when $A$ is a leaf, and otherwise
-\[
-h(A)=1+\max\{h(B)\mid B \text{ is a child of } A\}.
-\]
-Because $T$ is finite, every segment has finite height.
+Because every equation in $S(T,\Gamma)$ refers only to proper descendants of a segment,
+the dependency graph is acyclic. We therefore reason by induction on the height of a
+segment in the parsed tree.
 
-We prove simultaneously, by induction on $m \in \mathbb{N}$, the following statement:
-\emph{$P(m)$: for every parsed segment $A$ with $h(A)\le m$,}
-\begin{enumerate}
-\item \emph{there is a unique value $d_A \in D$ satisfying the equation for $A$ in $S(T,\Gamma)$ once the descendant values are fixed, and}
-\item \emph{the checker returns a clash on $A$ exactly when $d_A=0$, and otherwise returns the compacted effect $d_A$.}
-\end{enumerate}
-\textbf{Base case $m=0$.}
-If $h(A)=0$, then $A$ is a leaf. By construction of $S(T,\Gamma)$, its equation is
-\[
-X_A=\pi
-\]
-for the fixed known effect $\pi$ supplied by $\Gamma$. Hence there is exactly one possible value, namely $d_A=\pi \in D$, proving clause~(1). The checker treats a leaf in exactly the same way: it looks up the effect attached to that token occurrence and returns it. Therefore it does not report a clash, and its return value is exactly $d_A$, proving clause~(2).
+If $A$ is a leaf, its equation is $X_A=\pi$ for the fixed known effect supplied by
+$\Gamma$. So its value is uniquely determined, and the checker returns exactly that same
+value by lookup.
 
-\textbf{Inductive step.}
-Assume $P(m)$ and let $A$ be any parsed segment with $h(A)=m+1$. Every proper descendant of $A$ then has height at most $m$, so the induction hypothesis already gives a unique value $d_B \in D$ for each child or descendant segment $B$ of $A$, together with the fact that the checker returns exactly that value or clash according to whether $d_B$ is nonzero or zero.
-
+For the inductive step, assume every proper descendant of $A$ already has a unique value
+in $D$ and that the checker returns exactly that value, with clash represented by $0$.
 There are two cases.
-\emph{Case 1: $A$ is a sequential node with children $B$ and $C$.}
-Its equation in $S(T,\Gamma)$ is
+
+If $A$ is a sequential node with children $B$ and $C$, then its equation is
 \[
 X_A=\overline{\compose}(X_B,X_C).
 \]
-By the induction hypothesis, $X_B$ and $X_C$ are uniquely fixed as $d_B$ and $d_C$. The operator $\overline{\compose}$ is total and deterministic on $D$, so
-\[
-d_A=\overline{\compose}(d_B,d_C)
-\]
-is uniquely determined. This proves clause~(1) for $A$.
+By the induction hypothesis, the child values are uniquely fixed as $d_B$ and $d_C$.
+Since $\overline{\compose}$ is deterministic, $d_A=\overline{\compose}(d_B,d_C)$ is the
+unique solution for $A$. The checker performs that same totalized sequencing step after
+recursively evaluating $B$ and $C$, so it returns clash exactly when $d_A=0$, and
+otherwise returns $d_A$.
 
-For clause~(2), the checker first evaluates $B$ and $C$. By the induction hypothesis it thereby obtains exactly the values $d_B$ and $d_C$, with clash represented precisely by the value $0$. It then performs the same implemented sequencing operation used in the definition of $\overline{\compose}$: if either child has already clashed, or if the underlying raw composition is undefined, the result is clash; otherwise the checker returns the compacted composed effect. That is exactly the case distinction encoded by $\overline{\compose}(d_B,d_C)$. Hence the checker returns clash exactly when $d_A=0$, and otherwise returns $d_A$.
-
-\emph{Case 2: $A$ is a control node with template $E$.}
-Its equation in $S(T,\Gamma)$ is
+If $A$ is a control node with template $E$, then its equation is
 \[
 X_A=\widehat{\sem{E}}_X,
 \]
-where each segment reference $\langle B\rangle$ in $E$ is interpreted as the already fixed descendant value $d_B$.
+where segment references in $E$ are interpreted using the already fixed descendant values.
+The value of $\widehat{\sem{E}}_X$ is uniquely determined by structural recursion on $E$:
+the base forms $\eps$, segment references, and control-role atoms are fixed directly, and
+the constructors for sequencing, \texttt{either}, and \texttt{repeat} use the
+deterministic totalized operators $\overline{\compose}$, $\overline{\glb}$, and
+$\overline{\star}$. The checker evaluates the same template by the same recursion, so it
+again returns clash exactly when the resulting value is $0$, and otherwise returns that
+value.
 
-We first show that the right-hand side is uniquely determined. This is a straightforward structural induction on the syntax of $E$.
-\begin{enumerate}
-\item If $E=\eps$, then $\widehat{\sem{E}}_X=\id$, uniquely.
-\item If $E=\langle s\rangle$, then $\widehat{\sem{E}}_X=X_s=d_s$, uniquely by the outer induction hypothesis.
-\item If $E=c$, then $\widehat{\sem{E}}_X$ is the fixed declared runtime effect of the control role $c$.
-\item If $E=E_1E_2$, then by the induction hypothesis on expressions both $\widehat{\sem{E_1}}_X$ and $\widehat{\sem{E_2}}_X$ are uniquely determined, and therefore so is
-\[
-\overline{\compose}(\widehat{\sem{E_1}}_X,\widehat{\sem{E_2}}_X)
-\]
-because $\overline{\compose}$ is deterministic.
-\item If $E=\textsf{either}(E_1,E_2)$, the same reasoning applies using the deterministic operator $\overline{\glb}$.
-\item If $E=\textsf{repeat}(E_1)$, the same reasoning applies using the deterministic operator $\overline{\star}$.
-\end{enumerate}
-Thus $\widehat{\sem{E}}_X$ has a unique value in $D$; call it $d_A$. This proves clause~(1) for $A$.
-
-For clause~(2), the checker first recursively evaluates each captured child segment appearing in the control structure. By the outer induction hypothesis, those recursive calls return exactly the descendant values used above. The checker then evaluates the control meaning expression $E$ by the same recursion as the clauses defining $\widehat{\sem{E}}_X$: empty expressions return $\id$, segment references return the corresponding child result, control-role atoms return the declared runtime effect, sequencing uses the implemented totalized composition, \texttt{either} uses the implemented totalized merge, and \texttt{repeat} uses the implemented totalized one-step stabilization. Therefore the checker's result on $A$ is exactly $d_A$. In particular, it reports clash exactly when $d_A=0$, and otherwise returns the compacted effect $d_A$.
-
-This completes the induction and proves $P(m)$ for all $m$.
-
-Now let $M=\max\{h(A)\mid A \text{ is a segment of } T\}$. Applying $P(M)$ to every segment of $T$ yields clause~(1) of the theorem: each variable $X_A$ has exactly one value $d_A \in D$, so the entire system $S(T,\Gamma)$ has a unique solution $X^\ast$, namely $X^\ast_A=d_A$ for every segment $A$.
-
-Clause~(2) is exactly the second part of $P(M)$. Finally, the whole parsed body is the root segment of $T$, so clause~(3) follows immediately from clause~(2): the checker accepts the body exactly when the root value is nonzero, that is, exactly when $X^\ast_{\mathsf{root}} \neq 0$.
+Thus every segment has a unique value in $D$, and those values form the unique solution
+$X^\ast$ of $S(T,\Gamma)$. The exact correspondence with the implementation is the
+induction statement itself. Clause~(3) then follows immediately at the root of the parsed
+tree.
 \end{proof}
 
 The older inequality-based presentation of stack effects in
