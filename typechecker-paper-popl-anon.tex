@@ -29,46 +29,40 @@
 \newcommand{\id}{\mathbf{1}}
 \newcommand{\sem}[1]{[\![#1]\!]}
 
-\title{Declarative Stack-Effect Checking for Stack Based Languages}
+\title{Declarative Stack-Effect Checking for Stack Languages}
 \author{Anonymous Author(s)}
 \renewcommand{\shortauthors}{Anonymous Author(s)}
 
 \begin{document}
 
 \begin{abstract}
-This paper studies static type checking for a Forth-like language whose type hierarchy,
-vocabulary, and control syntax are loaded from external specification files. Instead of
-executing programs on concrete values, the checker computes symbolic stack effects.
-
+This paper studies static type checking for concatenative stack languages (e.g. Forth, PostScript,
+Cat, Factor, Joy, WebAssembly, JVM assembly, etc.). Description of the type system (type hierarchy,
+language vocabulary with type specifications, and control syntax) is loaded from external specification 
+files.
+The checker computes a symbolic effect for every linear fragment and control structure. 
 Its core calculus consists of three operators: sequential composition, branch merging via
-a lower-bound operator, and a lightweight one-step loop summary. Control structures are
-specified declaratively, so parsing and effect computation share a single specification
-framework.
+a lower-bound operator, and a lightweight one-step loop summary.
+The source program is accepted exactly when this bottom-up computation encounters no clash (Theorem 1).
 
-Once a program body has been parsed and each basic token occurrence has an assigned
-effect, the checker computes a unique symbolic summary for every larger fragment. The
-body is accepted exactly when this bottom-up computation encounters no clash.
-
-We implement the checker in Gforth and independently in Java, prove an exactness theorem
-for parsed bodies, and evaluate the approach on a set of tests and a
-multi-thousand-line application.
+The toolbox is implemented in Gforth (using an earlier prototype written in Java) and evaluated on a set 
+of tests and a multi-thousand-line application.
 \end{abstract}
 
 \maketitle
 
 \section{Introduction}
 Concatenative languages compose programs by juxtaposition. In stack-based variants such
-as Forth, each word transforms an implicit operand stack, and a natural static summary is
+as Forth, each word transforms an implicit operand stack, and a natural specification is
 therefore a \emph{stack effect} describing the consumed and produced stack cells.
 
 While stack-effect annotations are widely used in practice, most existing approaches
 assume a fixed language with built-in control constructs or limited forms of
 polymorphism. This makes them difficult to apply in settings where the type hierarchy,
-vocabulary, and control syntax are defined externally, as is common in Forth-like
-systems.
+specifications, and control syntax are defined externally.
 
 This paper presents a static checker for such settings. The system operates over
-externally provided specifications of types, words, and control structures, and computes
+given specifications of types, words, and control structures, and computes
 symbolic stack-effect summaries instead of executing programs concretely.
 
 A key design choice is that control structures are specified declaratively. As a result,
@@ -77,8 +71,8 @@ checker to be retargeted across different profiles without modifying the core
 implementation.
 
 \paragraph{Running example.}
-It helps to keep one small linear fragment in mind as we introduce the core composition
-operator. Consider the source fragment:
+Let us introduce the core composition
+operator for linear sequences. Consider the source fragment:
 \begin{lstlisting}
 1 2 + DUP
 \end{lstlisting}
@@ -107,7 +101,7 @@ suppression of some implicit pairwise indices.
 
 For example, a raw effect
 \[
-(x[7] \;--\; x[7])
+(x[1] \;--\; x[1])
 \]
 may be compacted to
 \[
@@ -261,9 +255,9 @@ is a conservative weakening of the corresponding raw one.
 \paragraph{Concrete example.}
 Suppose a raw computation produces
 \[
-(n[7] -- n[7]),
+(n[1] -- n[1]),
 \]
-where index $7$ was introduced implicitly during checking rather than written by the
+where index $1$ was introduced implicitly during checking rather than written by the
 user. After compaction, the checker may report
 \[
 (n -- n).
@@ -862,13 +856,13 @@ diagnostics.
 Several directions remain open. The local loop-summary operator of
 Section~5 could be replaced by stronger invariant generation or abstract-interpretation
 techniques. The present theorem is also deliberately local to one parsed body with
-known leaf effects; extending it to recursive definitions, forward references, and
+known leaf effects. Extending it to recursive definitions, forward references, and
 top-level dictionary growth would give a more complete account of the implementation.
 More broadly, it would be useful to mechanize the metatheory and to compare the
 resulting framework more systematically with other typed stack languages, e.g.
 WebAssembly.
 More broadly, the results indicate that declarative specifications and symbolic stack
-effects provide a viable foundation for retargetable static analysis of stack-based
+effects provide a viable foundation for static analysis of stack-based
 languages.
 
 \bibliographystyle{ACM-Reference-Format}
