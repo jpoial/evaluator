@@ -37,7 +37,7 @@
 
 \begin{abstract}
 This paper studies static type checking for concatenative stack languages (e.g. Forth, PostScript,
-Cat, Factor, Joy, WebAssembly, JVM assembly, etc.). Description of the type system (type hierarchy,
+Cat, Factor, Joy, WebAssembly, JVM assembly, etc.). The description of the type system (type hierarchy,
 language vocabulary with type specifications, and control syntax) is loaded from external specification 
 files.
 The checker computes a symbolic effect for every linear fragment and control structure. 
@@ -45,7 +45,7 @@ Its core calculus consists of three operators: sequential composition, branch me
 a lower-bound operator, and a lightweight one-step loop summary.
 The source program is accepted exactly when this bottom-up computation encounters no clash (Theorem 1).
 
-The toolbox is implemented in Gforth (using an earlier prototype written in Java) and evaluated on a set 
+The toolbox is implemented in Gforth (based on an earlier prototype written in Java) and evaluated on a set 
 of tests and a multi-thousand-line application.
 \end{abstract}
 
@@ -133,7 +133,7 @@ languages, and compositional type systems for stack-oriented languages
 Concretely, the paper makes four contributions.
 \begin{enumerate}
 \item It presents a symbolic effect calculus for stack shuffles. Stack symbols carry subtype information and identity constraints, so the calculus can reason about both compositionally.
-\item It gives one account of branching and looping in the same effect domain. Branches merge by a lower-bound operator, and loops use a lightweight local stabilization test.
+\item It handles branching and looping in the same effect domain. Branches merge by a lower-bound operator, and loops use a lightweight local stabilization test.
 \item It proves an exact compositional theorem for parsed bodies. Once each undecomposed token occurrence has an assigned effect, the checker accepts exactly when the induced segment equations are clash-free, and on success returns their unique solution.
 \item It evaluates the calculus as a retargetable checker. Types, vocabulary, parser behavior, and control structures all come from external specifications, and user-defined words are inferred during analysis. The artifact is exercised on 29 checked-in tests, several custom profiles, and a 4{,}255-line application.
 \end{enumerate}
