@@ -5,26 +5,33 @@ set "script_dir=%~dp0"
 set "profile=forth2012"
 set "gforth_bin="
 
-where /Q gforth-fast.exe
-if not errorlevel 1 set "gforth_bin=gforth-fast.exe"
+if defined GFORTH_BIN set "gforth_bin=%GFORTH_BIN%"
+
+if not defined gforth_bin (
+   where /Q gforth-fast.exe
+   if not errorlevel 1 set "gforth_bin=gforth-fast.exe"
+)
 
 if not defined gforth_bin (
    where /Q gforth.exe
    if not errorlevel 1 set "gforth_bin=gforth.exe"
 )
 
-if not defined gforth_bin if exist "%script_dir%..\gforth\gforth-fast.exe" set "gforth_bin=%script_dir%..\gforth\gforth-fast.exe"
-if not defined gforth_bin if exist "%script_dir%..\gforth\gforth.exe" set "gforth_bin=%script_dir%..\gforth\gforth.exe"
-
 if not defined gforth_bin (
-   echo Error: gforth executable not found on PATH or in %script_dir%..\gforth 1>&2
+   echo Error: 64-bit Gforth 0.7.9 or newer was not found on PATH. 1>&2
    exit /b 1
 )
 
-if exist "%script_dir%..\gforth\lib\gforth" (
-   for /d /r "%script_dir%..\gforth\lib\gforth" %%D in (libcc-named) do (
-      if not defined libccnameddir set "libccnameddir=%%~fD\"
-   )
+"%gforth_bin%" --version 2^>^&1 | findstr /R /C:"gforth 0\.7\.9" /C:"gforth 0\.[89]" /C:"gforth [1-9]" >nul
+if errorlevel 1 (
+   echo Error: 64-bit Gforth 0.7.9 or newer is required. 1>&2
+   exit /b 1
+)
+
+"%gforth_bin%" -e "cell 8 <> throw bye" >nul 2>nul
+if errorlevel 1 (
+   echo Error: the selected Gforth is not a working 64-bit build. 1>&2
+   exit /b 1
 )
 
 if not defined XDG_CACHE_HOME set "XDG_CACHE_HOME=%TEMP%\gforth-cache"
@@ -63,7 +70,7 @@ shift
 goto collect_args
 
 :launch
-"%gforth_bin%" "%script_dir%gforth-evaluator.fs" ^
+"%gforth_bin%" -m 4M "%script_dir%gforth-evaluator.fs" ^
    --types "%types_file%" ^
    --specs "%specs_file%" ^
    --prog "%prog_file%" ^

@@ -20,14 +20,14 @@ The bundled `types`, `specs`, and `prog.fs` files form a small working example. 
 
 ## Requirements
 
-- Gforth available on your `PATH` as `gforth`
+- 64-bit Gforth 0.7.9 or newer (the launcher prefers `~/.local/bin/gforth-fast`)
 
 There is no build step. The evaluator is a single Gforth source file.
 
 ## Usage
 
 ```sh
-gforth gforth-evaluator.fs --types TYPES --specs SPECS [--prog PROGRAM] [word ...]
+gforth -m 4M gforth-evaluator.fs --types TYPES --specs SPECS [--prog PROGRAM] [word ...]
 ```
 
 You must provide `--types` and `--specs`, plus either:
@@ -38,8 +38,8 @@ You must provide `--types` and `--specs`, plus either:
 Examples:
 
 ```sh
-gforth gforth-evaluator.fs --types types --specs specs --prog prog.fs
-gforth gforth-evaluator.fs --types types --specs specs 1 2 + DUP
+gforth -m 4M gforth-evaluator.fs --types types --specs specs --prog prog.fs
+gforth -m 4M gforth-evaluator.fs --types types --specs specs 1 2 + DUP
 ```
 
 When you pass words directly on the shell command line, quote any tokens that are special to your shell.
@@ -49,7 +49,7 @@ When you pass words directly on the shell command line, quote any tokens that ar
 Running the bundled sample expression:
 
 ```sh
-gforth gforth-evaluator.fs --types types --specs specs 1 2 + DUP
+gforth -m 4M gforth-evaluator.fs --types types --specs specs 1 2 + DUP
 ```
 
 produces an annotation of the program's effect:

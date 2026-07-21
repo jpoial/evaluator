@@ -5,42 +5,44 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$script_dir"
 
-gforth_bin=
-for candidate in gforth-fast gforth \
-   "$script_dir/../gforth/gforth-fast" "$script_dir/../gforth/gforth"
-do
-   if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
-      gforth_bin=$candidate
-      break
-   fi
-done
+gforth_bin=${GFORTH_BIN:-}
+if [ -z "$gforth_bin" ]; then
+   for candidate in "$HOME/.local/bin/gforth-fast" "$HOME/.local/bin/gforth" gforth-fast gforth
+   do
+      if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
+         gforth_bin=$candidate
+         break
+      fi
+   done
+fi
 
 if [ -z "$gforth_bin" ]; then
-   echo "Error: gforth executable not found on PATH or in $script_dir/../gforth" >&2
+   echo "Error: 64-bit Gforth 0.7.9 or newer was not found." >&2
    exit 1
 fi
 
-repo_image=$script_dir/gforth.fi
-gforth_image=
+version=$("$gforth_bin" --version 2>&1 | sed -n '1p')
+case "$version" in
+   "gforth 0.7.9"*|"gforth 0.8"*|"gforth 0.9"*|"gforth "[1-9]*) ;;
+   *)
+      echo "Error: $gforth_bin is '$version'; 64-bit Gforth 0.7.9 or newer is required." >&2
+      exit 1
+      ;;
+esac
 
-libcc_dir=$script_dir/../gforth/lib/gforth/0.7.9_20260224/amd64/libcc-named
-if [ -d "$libcc_dir" ]; then
+if ! "$gforth_bin" -e 'cell 8 <> abort" This Gforth is not 64-bit" bye' >/dev/null 2>&1; then
+   echo "Error: $gforth_bin is not a working 64-bit Gforth." >&2
+   exit 1
+fi
+
+# Use the libraries belonging to the newest user-local installation, if present.
+libcc_dir=$(find "$HOME/.local/lib/gforth" -type d -path '*/amd64/libcc-named' 2>/dev/null | sort | tail -n 1 || true)
+if [ -n "$libcc_dir" ]; then
    export libccnameddir=$libcc_dir/
 fi
 
-export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/gforth-cache}
+export XDG_CACHE_HOME=${XDG_CACHE_HOME:-$HOME/.cache/gforth}
 mkdir -p "$XDG_CACHE_HOME"
-
-# Keep the repo-local image on machines where it matches the selected engine,
-# but otherwise pin the engine's own default image so ./gforth.fi does not
-# shadow it just because the launcher runs from this directory.
-if [ -f "$repo_image" ] && "$gforth_bin" --image-file="$repo_image" -e bye >/dev/null 2>&1; then
-   gforth_image=$repo_image
-else
-   if debug_output=$(cd "$XDG_CACHE_HOME" && "$gforth_bin" --debug -e bye 2>&1); then
-      gforth_image=$(printf '%s\n' "$debug_output" | sed -n 's/^Opened image file: //p' | sed -n '1p')
-   fi
-fi
 
 profile=forth2012
 case "${1-}" in
@@ -73,15 +75,8 @@ if [ "$#" -eq 1 ] && [ -f "$1" ]; then
    shift
 fi
 
-if [ -n "$gforth_image" ]; then
-   exec "$gforth_bin" --image-file="$gforth_image" "$script_dir/gforth-evaluator.fs" \
-      --types "$types_file" \
-      --specs "$specs_file" \
-      --prog "$prog_file" \
-      "$@"
-fi
-
-exec "$gforth_bin" "$script_dir/gforth-evaluator.fs" \
+# The evaluator is larger than the dictionary in some stock Gforth images.
+exec "$gforth_bin" -m 4M "$script_dir/gforth-evaluator.fs" \
    --types "$types_file" \
    --specs "$specs_file" \
    --prog "$prog_file" \

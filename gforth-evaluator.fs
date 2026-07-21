@@ -4134,14 +4134,14 @@ variable ev-ppt.prog
 
 : ev-cfg-new ( -- cfg )
   /ev-cfg ev-xalloc { cfg }
-  0 cfg ev-cfg.types + !
-  0 cfg ev-cfg.specs + !
-  0 cfg ev-cfg.prog + !
+  s" ex1types.txt" ev-scopy cfg ev-cfg.types + !
+  s" ex1specs.txt" ev-scopy cfg ev-cfg.specs + !
+  s" ex1prog.txt" ev-scopy cfg ev-cfg.prog + !
   8 ev-vec-new cfg ev-cfg.words + !
   cfg ;
 
 : ev-args-usage ( -- s )
-  s" Usage: gforth gforth-evaluator.fs --types TYPES --specs SPECS [--prog PROGRAM] [word ...]" ev-scopy ;
+  s" Usage: gforth gforth-evaluator.fs [--types TYPES] [--specs SPECS] [--prog PROGRAM] [word ...] (defaults: ex1types.txt, ex1specs.txt, ex1prog.txt)" ev-scopy ;
 
 : ev-args-words>sptr { vec -- s }
   ev-sempty { out }
@@ -4164,7 +4164,7 @@ variable ev-ppt.prog
     cfg ev-cfg.prog + @ ev-s@ ev-file>sptr
   then ;
 
-\ Parses the gforth command line into explicit types/specs/program inputs.
+\ Parses the gforth command line, overriding the ex1 default inputs when requested.
 : ev-parse-args ( -- cfg )
   ev-cfg-new { cfg }
   1 { i }

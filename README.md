@@ -48,8 +48,11 @@ The repository also ships convenience wrappers for the bundled demo profiles:
 | `gforth` | `./run-evaluator-gforth.sh [profile]` | `run-evaluator-gforth.bat [profile]` |
 | Java | `./run-evaluator-java.sh [profile]` | `run-evaluator-java.bat [profile]` |
 
-The `gforth` launchers run `gforth-evaluator.fs` directly. The Java launchers
-run `evaluator.Evaluator`. Both use the same bundled profile defaults.
+The `gforth` launchers require a 64-bit Gforth 0.7.9 or newer and run
+`gforth-evaluator.fs` directly. On Linux they prefer the current user-local
+installation in `~/.local/bin`; `GFORTH_BIN` can override the executable. The
+Java launchers run `evaluator.Evaluator`. Both use the same bundled profile
+defaults.
 
 Each launcher also accepts one existing bare filename as shorthand for
 `--prog that-file`.
