@@ -394,9 +394,10 @@ variable ev-current-source-lines
   s ev-s@ ev-log-write-raw ;
 
 : ev-log-cr ( -- )
-  13 pad c!
-  10 pad 1+ c!
-  pad 2 ev-log-write-raw ;
+  \ Match Java BufferedWriter.newLine() on the Unix platforms supported by
+  \ the native launcher.
+  10 pad c!
+  pad 1 ev-log-write-raw ;
 
 : ev-log-span-start { span -- }
   span ev-span.source + @ ev-log-write-s
@@ -463,14 +464,43 @@ variable ev-current-source-lines
 9 cells constant ev-sc.lastcol
 10 cells constant /ev-sc
 
+: ev-normalize-file-text { raw -- text }
+  \ BufferedReader.readLine(), used by the Java evaluator, removes CR/LF
+  \ terminators and reconstructs lines with LF, without a final newline.
+  raw ev-s@ { addr u }
+  cell u + ev-xalloc { text }
+  text cell+ { out }
+  0 { src }
+  0 { dst }
+  begin src u < while
+    addr src + c@ { ch }
+    ch 13 = if
+      10 out dst + c!
+      dst 1+ to dst
+      src 1+ to src
+      src u < if
+        addr src + c@ 10 = if src 1+ to src then
+      then
+    else
+      ch out dst + c!
+      dst 1+ to dst
+      src 1+ to src
+    then
+  repeat
+  dst 0> if
+    out dst 1- + c@ 10 = if dst 1- to dst then
+  then
+  dst text !
+  text ;
+
 : ev-file>sptr { c-addr u -- s }
   c-addr u r/o open-file throw { fd }
   fd file-size throw d>s { len }
-  cell len + ev-xalloc { s }
-  len s !
-  s cell+ len fd read-file throw drop
+  cell len + ev-xalloc { raw }
+  len raw !
+  raw cell+ len fd read-file throw drop
   fd close-file drop
-  s ;
+  raw ev-normalize-file-text ;
 
 : ev-split-lines { text$ -- lines }
   16 ev-vec-new { lines }
@@ -1581,7 +1611,7 @@ variable ev-eval-result
 : ev-spec>sptr { spec -- s }
   s" ( " ev-scopy
   spec ev-spec.left + @ ev-sym-vec>sptr ev-scat2
-  s" --  " ev-scopy ev-scat2
+  s"  --  " ev-scopy ev-scat2
   spec ev-spec.right + @ ev-sym-vec>sptr ev-scat2
   s" ) " ev-scopy ev-scat2 ;
 
@@ -3748,17 +3778,9 @@ variable ev-ese.seqvec
         inputs outputs ev-generic-placeholder-spec
       then
     else
-      tok s" (" ev-token-unquoted= spec 0<> and spec ev-spec-consumes-until? and if
-        spec ev-spec.parse-string + @ preview ev-sc-parse-until { body }
-        body 0= if
-          0
-        else
-          body ev-word-text@ ev-local-doc-counts { inputs outputs }
-          inputs outputs ev-generic-placeholder-spec
-        then
-      else
-        0
-      then
+      \ Only locals-style declarations document a provisional effect.  Ordinary
+      \ comments such as `( -- n )` must not replace inference of the body.
+      0
     then
   then ;
 
@@ -4023,7 +4045,10 @@ variable ev-pacw.ts
   ev-sempty { out }
   prog ev-prog.words + @ { words }
   words ev-vec-count@ 0 ?do
-    out i words ev-vec@ ev-scat2 ev-sspace ev-scat2 to out
+    i words ev-vec@ { word }
+    word ev-slen@ 0> if
+      out word ev-scat2 ev-sspace ev-scat2 to out
+    then
   loop
   out ;
 
@@ -4031,12 +4056,16 @@ variable ev-pacw.ts
   ." > " final ev-spec.left + @ ev-sym-vec>sptr ev-s.
   cr
   prog ev-prog.words + @ { words }
+  words ev-vec-count@ 0= if cr then
   words ev-vec-count@ 0 ?do
-    ."     "
-    i words ev-vec@ ev-s.
-    ." 	"
-    i specs ev-vec@ ev-spec>sptr ev-s.
-    cr
+    i words ev-vec@ { word }
+    word ev-slen@ 0> if
+      ."     "
+      word ev-s.
+      ."  	"
+      i specs ev-vec@ ev-spec>sptr ev-s.
+      cr
+    then
   loop
   ." < " final ev-spec.right + @ ev-sym-vec>sptr ev-s.
   cr ;
@@ -4161,7 +4190,8 @@ variable ev-ppt.prog
 : ev-args-words>sptr { vec -- s }
   ev-sempty { out }
   vec ev-vec-count@ 0 ?do
-    out i vec ev-vec@ ev-scat2 ev-sspace ev-scat2 to out
+    i 0> if out ev-sspace ev-scat2 to out then
+    out i vec ev-vec@ ev-scat2 to out
   loop
   out ;
 
@@ -4252,6 +4282,9 @@ variable ev-ppt.prog
   prog ev-prog.text + @ ev-s. cr
   ." Program: " prog ev-prog-words>sptr ev-s. cr
   prog final-specs final ev-annotate.
+  \ Java prints the newline-terminated annotation with println(), leaving one
+  \ additional blank line after it.
+  cr
   ev-log-close ;
 
 : ev-main ( -- code )
