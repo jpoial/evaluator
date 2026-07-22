@@ -135,7 +135,7 @@ Concretely, the paper makes four contributions.
 \item It presents a symbolic effect calculus for stack shuffles. Stack symbols carry subtype information and identity constraints, so the calculus can reason about both compositionally.
 \item It handles branching and looping in the same effect domain. Branches merge by a lower-bound operator, and loops use a lightweight local stabilization test.
 \item It proves an exact compositional theorem for parsed bodies. Once each undecomposed token occurrence has an assigned effect, the checker accepts exactly when the induced segment equations are clash-free, and on success returns their unique solution.
-\item It evaluates the calculus as a retargetable checker. Types, vocabulary, parser behavior, and control structures all come from external specifications, and user-defined words are inferred during analysis. The artifact is exercised on 29 checked-in tests, several custom profiles, and a 4{,}255-line application.
+\item It evaluates the calculus as a retargetable checker. Types, vocabulary, parser behavior, and control structures all come from external specifications, and user-defined words are inferred during analysis. The artifact is exercised on 29 checked-in tests, several custom profiles, and a 4{,}309-line application.
 \end{enumerate}
 
 The rest of the paper follows the structure of the checker itself. Sections~2--5 define
@@ -209,6 +209,14 @@ DUP ( x[1] -- x[1] x[1] )
 states that duplication preserves the abstract identity of the top stack element.
 
 Unnamed symbols are treated as implicitly fresh.
+
+The implementation evaluates a deep clone of each effect sequence. This is
+necessary because wildcard freshening and unification substitute symbols across
+the working list. Each occurrence is assigned a disjoint range; the next range
+is based on the maximum after applying the current shift, following the Java
+reference's allocation rule. Consequently, prefix checks and repeated analyses
+cannot mutate dictionary entries or the effect list later normalized for the
+final annotation.
 
 \section{Stack Effects}
 \label{sec:stack-effects}
@@ -536,6 +544,12 @@ Additional clauses refine the operational role of a word.
 
 Thus the checker is not only typing tokens; it is also modeling the source-level behavior needed to parse Forth-like syntax in a way that aligns with standard Forth parsing disciplines \cite{forth2012standard}.
 
+Parser consumption does not by itself assert an effect. An ordinary
+parenthesized comment is discarded even when its text resembles
+\texttt{( -- n )}; it cannot replace inference of the surrounding body. Only a
+recognized locals-style declaration contributes provisional input/output counts
+during definition checking.
+
 \subsection{Control structures}
 Control structures are specified with paired \texttt{syntax:} and \texttt{effect:} blocks. This separates two concerns cleanly: the \texttt{syntax:} clause says how a source fragment is segmented, and the \texttt{effect:} clause says how the resulting pieces are summarized. This design yields a declarative account of source-level control words, a topic that has also been studied in formal models of Forth control structures \cite{power2004formal}. For example, the sample repository contains:
 \begin{lstlisting}
@@ -773,10 +787,10 @@ than a full semantic model of control-word execution.
 \section{Evaluation}
 We evaluate four claims: the checker behaves correctly on the checked-in tests,
 produces useful diagnostics, retargets across declarative profiles, and scales beyond
-toy examples. The repository contains both the Gforth implementation discussed throughout
+The repository contains both the Gforth implementation discussed throughout
 the paper and an independent Java implementation that consumes the same
-\texttt{types}/\texttt{specs}/\texttt{prog} formats. All quantitative results below come
-from batch-running the checked-in tests through the Java implementation.
+\texttt{types}/\texttt{specs}/\texttt{prog} formats. The results below come from
+batch-running the checked-in tests through both implementations.
 
 \paragraph{Tests.}
 The repository contains 29 tests. Thirteen are expected to type-check successfully and
@@ -786,31 +800,33 @@ example used in this paper. Table~\ref{tab:corpus-results} summarizes the result
 
 \begin{table}[t]
 \centering
-\caption{Checked-in tests and Java results.}
+\caption{Checked-in tests and results for both implementations.}
 \label{tab:corpus-results}
-\begin{tabular}{lrr}
+\begin{tabular}{lrrr}
 \hline
-Category & Programs & Java outcome \\
+Category & Programs & Java outcome & Gforth outcome \\
 \hline
-Forth 2012 positives & 7 & 7 accepted \\
-Custom-profile positives & 5 & 5 accepted \\
-Article profile & 1 & 1 accepted \\
-Negative tests & 16 & 14 rejected \\
+Forth 2012 positives & 7 & 7 accepted & 7 accepted \\
+Custom-profile positives & 5 & 5 accepted & 5 accepted \\
+Article profile & 1 & 1 accepted & 1 accepted \\
+Negative tests & 16 & 14 rejected & 14 rejected \\
 \hline
-Total & 29 & 27 as expected \\
+Total & 29 & 27 as expected & 27 as expected \\
 \hline
 \end{tabular}
 \end{table}
 
 \paragraph{Results.}
-The Java implementation accepts all 13 positive tests and rejects 14 of the 16 negative
+Both implementations accept all 13 positive tests and reject 14 of the 16 negative
 tests. The two remaining misses are \texttt{linear\_clash.fs} and
 \texttt{top\_level\_clash.fs}, both linear numeric/address clashes involving
 \texttt{DP 1+}. These cases expose gaps in top-level linear reasoning rather than in the
 declarative control machinery.
-These results indicate that the checker behaves as expected on both positive and negative
-examples, while the remaining failures highlight limitations in top-level linear
-reasoning rather than in the core calculus.
+The two runtimes produce byte-for-byte identical standard output on all 13 positive
+tests; their diagnostic wording still differs on rejected inputs. These results indicate
+that the checker behaves as expected on both positive and negative examples, while the
+remaining failures highlight limitations in top-level linear reasoning rather than in the
+core calculus.
 
 \paragraph{Diagnostics.}
 The negative tests cover malformed control nesting (\texttt{missing\_fi},
@@ -829,8 +845,8 @@ The main scale indicators are straightforward. The bundled
 Forth 2012 environment consists of a 50-line type file and a 278-line specification file,
 for 328 lines of declarative typing and control information in total. Under that
 environment, the checker analyzes the single-file implementation
-\texttt{gforth-evaluator.fs}, which has 4{,}255 lines. The artifact also contains an
-independent Java implementation totaling 12{,}138 lines across its checked-in
+\texttt{gforth-evaluator.fs}, which has 4{,}309 lines. The artifact also contains an
+independent Java implementation totaling 7{,}555 lines across its checked-in
 \texttt{.java} sources. These figures are enough to show that the checker is being applied
 to a nontrivial specification environment and a multi-thousand-line program rather than
 only to toy fragments.

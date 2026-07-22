@@ -88,6 +88,13 @@ states that duplication preserves the abstract identity of the top stack element
 
 Unnamed symbols are treated as implicitly fresh. After evaluation, the checker renumbers indices into a compact normal form, so effects are compared modulo alpha-renaming.
 
+Before composition, the implementation deep-clones the sequence of effects and
+assigns each occurrence a disjoint wildcard range. The next range is computed
+from the maximum after the current shift, matching the reference implementation's
+allocation rule. Cloning is required because freshening and unification perform
+sequence-wide substitutions: a prefix check must not mutate dictionary entries,
+later checks, or the effect list eventually used for annotation.
+
 \section{Stack Effects}
 \subsection{Syntax}
 Let $\Sigma$ be the set of stack symbols. A stack effect is a pair of finite sequences
@@ -143,9 +150,9 @@ DUP ( x[1] -- x[1] x[1] )
 \end{lstlisting}
 The checker prints
 \begin{lstlisting}
-1   ( --  n[2] )
-2   ( --  n[2] )
-+   ( n[2] n[2] --  n[1] )
+1   ( --  n )
+2   ( --  n )
++   ( n n --  n[1] )
 DUP ( n[1] --  n[1] n[1] )
 \end{lstlisting}
 and concludes that the whole program has effect
@@ -234,6 +241,12 @@ Additional clauses refine the operational role of a word.
 
 Thus the checker is not only typing tokens; it also models the source-level behavior needed to parse Forth-like syntax in a way that aligns with standard Forth parsing disciplines \cite{forth2012standard}.
 
+Parser consumption and effect inference remain separate. In particular, text
+inside an ordinary parenthesized comment is discarded even if it resembles a
+stack effect, so \texttt{( -- n )} cannot replace inference of a definition
+body. Only a recognized locals-style declaration contributes the provisional
+input/output counts used while the body is being checked.
+
 \subsection{Control structures}
 Control structures are specified with paired \texttt{syntax:} and \texttt{effect:} blocks. This gives a compact declarative account of source-level control words, a topic that has also been studied in formal models of Forth control structures \cite{power2004formal}. For example, the sample repository contains:
 \begin{lstlisting}
@@ -298,6 +311,13 @@ These examples demonstrate several features of the checker at once.
 The checker is designed as a static evaluator rather than a full runtime. It reports source spans for malformed specifications, unknown types, missing parser delimiters, illegal control words, and type clashes in both top-level programs and definitions. When composition fails, the checker reports the surrounding context and the conflicting symbols at the composition boundary.
 
 The current implementation intentionally stays small. It relies on the declared specification set, rejects nested defining words inside definitions, enforces interpretation-state restrictions, and treats the external type hierarchy as the semantic authority. These restrictions are acceptable for a checker whose purpose is to validate stack discipline and infer word summaries, not to execute arbitrary Forth code.
+
+The Gforth and Java implementations also agree on successful presentation for
+the checked-in positive corpus. The native reader normalizes LF, CRLF, and CR
+terminators to the same logical lines as Java's buffered line reader, and the
+native logger uses LF on Unix. Empty internal placeholder tokens are omitted
+from annotations, which are printed from the effect clone normalized together
+with the final result.
 
 \section{Conclusion}
 The type checker described in this paper shows that a useful static analysis for a Forth(-like) language can be built from a very small mathematical core. A finite type lattice supplies precision information; indexed stack symbols express correlations; sequential composition forms a partial semigroup of effects; branch summaries are greatest lower bounds of effects; and loop summaries are accepted when repeated execution stabilizes to an idempotent effect. Because the checker loads both the type hierarchy and the word specifications from external files, the same implementation can be retargeted to other vocabularies and dialects with little or no change to the core.

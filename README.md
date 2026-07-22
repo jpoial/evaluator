@@ -13,6 +13,14 @@ the same input files:
 Both read the same `--types`, `--specs`, and `--prog` text formats, and both
 can be driven through the bundled launcher scripts.
 
+The native port follows the Java evaluator's observable success-path
+semantics closely. In particular, it normalizes CRLF and CR input to the same
+logical LF-separated text as Java's line reader, allocates disjoint wildcard
+ranges using the same index rules, evaluates cloned effect lists so that one
+analysis cannot mutate a later one, and emits the same successful annotation
+and Unix log-file layout. The checked-in positive corpus currently produces
+identical standard output in both implementations.
+
 ## Quick Start
 
 ### Java directly
@@ -109,6 +117,12 @@ Program-file comment handling is profile-driven through these parser-word
 entries. For example, if a specs file declares `"\\" parse until eol ( -- )`,
 both the Java and `gforth` implementations treat backslash comments the same
 way for that profile.
+
+Consumed comment text is not treated as an asserted stack effect. In
+particular, an ordinary source comment such as `( -- n )` does not replace
+inference of the surrounding definition. The provisional effect used while
+checking a definition is derived only from a recognized locals-style
+declaration such as `{ ... }`.
 
 The evaluator follows an explicit outer-interpreter model with interpretation
 state and compilation state:
@@ -226,6 +240,13 @@ and `; control end ( -- )`.
 Word lookup is case-insensitive throughout the evaluator. Source text is left
 as written, but names are treated internally as if all letters were uppercase.
 
+Each sequence evaluation works on cloned word effects. Composition renumbers
+wildcards and substitutes unified symbols throughout that working list, while
+the dictionary entries and stored program effects remain unchanged. Freshening
+uses non-overlapping index ranges for independently evaluated fragments; the
+normalized annotation is produced from the same evaluated clone as the final
+program effect.
+
 ### Conditionals
 
 Inside colon definitions, the evaluator supports:
@@ -281,7 +302,9 @@ the rest of the file and reports later errors as separate diagnostics.
 
 Each run also writes a log file beside the program input as `PROGRAM.log`, or
 to `command-line.log` for command-line programs. The log records created
-definitions in specs format and any reported errors.
+definitions in specs format and any reported errors. On Unix, the native and
+Java implementations write LF line endings. Program files using LF, CRLF, or
+CR line endings are normalized before tokenization and source-line reporting.
 
 ## Type Profiles
 

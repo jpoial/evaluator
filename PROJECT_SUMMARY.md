@@ -66,6 +66,12 @@ job of:
 - preserving wildcard identities across stack manipulation,
 - and detecting mismatches.
 
+The native implementation also mirrors the Java reference in several details
+that matter to reproducibility: input newline normalization, mutable-effect
+cloning, wildcard-range allocation, the treatment of comments versus locals
+declarations, and successful annotation/log formatting. The current positive
+test corpus has identical standard output in both runtimes.
+
 They do **not** yet implement the full vision described in the papers:
 
 - no full multiple-stack-effects engine for branches or other alternatives,
@@ -475,6 +481,11 @@ Program-file comments are now profile-driven parser words from the shared spec
 file, so Java and `gforth` follow the same per-profile behavior for inputs
 such as backslash line comments.
 
+Parser comments affect tokenization but do not assert a definition's inferred
+effect. A comment such as `( -- n )` is ignored semantically; only a recognized
+locals declaration such as `{ ... }` contributes the provisional input/output
+counts used during definition checking.
+
 So the class is still a compact front end rather than a full Forth parser, but it is now a real supported entry point for both command-line and file-based checking.
 
 ## `SpecList`
@@ -504,6 +515,13 @@ top-level word sequence, and an annotated stack-effect listing. When parsing
 collects recoverable errors, it prints the rendered diagnostics, writes a
 `PROGRAM.log` or `command-line.log` file containing created definitions and
 errors, and exits with failure.
+
+The Gforth entry point now follows the same success-path presentation: it
+annotates the cloned list normalized together with the final effect, omits
+internal empty placeholder tokens, uses the same spacing and blank-line layout,
+and writes LF-delimited logs on Unix. File input is normalized like Java's
+`BufferedReader.readLine()`, so LF, CRLF, and CR files have the same logical
+source lines and no synthetic final empty line.
 
 This is useful for experimentation, but it is still a compact CLI rather than
 a polished toolchain integration point.
@@ -541,6 +559,14 @@ Before evaluating a whole program, `SpecList.evaluate(...)` calls `incrementWild
 - existing positive indices are shifted upward,
 - zero indices are turned into fresh unique indices,
 - and collisions between different words are avoided.
+
+The allocator bases each next range on the already shifted maximum and advances
+it once more by the current offset. Although that extra displacement can look
+redundant, it is the Java reference behavior and keeps independently evaluated
+fragments in disjoint wildcard ranges. Evaluation is performed on deep clones
+because renumbering and sequence-wide substitution mutate the working effects.
+Prefix checks, definition inference, and final top-level annotation therefore
+cannot change the dictionary or one another's stored inputs.
 
 This gives the analyzer a clean global namespace of symbolic items for the current run.
 

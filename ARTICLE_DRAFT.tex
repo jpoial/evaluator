@@ -207,6 +207,16 @@ directly in the checker. When a composition fails, the checker reports
 line-and-column diagnostics together with the offending line and symbolic stack
 annotations.
 
+The native implementation follows the earlier Java reference in details that
+are semantically significant. Each sequence is evaluated on cloned effects,
+because wildcard renaming and unification mutate the working list; independently
+evaluated fragments receive disjoint wildcard ranges; and the final annotation
+uses the same normalized clone as the final effect. File input is normalized
+from LF, CRLF, or CR to logical LF-separated lines. Parser comments only consume
+source text: an ordinary comment such as \texttt{( -- n )} does not override
+inference, whereas a recognized locals declaration may provide a provisional
+effect shape.
+
 The following demo profile illustrates the checker. Using
 types such as \texttt{X}, \texttt{n}, \texttt{char}, \texttt{flag},
 \texttt{c-addr}, and \texttt{a-addr}, together with specifications for

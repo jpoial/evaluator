@@ -2,6 +2,11 @@
 
 This repository contains `gforth-evaluator.fs`, a single-file Gforth port of a stack-effect evaluator for a Forth-like language. Instead of executing a program for its runtime behavior, it loads a type lattice and a declarative specification set, analyzes the source, and prints the inferred stack effect of each token and of the whole program.
 
+The port uses the Java evaluator as its behavioral reference. It matches the
+reference's wildcard freshening and clone-before-evaluation rules, normalizes
+file newlines in the same way, and produces identical successful output for the
+checked-in positive test corpus.
+
 The bundled `types`, `specs`, and `prog.fs` files form a small working example. `forth-2012.pdf` is included as reference material for the language family the evaluator is modeling.
 
 ## What the evaluator does
@@ -62,9 +67,9 @@ Program text:
 1 2 + DUP
 Program: 1 2 + DUP
 >
-    1   ( --  n[2] )
-    2   ( --  n[2] )
-    +   ( n[2] n[2] --  n[1] )
+    1   ( --  n )
+    2   ( --  n )
+    +   ( n n --  n[1] )
     DUP ( n[1] --  n[1] n[1] )
 < n[1] n[1]
 ```
@@ -137,6 +142,17 @@ Control structures can also be described declaratively with `syntax:` and `effec
 
 Stack effects use the usual Forth-style `( in -- out )` notation with typed symbols. Indexed symbols such as `x[1]` and `x[2]` refer to related abstract values across the effect, while the subtype lattice from `types` is used to decide whether compositions are compatible.
 
+Every analysis clones its input effects before wildcard renumbering and
+substitution. Fresh ranges are kept disjoint between independently evaluated
+fragments, while final normalization gives the compact indices shown in the
+annotation. This prevents prefix checks or earlier definitions from changing
+later results.
+
+`parse until` words consume source text but do not turn arbitrary comment text
+into an inferred stack effect. For example, `( -- n )` remains an ordinary
+comment. Only a recognized locals-style declaration such as `{ ... }` supplies
+the provisional shape used while checking a definition.
+
 ## Output and logs
 
 On success the evaluator prints:
@@ -152,6 +168,9 @@ It also writes a log file:
 - `command-line.log` when the source comes from trailing command-line words
 
 The log contains inferred user-defined word definitions and diagnostics.
+On Unix it uses LF line endings, matching the Java implementation. Input files
+with LF, CRLF, or CR terminators are normalized to logical LF-separated lines
+before scanning, without adding a final empty source line.
 
 ## Current scope and limitations
 
