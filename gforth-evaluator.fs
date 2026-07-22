@@ -1410,7 +1410,12 @@ variable ev-current-source-lines
 : ev-spec-increment-wild { amount spec -- }
   amount spec ev-spec.left + @ ev-spec-increment-wild-vec
   amount spec ev-spec.right + @ ev-spec-increment-wild-vec
-  spec ev-spec-max-pos { max }
+  \ Match Spec.incrementWild(): maxPos() observes the already shifted explicit
+  \ indices, then Java adds amount once more before allocating former zeroes.
+  \ Although that extra offset can look redundant, it keeps independently
+  \ evaluated effects in disjoint wildcard ranges and is part of the reference
+  \ implementation's index semantics.
+  spec ev-spec-max-pos amount + { max }
   max spec ev-spec.max-pos + !
   spec ev-spec.left + @ { left }
   spec ev-spec.right + @ { right }
@@ -3289,8 +3294,19 @@ variable ev-ipi.sc
   then ;
 
 \ Evaluates a linear sequence of runtime effects and raises a contextual clash if composition fails.
+: ev-spec-list-clone { seq -- copy }
+  seq ev-vec-count@ 4 ev-max ev-vec-new { copy }
+  seq ev-vec-count@ 0 ?do
+    i seq ev-vec@ ev-spec-clone copy ev-vec-push
+  loop
+  copy ;
+
 : ev-seq-evaluate { seq context ts -- spec }
-  seq ts ev-spec-list-evaluate { result }
+  \ Java's SpecList evaluation always works on clones.  Evaluation renumbers
+  \ and substitutes symbols in its input list, so using the stored program
+  \ effects directly makes later checks (and the annotation) depend on how
+  \ many prefix checks have already run.
+  seq ev-spec-list-clone ts ev-spec-list-evaluate { result }
   result 0<> if
     result
   else
@@ -4011,11 +4027,10 @@ variable ev-pacw.ts
   loop
   out ;
 
-: ev-annotate. { prog final -- }
+: ev-annotate. { prog specs final -- }
   ." > " final ev-spec.left + @ ev-sym-vec>sptr ev-s.
   cr
   prog ev-prog.words + @ { words }
-  prog ev-prog.specs + @ { specs }
   words ev-vec-count@ 0 ?do
     ."     "
     i words ev-vec@ ev-s.
@@ -4226,11 +4241,17 @@ variable ev-ppt.prog
   ev-diagnostic-count @ 0> if
     ev-reported-error# throw
   then
-  prog ts ev-prog-current-effect { final }
+  \ Keep the final evaluated list: Java annotates the cloned SpecList that was
+  \ normalized together with the result, not the immutable stored word specs.
+  prog ev-prog.specs + @ ev-spec-list-clone { final-specs }
+  final-specs ts ev-spec-list-evaluate { final }
+  final 0= if
+    s" Type clash in top-level program" ev-scopy 0 ev-current-program-span ev-error-msg
+  then
   ." Program text:" cr
   prog ev-prog.text + @ ev-s. cr
   ." Program: " prog ev-prog-words>sptr ev-s. cr
-  prog final ev-annotate.
+  prog final-specs final ev-annotate.
   ev-log-close ;
 
 : ev-main ( -- code )
