@@ -4187,6 +4187,14 @@ variable ev-ppt.prog
 : ev-args-usage ( -- s )
   s" Usage: gforth gforth-evaluator.fs [--types TYPES] [--specs SPECS] [--prog PROGRAM] [word ...] (defaults: ex1types.txt, ex1specs.txt, ex1prog.txt)" ev-scopy ;
 
+: ev-file-exists? ( s -- flag )
+  ev-s@ file-status nip 0= ;
+
+: ev-default-files-exist? { cfg -- flag }
+  cfg ev-cfg.types + @ ev-file-exists?
+  cfg ev-cfg.specs + @ ev-file-exists? and
+  cfg ev-cfg.prog + @ ev-file-exists? and ;
+
 : ev-args-words>sptr { vec -- s }
   ev-sempty { out }
   vec ev-vec-count@ 0 ?do
@@ -4212,6 +4220,9 @@ variable ev-ppt.prog
 \ Parses the gforth command line, overriding the ex1 default inputs when requested.
 : ev-parse-args ( -- cfg )
   ev-cfg-new { cfg }
+  argc @ 1 = cfg ev-default-files-exist? 0= and if
+    ev-args-usage 0 0 ev-error-msg
+  then
   1 { i }
   begin
     i argc @ <
