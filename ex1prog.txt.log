@@ -1,5 +1,6 @@
-PEEK2 ( a-addr[1]  --  X[2] X ) 
-MAYSWAP ( X[1] X[1] flag  --  X[1] X[1] ) 
-NLOOP ( n[1]  --  n[1] ) 
-ULOOP ( n[1]  --  n[1] ) 
-KEEPIF ( X[1] flag  --  X[1] X[1] ) 
+Error: No specification found for -types at <command line>:1:1.
+Error: No specification found for forth2012types.txt at <command line>:1:8.
+Error: No specification found for -specs at <command line>:1:27.
+Error: No specification found for forth2012specs.txt at <command line>:1:34.
+Error: No specification found for -prog at <command line>:1:53.
+Error: No specification found for gforth-evaluator.fs at <command line>:1:59.
