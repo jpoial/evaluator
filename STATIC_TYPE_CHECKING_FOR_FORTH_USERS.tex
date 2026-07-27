@@ -1,0 +1,448 @@
+\documentclass[a4paper,10pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{url}
+\Urlmuskip=0mu plus 1mu
+
+% A compact article layout using only packages present in a minimal TeX setup.
+\setlength{\textwidth}{6.83in}
+\setlength{\oddsidemargin}{-0.28in}
+\setlength{\evensidemargin}{-0.28in}
+\setlength{\textheight}{9.9in}
+\setlength{\topmargin}{-0.35in}
+\setlength{\headheight}{0pt}
+\setlength{\headsep}{0pt}
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0.15em}
+\setlength{\intextsep}{0.6em}
+\setlength{\textfloatsep}{0.8em}
+\makeatletter
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+  {-1.4ex plus -.3ex minus -.2ex}{0.6ex plus .2ex}{\large\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {-1.0ex plus -.2ex minus -.1ex}{0.35ex plus .1ex}{\normalsize\bfseries}}
+\makeatother
+\emergencystretch=2em
+\widowpenalty=10000
+\clubpenalty=10000
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  breaklines=true,
+  aboveskip=0.5em,
+  belowskip=0.5em
+}
+
+\title{Making Stack Comments Checkable:\\Static Type Checking for Forth}
+\author{Jaanus Pöial\\Tallinn University of Technology}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+Forth programmers already document words with stack-effect comments.  This
+paper shows how nearly the same notation can drive a static checker.  An effect
+records the required and produced stack suffix, while indexed type names retain
+the identity of values moved by words such as \texttt{DUP}, \texttt{SWAP}, and
+\texttt{OVER}.  Three operations form the useful core: join adjacent effects
+for straight-line code, find a common contract for alternatives, and compare
+one with two executions to approximate repetition.  A native Gforth prototype
+loads its type hierarchy, word effects, parser behavior, and control structures
+from text files.  It infers effects for colon definitions and reports stack or
+type clashes without running the program.  The presentation emphasizes what a
+Forth user can write, see, and rely on; formal proofs and deeper algebra are
+left to the cited technical work.
+\end{abstract}
+
+\noindent\textbf{Keywords:} Forth; stack effects; static checking; symbolic
+execution; concatenative languages.
+
+\section{From comments to contracts}
+
+A stack comment is one of Forth's best documentation tools:
+\begin{lstlisting}
+: SQUARED  DUP * ;        ( n -- n )
+\end{lstlisting}
+The comment states a calling convention, but a normal Forth system neither
+checks it nor derives it.  A later edit can leave the comment wrong.  The
+problem becomes harder around stack shuffles, branches, and loops, where stack
+height alone is not enough.
+
+The checker described here treats an effect as a small symbolic execution of a
+word.  As in ordinary Forth notation, the top of stack is on the right:
+\begin{lstlisting}
++       ( n n -- n )
+@       ( a-addr -- x )
+C@      ( c-addr -- char )
+\end{lstlisting}
+The effect constrains only the part of the data stack touched by the word.  An
+unmentioned prefix passes through unchanged.  Consequently, the checker need
+not know the complete stack at every point: it can infer which suffix must have
+been present before a phrase.
+
+This is a source-level checker, not a modified Forth virtual machine.  It reads
+source text and computes effects instead of executing the words.  Its job is to
+answer practical questions:
+\begin{itemize}
+  \item Does every consumer receive enough stack items of compatible types?
+  \item Which input value reaches each output after stack shuffling?
+  \item Do alternatives admit one usable stack contract?
+  \item Does a repeated phrase appear stack-stable under the implemented test?
+\end{itemize}
+
+The approach does not make Forth dynamically typed at run time, nor does it
+attach tags to cells.  Types exist only in the checker and may be as broad or
+as detailed as the selected application profile.  The calculus follows earlier
+work on algebraic and multiple stack effects, typed wildcards, must-analysis,
+and executable checking tools~\cite{poial1991,poial1992,poial2002,poial2006,poial2008}.
+
+\section{Effects that remember values}
+
+\subsection{Types supplied by the application}
+
+The checker loads a finite subtype relation.  A typical Forth-oriented fragment
+is:
+\begin{lstlisting}
+type X cell x
+type n number N
+type char c
+type flag boolean f
+type addr a
+type c-addr ca
+type a-addr aa
+
+rel n < X
+rel addr < X
+rel char < n
+rel c-addr < addr
+rel a-addr < c-addr
+\end{lstlisting}
+Here \texttt{X}, \texttt{cell}, and \texttt{x} are aliases.  A
+\texttt{a-addr} is acceptable where a \texttt{c-addr}, \texttt{addr}, or
+\texttt{X} is required, but the converse is not necessarily safe.  The
+checker keeps the more specific type when two compatible boundaries meet.  It
+reports a clash when neither type is a subtype of the other.
+
+The hierarchy is deliberately profile-dependent.  For example, one profile
+may place \texttt{flag} below \texttt{n}, while a stricter Forth-2012
+profile~\cite{forth2012} keeps flags separate from numeric types.  This makes assumptions visible
+instead of embedding one machine model in the analyzer.
+
+\subsection{Indexed symbols}
+
+Types alone lose important information.  The two occurrences produced by
+\texttt{DUP} are not unrelated values, and \texttt{SWAP} does not manufacture
+new values.  Indexed symbols state these correlations:
+\begin{lstlisting}
+DUP   ( X[1] -- X[1] X[1] )
+SWAP  ( X[2] X[1] -- X[1] X[2] )
+OVER  ( X[2] X[1] -- X[2] X[1] X[2] )
+\end{lstlisting}
+An index is local to an effect declaration.  Repeated \texttt{[1]} means the
+same symbolic input has flowed to those positions.  Two plain, unindexed
+\texttt{X} occurrences are fresh values; they are not silently assumed equal.
+Before checking a phrase, the implementation renames local indices so effects
+from different words cannot collide.
+
+Indices are useful even on an untyped cell machine.  They let a use later in a
+phrase refine an earlier value and carry that information through intervening
+stack words.  They express data flow without introducing variable names into
+the Forth source.
+
+\section{The effect calculus in working terms}
+
+Only three combining operations are needed for the supported control forms.
+Table~\ref{tab:operations} gives their programmer-facing interpretation.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}>{\bfseries}p{0.18\linewidth}p{0.26\linewidth}p{0.48\linewidth}@{}}
+\hline
+Source form & Operation & Question answered \\
+\hline
+\texttt{P Q} & composition & Can the output of \texttt{P} supply the input of \texttt{Q}? \\
+branches & common contract & What stack effect is valid for either alternative? \\
+repetition & one-versus-two test & Is the repeated phrase stable in this local approximation? \\
+\hline
+\end{tabular}
+\caption{The three core effect operations.}
+\label{tab:operations}
+\end{table}
+
+\subsection{Sequence: match the touching boundaries}
+
+For adjacent phrases, the checker matches the top output of the first effect
+against the top input of the second, then works inward.  Compatible symbols
+are replaced everywhere by one symbol with the more precise type.  Any
+unmatched requirement becomes part of the inferred input; any unmatched result
+becomes part of the output.
+
+For example, integer literals, \texttt{+}, and \texttt{DUP} may be declared as:
+\begin{lstlisting}
+literal integer ( -- n )
++               ( n n -- n )
+DUP             ( X[1] -- X[1] X[1] )
+\end{lstlisting}
+The phrase
+\begin{lstlisting}
+1 2 + DUP
+\end{lstlisting}
+first produces two numbers, consumes them with \texttt{+}, and then matches the
+resulting \texttt{n} against \texttt{DUP}'s general \texttt{X}.  The inferred
+result is:
+\begin{lstlisting}
+( -- n[1] n[1] )
+\end{lstlisting}
+Both output cells come from the one numeric result.  Substitution across the
+whole working phrase is the key: refinement discovered at one boundary remains
+visible on every correlated occurrence.
+
+A mismatch is equally direct.  Given \texttt{C@ ( c-addr -- char )} and
+\texttt{! ( X a-addr -- )}, the phrase \texttt{C@ !} attempts to use the
+produced \texttt{char} as the address consumed by \texttt{!}.  If those types
+are incomparable in the selected profile, checking stops at that boundary
+rather than waiting for a bad memory access.
+
+\subsection{Alternatives: find one honest contract}
+
+An \texttt{IF} has more than one path, but callers need one effect for the
+whole definition.  The checker therefore combines branch effects only when it
+can construct a common contract.  It aligns their visible inputs and outputs,
+accounts for a preserved stack prefix when depths differ, and unifies
+corresponding types and identities.  The condition's \texttt{flag} consumption
+is then composed with that contract.
+
+The easy case is two branches with the same behavior:
+\begin{lstlisting}
+: KEEPIF  IF DUP ELSE DUP THEN ;
+\end{lstlisting}
+The inferred effect is:
+\begin{lstlisting}
+KEEPIF  ( X[1] flag -- X[1] X[1] )
+\end{lstlisting}
+By contrast, one branch leaving an extra item while the other removes one will
+normally have no common usable boundary and is rejected.  Differences in type
+can still be accepted when one type is a declared subtype of the other; the
+result records the stronger requirement that is valid for both paths.
+
+This operation is sometimes called a greatest lower bound in the effect
+literature.  For day-to-day use, ``common branch contract'' is the important
+idea.  It is not a union of everything either branch might do.  It keeps only a
+single symbolic interface that the checker can justify for both.
+
+\subsection{Loops: compare one pass with two}
+
+A loop body can execute an unknown number of times.  The prototype uses a
+finite, deliberately modest test: compute the effect of one pass, compute the
+effect of two consecutive passes, and ask the branch-contract operation for a
+common stable summary.  This catches common mistakes such as a body that grows
+or shrinks the data stack on each iteration.
+
+For example, including the terminating test in the repeated phrase makes this
+loop stack-stable:
+\begin{lstlisting}
+: ULOOP  BEGIN DUP 0= UNTIL ;
+\end{lstlisting}
+With \texttt{0= ( n -- flag )} and \texttt{UNTIL ( flag -- )}, its inferred
+effect is:
+\begin{lstlisting}
+ULOOP  ( n[1] -- n[1] )
+\end{lstlisting}
+The number survives each pass; the duplicated copy is consumed by the test.
+The specification language can similarly describe \texttt{BEGIN--WHILE--REPEAT}
+and \texttt{DO--LOOP} skeletons.
+
+The limitation matters: agreement between one and two passes is a local
+approximation, not a general fixed-point computation and not a proof for every
+iteration count.  Acceptance says that the phrase passed this stack-effect
+test under its primitive declarations.  It does not establish termination or
+all semantic loop invariants.
+
+\section{Turning Forth source into effects}
+
+The algebra alone cannot read real source.  Forth words may consume the next
+name, scan to a delimiter, change compilation state, or introduce dictionary
+entries.  The prototype therefore separates three inputs:
+\begin{enumerate}
+  \item a \emph{type file} containing names, aliases, and subtype edges;
+  \item a \emph{specification file} containing word effects and parsing roles;
+  \item the Forth \emph{program file} to check.
+\end{enumerate}
+Representative specifications are:
+\begin{lstlisting}
+"("      parse until ")"       ( -- )
+:        parse word define colon ( -- )
+;        control end             ( -- )
+literal integer                  ( -- n )
+IF       control if              ( flag -- )
+@                                  ( a-addr -- X )
+\end{lstlisting}
+Control syntax can also be declared as a pattern with captured source
+segments, followed by an effect recipe using sequencing, alternatives, and
+repetition.  This keeps parser conventions out of the calculus and permits
+custom Forth-like profiles.
+
+A colon definition is checked when it closes, and its inferred effect is added
+to the analysis dictionary for later source.  Ordinary comments are consumed
+but are not trusted as declarations.  Thus this source cannot force an
+incorrect result merely by claiming one:
+\begin{lstlisting}
+: BAD  C@ ! ;   ( -- n )
+\end{lstlisting}
+Recognized locals syntax may provide a provisional shape, but a normal stack
+comment remains documentation.
+
+The bundled launchers run either the native Gforth checker or the Java
+reference.  For example:
+\begin{lstlisting}
+./run-evaluator-gforth.sh real
+
+./run-evaluator-gforth.sh \
+  --types forth2012types.txt \
+  --specs forth2012specs.txt \
+  --prog forth2012prog.txt
+\end{lstlisting}
+On Windows, \texttt{run-evaluator-gforth.bat} provides the corresponding
+entry point.  The native implementation itself is the single file
+\texttt{gforth-evaluator.fs}.
+
+\section{A complete small example}
+
+The bundled \texttt{real} profile analyzes these definitions and a top-level
+phrase:
+\begin{lstlisting}
+: PEEK2   DUP @ SWAP @ ;
+: MAYSWAP IF SWAP THEN ;
+: NLOOP   BEGIN DUP 0= WHILE REPEAT ;
+: ULOOP   BEGIN DUP 0= UNTIL ;
+: KEEPIF  IF DUP ELSE DUP THEN ;
+
+DP DP C@ 0= KEEPIF
+\end{lstlisting}
+The generated log includes:
+\begin{lstlisting}
+PEEK2   ( a-addr[1] -- X[2] X )
+MAYSWAP ( X[1] X[1] flag -- X[1] X[1] )
+NLOOP   ( n[1] -- n[1] )
+ULOOP   ( n[1] -- n[1] )
+KEEPIF  ( X[1] flag -- X[1] X[1] )
+\end{lstlisting}
+Several details are worth reading as a Forth programmer.  \texttt{PEEK2}
+requires an address because its input eventually reaches \texttt{@}; the type
+requirement travels backward through \texttt{DUP} and \texttt{SWAP}.
+\texttt{MAYSWAP} can promise one output order only under the stronger symbolic
+condition shown by its repeated index.  Both loop examples preserve their
+numeric input according to the one-versus-two rule.  \texttt{KEEPIF} consumes a
+flag and duplicates the remaining cell regardless of the selected branch.
+
+For the final phrase, the checker reports the per-word refined effects and
+ends with:
+\begin{lstlisting}
+DP      ( -- a-addr[1] )
+DP      ( -- a-addr )
+C@      ( a-addr -- char )
+0=      ( char -- flag )
+KEEPIF  ( a-addr[1] flag -- a-addr[1] a-addr[1] )
+< a-addr[1] a-addr[1]
+\end{lstlisting}
+The second \texttt{DP} result is specific enough for \texttt{C@}; \texttt{0=}
+produces the flag consumed by \texttt{KEEPIF}; and the first address is the
+value duplicated on exit.  This is more information than a stack-depth pass
+would retain, yet the result still looks like familiar Forth notation.
+
+\section{What acceptance does---and does not---mean}
+
+The checker is useful as an early consistency check, especially for legacy
+code whose stack comments are incomplete.  It can expose underflow-like shape
+errors, incompatible address and scalar uses, branch interfaces that disagree,
+and many loop bodies with changing stack shape.  External profiles also make
+it possible to tighten a project gradually instead of imposing one universal
+Forth type system.
+
+Its guarantees are bounded by the model:
+\begin{itemize}
+  \item Primitive effects are trusted.  A wrong specification can make a wrong
+        program appear valid.
+  \item The current type match handles equal or directly comparable types; it
+        does not search the hierarchy for an arbitrary third common subtype.
+  \item Internal normalization can discard some automatically introduced
+        identity correlations, reducing precision in later checks.
+  \item Branch merging produces one conservative syntactic contract, not a set
+        of all possible branch effects.
+  \item The loop rule is the one-versus-two approximation described above.
+  \item Return-stack tricks, unrestricted \texttt{EXECUTE}, non-local
+        \texttt{THROW}, self-modifying definitions, and other metaprogramming
+        may need special models or remain outside the supported subset.
+\end{itemize}
+The tool should therefore complement tests, reviews, and target-system checks,
+not replace them.  It is best viewed as executable stack-effect documentation
+with useful static diagnostics.
+
+\section{Conclusion}
+
+Forth already has the right surface notation for a lightweight static
+analysis.  Making stack comments executable requires two additions: a
+project-specific type relation and indices that preserve symbolic value flow.
+From there, three operations cover much useful source: compose effects for a
+word sequence, form a common contract for alternatives, and compare one with
+two passes for repetition.
+
+The result remains recognizably Forth.  Word effects live in text files,
+custom parser and control behavior can be declared, definitions receive
+inferred stack comments, and diagnostics point to incompatible boundaries.
+The method does not solve arbitrary Forth metaprogramming or general loop
+verification, but it offers a practical path from informal comments to
+machine-checked stack discipline.
+
+\begin{thebibliography}{9}
+\small
+\raggedright
+
+\bibitem{forth2012}
+Forth 200x Standardisation Committee.
+\newblock \emph{Forth 2012 Standard}, draft proposed standard, 2014.
+\newblock \url{https://forth-standard.org/standard/intro}.
+
+\bibitem{poial1991}
+J. Pöial.
+\newblock Algebraic specifications of stack effects for Forth programs.
+\newblock In \emph{1990 FORML Conference Proceedings, EuroFORML'90},
+pp. 282--290, 1991.
+
+\bibitem{poial1992}
+J. Pöial.
+\newblock Multiple stack-effects of Forth programs.
+\newblock In \emph{1991 FORML Conference Proceedings, euroFORML'91},
+pp. 400--406, 1992.
+
+\bibitem{poial2002}
+J. Pöial.
+\newblock Stack effect calculus with typed wildcards, polymorphism and
+inheritance.
+\newblock Abstract and presentation, 18th EuroForth Conference, 2002.
+
+\bibitem{poial2006}
+J. Pöial.
+\newblock Typing tools for typeless stack languages.
+\newblock In \emph{Proceedings of the 22nd EuroForth Conference},
+pp. 40--46, 2006.
+
+\bibitem{poial2008}
+J. Pöial.
+\newblock Java framework for static analysis of Forth programs.
+\newblock In \emph{Proceedings of the 24th EuroForth Conference},
+pp. 20--23, 2008.
+
+\end{thebibliography}
+
+\end{document}
