@@ -1,0 +1,463 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[a4paper,margin=19mm]{geometry}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{url}
+\usepackage{microtype}
+
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0pt}
+\setlength{\textfloatsep}{6pt plus 2pt minus 2pt}
+\setlength{\intextsep}{6pt plus 2pt minus 2pt}
+\setlength{\abovedisplayskip}{5pt plus 2pt minus 2pt}
+\setlength{\belowdisplayskip}{5pt plus 2pt minus 2pt}
+\emergencystretch=2em
+\widowpenalty=10000
+\clubpenalty=10000
+\Urlmuskip=0mu plus 1mu
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  aboveskip=5pt,
+  belowskip=5pt,
+  breaklines=true
+}
+
+\newcommand{\meet}{\mathbin{\sqcap}}
+\newcommand{\seq}{\mathbin{\cdot}}
+
+\title{Static Type Checking for Forth by Symbolic Stack Effects}
+\author{Jaanus Pöial\\Tallinn University of Technology}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+This paper describes a source-level static checker intended for Forth systems
+whose vocabulary and parsing rules can be described externally.  The checker
+reads a type hierarchy, stack-effect and parser specifications, and Forth
+source.  It represents each phrase by a pair of symbolic stacks.  Indexed
+symbols retain the identity of cells moved or copied by words such as
+\texttt{DUP}, \texttt{OVER}, and \texttt{SWAP}; subtype-aware unification
+checks adjacent effects and propagates the most precise available type.
+Alternative paths are reduced to a common stack contract.  Repetition uses a
+finite one-execution versus two-execution test rather than a general loop
+invariant calculation.  Parser words, defining words, literals, and control
+structures are profile data, so checking is not tied to one fixed Forth
+syntax.  The account concentrates on the choices that matter to a Forth
+implementor, gives a complete worked example, and states the important limits
+of the current native Gforth implementation.
+\end{abstract}
+
+\noindent\textbf{Keywords:} Forth; stack effect; static checking; symbolic
+execution; subtyping.
+
+\section{The problem in Forth terms}
+
+Forth programmers already use stack comments as interfaces:
+\begin{lstlisting}
+: SQUARED  ( n -- n^2 )  DUP * ;
+\end{lstlisting}
+A useful checker must do more than count the cells on either side of
+\texttt{--}.  It must know that both inputs of \texttt{*} are numeric, that
+\texttt{DUP} produces two references to the same abstract value, and that a
+word requiring a character address may accept an aligned address.  It must
+also follow the outer interpreter: \texttt{:} consumes a name and starts a
+definition, \texttt{;} ends one, comments consume source text, and immediate
+control words combine non-linear source regions.
+
+The evaluator in this project performs that work without running the program.
+It takes three independent inputs:
+\begin{enumerate}
+  \item a finite set of types, aliases, and subtype declarations;
+  \item a dictionary of word effects plus parser and control metadata;
+  \item the source to be checked.
+\end{enumerate}
+The same engine can therefore check a small teaching vocabulary, the bundled
+Forth-2012-like profile, or a system-specific profile.  The executable is
+\texttt{gforth-evaluator.fs}; a Java version consumes the same files.
+
+This is deliberately a checker for declared Forth interfaces, not a claim to
+infer the behavior of arbitrary native code.  Trust begins at the primitive
+specifications.  If \texttt{@} is declared incorrectly, no analysis of its
+clients can repair the error.  Within that boundary, the checker infers colon
+definitions, checks linear compositions, and gives source-oriented clash
+diagnostics.
+
+\section{Effects with cell identity}
+
+\subsection{The visible suffix and its frame}
+
+An effect is written in normal Forth order, with top of stack at the right:
+\[
+             (L\;--\;R).
+\]
+It describes only the suffix touched by the phrase.  An arbitrary deeper frame
+is preserved.  Thus \texttt{( n -- n )} is applicable to \texttt{F n}, not
+only to a one-cell data stack.  This implicit frame is also why effects with
+different displayed depths can compose or describe two branches of one
+control structure.
+
+The empty effect \texttt{( -- )} is identity.  A clash is a separate failure
+value; it is not an effect and absorbs subsequent composition.  This keeps a
+reported error from being mistaken for a word that happens to have no stack
+behavior.
+
+\subsection{Types and indexed wildcards}
+
+A profile declares canonical types and aliases.  A small address and numeric
+hierarchy may include
+\[
+ \texttt{a-addr} < \texttt{c-addr} < \texttt{addr} < \texttt{x},
+ \qquad
+ \texttt{char} < \texttt{+n} < \texttt{n} < \texttt{x}.
+\]
+Here ``$<$'' means ``more specific than.''  The loader resolves aliases and
+computes transitive relationships.  When two boundary cells are compared, the
+checker keeps the more specific type if the types are comparable; unrelated
+types clash.  It does not search the hierarchy for a third, common subtype.
+That simple rule makes both behavior and diagnostics predictable for profile
+authors.
+
+A type name may carry an index:
+\begin{lstlisting}
+DUP   ( x[1] -- x[1] x[1] )
+SWAP  ( x[2] x[1] -- x[1] x[2] )
+OVER  ( x[2] x[1] -- x[2] x[1] x[2] )
+DROP  ( x -- )
+\end{lstlisting}
+Equal positive indices mean equal symbolic cells.  They express the dataflow
+that an ordinary unindexed effect omits.  An unindexed \texttt{x} is fresh on
+each use; two plain occurrences do not assert equality.  Indices are logical
+variables, not addresses and not runtime tags.  Every fetched dictionary
+effect is cloned and its indices are freshened before use, so two calls of
+\texttt{DUP} cannot accidentally share a variable.
+
+\section{How a Forth phrase is composed}
+
+Suppose the current phrase has effect $(L_1--R_1)$ and the next word has
+$(L_2--R_2)$.  Composition compares $R_1$ and $L_2$ from the top of stack
+inwards.  For each pair it performs the following steps:
+\begin{enumerate}
+  \item check that their types are comparable and select the more specific;
+  \item create one fresh symbol of that type;
+  \item replace both old symbols everywhere in both working effects;
+  \item remove the matched output/input pair and continue.
+\end{enumerate}
+Replacing \emph{every} occurrence is important.  A numeric constraint found at
+one boundary must reach all copies made by \texttt{DUP}, and a constraint on
+one side of \texttt{SWAP} must follow the cell to its new position.  When one
+touching side is exhausted, unmatched requirements or results are retained,
+with the untouched stack frame inserted in the appropriate place.
+
+For example, use these declarations:
+\begin{lstlisting}
+literal integer  ( -- n )
++                ( n n -- n )
+DUP              ( x[1] -- x[1] x[1] )
+\end{lstlisting}
+The phrase \texttt{1 2 + DUP} reduces as follows:
+\[
+ (\,--n)\seq(\,--n)=(\,--n\;n),
+\]
+\[
+ (\,--n\;n)\seq(n\;n--n)=(\,--n),
+\]
+\[
+ (\,--n)\seq(x[1]--x[1]\;x[1])
+       =(\,--n[1]\;n[1]).
+\]
+The final match specializes \texttt{x} to \texttt{n}; global substitution
+applies that choice to both outputs.  The native trace makes the same process
+visible:
+\begin{lstlisting}
+1    ( -- n )
+2    ( -- n )
++    ( n n -- n[1] )
+DUP  ( n[1] -- n[1] n[1] )
+< n[1] n[1]
+\end{lstlisting}
+
+This procedure is deterministic.  Fresh-index numbers may differ between
+runs or implementations, but consistent renaming does not alter the effect.
+The older algebraic presentation relates untyped stack effects to a
+polycyclic monoid \cite{poial1991,poial1994}; for using the checker, boundary
+matching and whole-effect substitution are the essential facts.
+
+\subsection{Compaction and a precision caveat}
+
+Working effects are normalized after a successful operation.  Wildcard
+numbers are made small and deterministic.  An index explicitly written by the
+profile author remains visible.  An implicit identity that has too few
+occurrences may be printed without its index; for example an internally
+created \texttt{( n[7] -- n[7] )} can become \texttt{( n -- n )}.
+
+Compaction produces readable inferred comments, but the implementation also
+stores the compacted value.  It can therefore forget a pairwise equality that
+would help a later word.  In analysis terminology this is a widening: stack
+height and the type at each position remain valid, while correlation precision
+can decrease.  A future version should preserve raw identities internally and
+compact only when printing.
+
+\section{Branches and control words}
+
+Two arms of an \texttt{IF} must be represented by one contract for the code
+that follows.  The checker calls the combining operation \texttt{glb}.  For
+equal-depth effects it unifies corresponding inputs and outputs, again taking
+the more specific of comparable types.  A mismatch in stack depth is accepted
+only when the extra input cells and the same number of extra output cells form
+a preserved prefix---the implicit frame made explicit by the longer arm.
+Otherwise the merge clashes.
+
+Consider two store-like branch effects requiring respectively
+\[
+ (\texttt{x a-addr}--), \qquad (\texttt{x c-addr}--).
+\]
+Because \texttt{a-addr} is more specific than \texttt{c-addr}, their common
+contract requires \texttt{a-addr}.  For a complete conditional, the declared
+\texttt{IF ( flag -- )} effect is composed with that branch contract, so the
+selector is consumed as well.
+
+The operation should not be read as a union of all concrete executions.  It is
+a \emph{must} contract: one input/output description required to be valid for
+both alternatives.  The current rule is syntactic and intentionally strict.
+It catches the common Forth error where only one path leaves a value, while
+allowing paths that merely expose different amounts of an otherwise preserved
+frame.
+
+Control syntax is not hard-wired into the effect algebra.  A profile can
+describe a source form and how its captured regions are reduced:
+\begin{lstlisting}
+syntax:
+  IF <then branch> [ELSE <else branch>] FI
+effect:
+  IF
+  either <then branch> <else branch>
+\end{lstlisting}
+The small template language sequences control-word effects and captured
+regions, combines regions with \texttt{either}, and applies \texttt{repeat} to
+a loop region.  Consequently systems using \texttt{THEN}, \texttt{FI}, or a
+custom immediate word can share the evaluator by changing profile data.
+
+\section{What the loop check does---and does not do}
+
+For a repeated region with effect $p$, the implementation computes one copy
+$p$, composes two copies $p\seq p$, and asks for their common branch-style
+contract:
+\[
+                         p^*_2 = p\meet(p\seq p).
+\]
+This is a finite stack-stability test.  It is useful for conventional loops
+whose iteration restores the same visible stack shape, and it rejects many
+bodies that grow, shrink, or change a cell incompatibly on the second
+iteration.
+
+It is not Kleene star, transitive closure, or a general abstract-interpretation
+fixpoint.  Agreement of one and two iterations alone does not prove agreement
+for every iteration count.  Nor does the checker discover a programmer's loop
+invariant.  Profiles for \texttt{BEGIN ... UNTIL} or
+\texttt{BEGIN ... WHILE ... REPEAT} must include the test word in the repeated
+region when its per-iteration \texttt{flag} consumption belongs there.
+Calling this rule ``idempotent repetition'' is convenient historically, but
+``one-versus-two approximation'' describes the implemented guarantee more
+accurately.
+
+For production assurance, the replacement is standard: construct a
+control-flow graph, maintain an abstract stack at each loop header, and
+iterate to a post-fixpoint, widening if the chosen domain requires it.  The
+local rule remains attractive for a small Forth tool because it terminates
+immediately and works without constructing a whole-program graph.
+
+\section{Following the outer interpreter}
+
+A Forth source checker cannot tokenize every blank-delimited string as an
+ordinary word.  The specification file therefore includes source behavior as
+well as runtime stack effects:
+\begin{lstlisting}
+"("       parse until ")"          ( -- )
+"\\"      parse until eol          ( -- )
+CONSTANT  parse word define        ( x -- )
+VARIABLE  parse word define        ( -- a-addr )
+:         parse word define colon  ( -- )
+;         control end              ( -- )
+literal integer                    ( -- n )
+IF        control if               ( flag -- )
+\end{lstlisting}
+The evaluator has interpretation and compilation states.  Defining words
+consume the following name and extend the analysis dictionary; colon bodies
+are checked and their inferred effects are installed at \texttt{;}.  Parser
+words consume names or delimited text.  Literals are classified by profile
+entries.  Word lookup is case-insensitive.
+
+An ordinary comment such as \texttt{( n -- n )} is consumed, not trusted as an
+assertion.  Otherwise a false source comment could override the very inference
+being checked.  Recognized locals syntax may supply a provisional definition
+shape, but that is a distinct parser feature.  Return-stack activity,
+\texttt{EXECUTE}, native code generation, \texttt{THROW}, and unrestricted
+metaprogramming require special abstractions or remain outside this model.
+
+Once one colon body has been parsed, evaluation is simple.  Leaves are known
+word or literal effects; adjacent nodes use composition; control nodes apply
+the profile template.  Dependencies run from a node to its contained source
+regions, so a non-recursive parsed body has one deterministic bottom-up result.
+This modest observation is more useful than a heavy theorem here: it identifies
+exactly what a reproducible diagnostic depends on---the parsed structure, the
+current dictionary, and the three effect operators.
+
+\section{Complete profile example}
+
+The bundled \texttt{real} profile is run with
+\begin{lstlisting}
+./run-evaluator-gforth.sh real
+\end{lstlisting}
+It reads \texttt{ex1types.txt}, \texttt{ex1specs.txt}, and
+\texttt{ex1prog.txt}.  The source defines:
+\begin{lstlisting}
+: PEEK2   DUP @ SWAP @ ;
+: MAYSWAP IF SWAP FI ;
+: NLOOP   BEGIN DUP 0= WHILE REPEAT ;
+: ULOOP   BEGIN DUP 0= UNTIL ;
+: KEEPIF  IF DUP ELSE DUP FI ;
+
+DP DP C@ 0= KEEPIF
+\end{lstlisting}
+Representative profile declarations are \texttt{@ ( a-addr -- x )},
+\texttt{C@ ( c-addr -- char )}, \texttt{0= ( n -- flag )}, and the indexed
+stack operators shown earlier.  The inferred definitions are:
+\begin{lstlisting}
+PEEK2   ( a-addr[1] -- x[2] x )
+MAYSWAP ( x[1] x[1] flag -- x[1] x[1] )
+NLOOP   ( n[1] -- n[1] )
+ULOOP   ( n[1] -- n[1] )
+KEEPIF  ( x[1] flag -- x[1] x[1] )
+\end{lstlisting}
+The top-level phrase ends in
+\begin{lstlisting}
+DP      ( -- a-addr[1] )
+DP      ( -- a-addr )
+C@      ( a-addr -- char )
+0=      ( char -- flag )
+KEEPIF  ( a-addr[1] flag -- a-addr[1] a-addr[1] )
+< a-addr[1] a-addr[1]
+\end{lstlisting}
+\texttt{C@} asks for \texttt{c-addr}; \texttt{DP} provides the more specific
+\texttt{a-addr}, so the boundary succeeds.  Since \texttt{char} is below
+\texttt{n}, \texttt{0=} also succeeds.  Both \texttt{KEEPIF} paths duplicate
+the surviving address and their common contract retains that identity.  This
+one example exercises subtyping, symbolic copies, a definition, branch merge,
+loop approximation, literals, and top-level checking.
+
+\section{Implementation and evidence}
+
+The native implementation is one Gforth source file.  Its word families
+separate type relations (\texttt{ev-ts-*}), symbols (\texttt{ev-sym-*}),
+effects (\texttt{ev-spec-*}), effect lists, specification dictionaries,
+source parsing, and diagnostics.  Effects are mutable records, so dictionary
+entries are deep-cloned before use and independently evaluated branches receive
+disjoint wildcard ranges.  Input line endings and normalized wildcard
+allocation are made deterministic across runs.
+
+Boundary matching itself is linear in the shorter touching boundary.  The
+current substitution strategy scans whole working effects after each match,
+so large intermediate effects can make reduction roughly quadratic.  A
+union--find representation of identity classes and persistent stack rows would
+reduce copying, but the straightforward implementation has proved easier to
+inspect in Gforth.
+
+The checked-in regression corpus contains 29 programs: 13 expected accepts and
+16 expected rejects.  A current native batch accepts all 13 positive cases and
+rejects 14 negative cases.  The two known misses are
+\texttt{linear\_clash.fs} and \texttt{top\_level\_clash.fs}, both involving
+the top-level phrase \texttt{DP 1+}.  This is evidence about the artifact, not
+a soundness result; in particular it documents a real gap in top-level linear
+checking.  The profile is also an assumption: tests cannot reveal an error
+shared by a primitive declaration and its expected output.
+
+\section{Scope and next steps}
+
+The checker preserves the main benefits sought by a Forth programmer: inferred
+stack comments, early detection of type or depth clashes, dataflow through
+stack shuffles, address-type refinement, and profile-defined immediate syntax.
+Its limits should remain visible:
+\begin{itemize}
+  \item primitive and parser specifications are trusted;
+  \item only comparable types unify;
+  \item compaction can lose implicit identity information;
+  \item branch merge is a strict syntactic common contract;
+  \item loop checking compares only one and two iterations;
+  \item recursion, forward references, quotations, non-local exits, and
+        unrestricted compile-time behavior are not covered generally;
+  \item two known negative regression cases are currently missed.
+\end{itemize}
+
+The most direct improvements are to retain raw correlations until display, fix
+the top-level clash path, and replace repeated global substitution by identity
+classes.  Explicit stack-row variables would support more general
+stack-polymorphic and higher-order words.  A control-flow fixpoint would give
+loops a conventional invariant semantics.  Finally, checking primitive
+specifications against an operational model is necessary before claiming
+whole-system soundness.
+
+Forth stack comments already provide the right interface notation.  The main
+step is to make their variables, subtype relationships, parser effects, and
+control combinations executable.  Symbolic stack effects do that with a small
+set of understandable operations: subtype-aware boundary composition for
+sequences, common contracts for alternatives, and a clearly delimited local
+approximation for repetition.  The result is not a static semantics for all of
+Forth, but it is a practical and extensible checker for the substantial subset
+that a system profile can describe.
+
+\begin{thebibliography}{9}
+\small
+
+\bibitem{forth2012}
+Forth 200x Standardisation Committee.
+\newblock \emph{Forth 2012 Standard}, 2014.
+\newblock \url{https://forth-standard.org/standard/intro}.
+
+\bibitem{poial1991}
+J. Pöial.
+\newblock Algebraic specifications of stack effects for Forth programs.
+\newblock In \emph{1990 FORML Conference Proceedings}, pp. 282--290, 1991.
+
+\bibitem{poial1994}
+J. Pöial.
+\newblock Algebraic specifications of stack effects.
+\newblock \emph{Forth Dimensions}, 16(4):18--20, 1994.
+
+\bibitem{poial2002}
+J. Pöial.
+\newblock Stack effect calculus with typed wildcards, polymorphism and
+inheritance.
+\newblock \emph{18th EuroForth Conference}, 2002.
+
+\bibitem{poial2006}
+J. Pöial.
+\newblock Typing tools for typeless stack languages.
+\newblock In \emph{22nd EuroForth Conference}, pp. 40--46, 2006.
+
+\bibitem{poial2008}
+J. Pöial.
+\newblock Java framework for static analysis of Forth programs.
+\newblock In \emph{24th EuroForth Conference}, pp. 20--23, 2008.
+
+\bibitem{stoddart1993}
+B. Stoddart and P. J. Knaggs.
+\newblock Type inference in stack based languages.
+\newblock \emph{Formal Aspects of Computing}, 5(4):289--298, 1993.
+
+\end{thebibliography}
+
+\end{document}
