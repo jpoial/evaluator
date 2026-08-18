@@ -2,43 +2,37 @@
 
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
-\usepackage{amsmath,amssymb}
+\usepackage[a4paper,margin=24mm]{geometry}
 \usepackage{array}
 \usepackage{listings}
 \usepackage{url}
-\newcommand{\href}[2]{#2}
+\usepackage[hidelinks]{hyperref}
+
 \Urlmuskip=0mu plus 1mu
-\emergencystretch=2em
+\emergencystretch=3em
 \widowpenalty=10000
 \clubpenalty=10000
 \displaywidowpenalty=10000
+\setlength{\parskip}{0.25em}
 
-\newtheorem{definition}{Definition}
-\newtheorem{proposition}{Proposition}
-\newtheorem{theorem}{Theorem}
-\newtheorem{remark}{Remark}
-\newenvironment{proof}{\par\noindent\textit{Proof.}\ }{\hfill$\square$\par}
-
-\newcommand{\Types}{\mathcal{T}}
-\newcommand{\Symbols}{\Sigma}
-\newcommand{\Effects}{\mathcal{E}}
-\newcommand{\meet}{\mathbin{\sqcap}}
-\newcommand{\seq}{\mathbin{\cdot}}
-\newcommand{\zero}{\mathbf{0}}
-\newcommand{\id}{\mathbf{1}}
-\newcommand{\compact}{\mathsf{compact}}
-\newcommand{\eval}[1]{[\![#1]\!]}
-
+% Listings are deliberately unboxed.  Framed listings in earlier versions
+% could collide visually with nearby prose and page boundaries.
 \lstset{
   basicstyle=\ttfamily\small,
   columns=fullflexible,
   keepspaces=true,
   showstringspaces=false,
-  frame=single,
-  breaklines=true
+  frame=none,
+  xleftmargin=1.2em,
+  xrightmargin=0.5em,
+  aboveskip=0.6em,
+  belowskip=0.6em,
+  breaklines=true,
+  breakatwhitespace=true
 }
 
-\title{Configurable Source-Level Type Checking for Forth\\with Symbolic Stack Effects}
+\title{Configurable Source-Level Type Checking for Forth\\
+with Symbolic Stack Effects}
 \author{Jaanus Pöial\\Tallinn University of Technology}
 \date{}
 
@@ -46,290 +40,241 @@
 \maketitle
 
 \begin{abstract}
-Forth words communicate through an implicit data stack, and Forth source can
-also change the parser and dictionary while it is being read.  This paper
-describes a configurable, source-level checker for that setting.  A phrase is
-represented by an input and an output stack of typed symbolic cells.  Repeated
-indices record that two positions contain the same abstract value.  Linear
-phrases are checked by unifying the touching stack boundaries.  At a branch,
-the checker must replace two path effects by one interface; it does so with a
-partial syntactic common-contract operation that also handles unequal visible
-depths when the difference is an unchanged stack prefix.  Repetition is
-handled by comparing one execution with two, not by computing a general loop
-invariant.
+Forth words exchange operands through a data stack, and Forth source may also
+change the parser and dictionary while it is being read.  This paper describes
+a configurable source-level checker for that setting.  The checker represents
+a phrase by the stack cells it requires and the cells it leaves.  Each cell
+has a profile-defined type and may have a symbolic identifier that records
+value flow through words such as \texttt{DUP}, \texttt{SWAP}, and
+\texttt{OVER}.
 
-The type hierarchy, primitive effects, parser words, defining words, literals,
-and structured control forms are supplied in text files.  The paper gives
-step-by-step definitions of the three effect operators, a complete runnable
-example, an artifact manifest, and an exact characterization of the
-bottom-up computation performed after a body has been parsed.  It also
-separates guarantees from implementation choices: normalization can discard
-identity information, branch combination has no accompanying semantic
-soundness theorem, and a concrete counterexample shows that the one-versus-two
-loop test does not establish correctness for arbitrary iteration counts.  The
-native implementation is \texttt{gforth-evaluator.fs}; comparisons with
-StrongForth, an optional pluggable Forth type system, and WebAssembly explain
-which limitations arise from this checker rather than from stack languages in
-general.
+Straight-line code is checked by matching the output of one word with the
+input of the next.  Branches are combined only when the implementation can
+construct one common stack interface.  Repetition uses a finite test that
+compares one pass with two passes.  The paper explains each algorithm with
+source examples and pseudocode, including unequal branch depths and a loop
+counterexample.  It also separates the implemented checks from stronger
+claims: normalization can lose value-flow information, the current branch
+operator is not a sound summary for every program, and the loop test does not
+compute an inductive invariant.
+
+The type hierarchy, primitive stack effects, parser words, defining words,
+literals, and control structures are supplied in text files.  The native
+implementation is \texttt{gforth-evaluator.fs}.  A complete artifact manifest
+and reproducible example are included.  Comparisons with StrongForth,
+pluggable Forth typing, and WebAssembly show which restrictions belong to this
+prototype rather than to stack languages in general.
 \end{abstract}
 
-\noindent\textbf{Keywords:} concatenative language; Forth; static analysis;
-stack effect; abstract interpretation; symbolic execution.
+\noindent\textbf{Keywords:} Forth; static analysis; stack effect; type checking;
+symbolic execution; concatenative language.
 
 \section{Introduction}
 
-\par\noindent\begin{minipage}{\linewidth}
-In a concatenative language, juxtaposition is composition: if $p$ and $q$ are
-programs, then $p\,q$ executes $p$ and passes its resulting stack directly to
-$q$.  A conventional Forth stack annotation has the form
+A Forth \emph{word} is a named operation.  Operands normally come from the
+data stack instead of named parameters.  This paper writes the top of stack on
+the right, following standard stack-effect notation:
+
 \begin{lstlisting}
-( n n -- n )
++   ( n1 n2 -- n3 )
 \end{lstlisting}
-\end{minipage}\par
-Such an annotation resembles a type signature, but an ordinary comment has no
-static force and does not generally express correlations between stack cells.
-For example,
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+
+The effect says that \texttt{+} consumes two numbers and produces one.  It
+constrains only the visible top part of the stack; cells below that part remain
+unchanged.  A colon definition introduces a new word:
+
 \begin{lstlisting}
-DUP  ( x[1] -- x[1] x[1] )
-OVER ( x[2] x[1] -- x[2] x[1] x[2] )
+: SQUARED  DUP * ;
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-records facts that the unindexed signatures cannot express: two output
-positions may denote the same symbolic input.
 
-This project turns such signatures into an executable abstract semantics.  It
-loads three inputs: a finite type hierarchy, a vocabulary of word and parser
-specifications, and source text.  It infers effects for sequences and newly
-defined words without executing the concrete program.  The implementation is
-a single native Gforth source file, \texttt{gforth-evaluator.fs}.
+A conventional Forth system treats a stack effect as documentation.  The
+comment may be missing, stale, or too weak to describe value flow.  For
+example, the two results of \texttt{DUP} are copies of the same input.  A
+checker also has to handle branches, loops, parser words, and words that extend
+the dictionary while source is processed.
 
-For readers unfamiliar with Forth, a \emph{word} is a named operation and a
-colon definition \texttt{: NAME ... ;} introduces a new word.  Operands are
-normally taken from the data stack rather than from named arguments; throughout
-this paper the top cell is the rightmost one.  Thus \texttt{1 2 +} pushes two
-integer literals and then replaces them by their sum.  Words such as
-\texttt{DUP}, \texttt{SWAP}, and \texttt{OVER} respectively copy the top cell,
-exchange the top two cells, and copy the second cell over the top one.  Control
-words such as \texttt{IF}, \texttt{ELSE}, and \texttt{THEN} execute while a
-definition is compiled and delimit source regions that run later.  These data-
-and compile-time roles are kept separate below.
+The evaluator in this project reads three inputs:
 
-The analysis addresses four problems in addition to stack-height consistency.
 \begin{enumerate}
-  \item compatibility of an effect's output boundary with the next effect's
-        input boundary;
-  \item propagation of subtype refinement and symbolic identity through stack
-        shuffles;
-  \item construction of a common contract for alternative branches;
-  \item finite approximation of unbounded iteration.
+  \item a finite set of types, aliases, and subtype declarations;
+  \item word effects plus parser and control-word metadata;
+  \item the Forth source to check.
 \end{enumerate}
 
-The answers implemented here are, respectively, comparable-type unification,
-sequence-wide substitution, a partial effect meet, and a local repeated-effect
-operator.  These are choices made by this checker, not limitations inherent to
-concatenative languages.  For example, WebAssembly validates loops against
-declared control-label types, and other typed Forth systems make different
-choices about annotations and overloading (Section~\ref{sec:related}).  The
-present choices continue the algebraic development of stack effects in
-\cite{poial1991,poial1992,poial1994,poial2002,poial2006}.  An earlier Java
-implementation of the framework was published in 2008 \cite{poial2008}; the
-implementation studied in this paper is the native Gforth version.
+It infers effects for source phrases and colon definitions without executing
+the program.  An earlier Java implementation established the basic framework
+\cite{poial2008}; the artifact studied here is the native Gforth version.  The
+same engine can use a permissive profile that mostly checks stack depth or a
+narrower profile that distinguishes numbers, flags, address classes, and
+execution tokens.
 
-The analysis distinguishes five technical properties.
+The checker addresses four tasks beyond tokenization:
+
 \begin{itemize}
-  \item The declared type relation need not be a complete lattice.  The core
-        algorithm requires only a finite normalized relation and selects a
-        meet when the two types are comparable.
-  \item Raw effects and printed effects are different domains.  Normalization
-        is deterministic, but it may erase an implicitly introduced
-        two-occurrence correlation.
-  \item Branch merging is an operation on contracts, not the set-theoretic
-        union of branch transition relations.
-  \item The implemented loop operation is $\pi\meet(\pi\seq\pi)$.  It is not a
-        proof that the result describes every iteration count.
-  \item Once parsing and leaf lookup are fixed, checking is the unique
-        bottom-up evaluation of an acyclic system of effect equations.
+  \item match adjacent stack interfaces in straight-line code;
+  \item propagate types and value identities through stack shuffles;
+  \item construct one interface for alternative control-flow paths;
+  \item approximate repeated execution with a terminating local test.
 \end{itemize}
 
-\section{Type and Symbol Domains}
+These are design choices of this implementation.  They are not limitations of
+concatenative languages as a class.  WebAssembly, for example, validates loops
+against declared block interfaces, while StrongForth integrates typing into a
+Forth system.  Section~\ref{sec:related} compares these alternatives.
 
-\subsection{Normalized finite subtype relation}
+\section{Analysis Model}
+\label{sec:model}
 
-Let $\Types$ be the finite set of canonical type names.  The input permits
-aliases; mathematically, aliases are quotiented before considering the strict
-subtype declarations.  Write $\tau\leq\upsilon$ when $\tau$ is at least as
-specific as $\upsilon$.  The bundled Forth-like profiles contain chains such
-as
-\[
-  \mathit{a\mbox{-}addr} < \mathit{c\mbox{-}addr}
-  < \mathit{addr} < u < x,
-  \qquad
-  \mathit{char} < {+}n < n < x.
-\]
-The implementation adds identity, inverse lookup information, and transitive
-relations after loading the declarations.
+\subsection{Profile-defined types}
 
-\begin{definition}[Comparable type meet]
-For $\tau,\upsilon\in\Types$, define the partial operation
-\[
-\tau\meet\upsilon =
-\begin{cases}
- \tau, & \tau\leq\upsilon,\\
- \upsilon, & \upsilon\leq\tau,\\
- \text{undefined}, & \text{otherwise}.
-\end{cases}
-\]
-\end{definition}
+A profile defines canonical type names, aliases, and subtype edges.  A typical
+fragment is:
 
-Thus the implementation does not search for an arbitrary third subtype when
-$\tau$ and $\upsilon$ are incomparable.  This is stricter than meet in a
-general lattice and identifies failures at the corresponding boundary.
-
-\subsection{Typed symbolic cells}
-
-A stack symbol is a triple
-\[
-  a=(\tau,i,e)\in\Types\times\mathbb{N}\times\{0,1\}.
-\]
-It is printed as $\tau$ when $i=0$ and as $\tau[i]$ otherwise.  The bit $e$
-records whether an index was explicit in the specification.  Symbols with the
-same positive index are correlated.  An unindexed occurrence is freshened
-before composition, so two occurrences of plain \texttt{x} do not accidentally
-become equal.
-
-This system uses indices as first-order equality variables, not as names of
-runtime storage locations.  Equal indices assert one correlation; different
-indices do not assert that the concrete values are unequal.  A substitution
-$[a\mapsto b]$ replaces every occurrence of $a$ in the current effect sequence.
-Global replacement is what allows a type fact discovered at one composition
-boundary to propagate through \texttt{DUP}, \texttt{SWAP}, or \texttt{OVER}.
-
-The brackets are an internal, explicit version of the Forth standard's numeric
-suffix convention.  Standard prose commonly writes \texttt{n1 n2 -- n3} to
-distinguish several items of type \texttt{n}, while a word such as
-\texttt{DUP ( x -- x x )} needs no suffix because every shown \texttt{x}
-refers to the copied item.  In formulas below, \texttt{x[1]} makes the equality
-variable unambiguous.  When effects are presented to a Forth user, indices
-should be renumbered consecutively and omitted only where the standard
-convention remains unambiguous.
-
-\section{Stack Effects and Frames}
-
-Let $\Symbols$ be the set of typed symbols and let $\Symbols^*$ be finite
-symbol sequences.  The top of stack is written on the right.
-
-\begin{definition}[Raw effect]
-A raw stack effect is a pair
-\[
-  \pi=(L\;--\;R),\qquad L,R\in\Symbols^*.
-\]
-It denotes a transformation of a visible stack suffix: for an arbitrary
-unchanged frame $F$, a stack of shape $F L$ is transformed to $F R$, subject
-to the type and equality constraints represented by the symbols.
-\end{definition}
-
-The empty effect $\id=(\;--\;)$ is identity.  Algorithmic failure is represented
-by a separate clash value $\zero$, not by an ordinary effect.
-
-The implicit frame is essential.  For example, $(n--n)$ does not assert that
-the whole runtime stack has exactly one cell; it constrains only the suffix
-touched by the word.  Effects with different visible depths may consequently
-still be combined if their depth difference is a preserved prefix.  Type-system
-literature often calls such an arbitrary sequence a \emph{stack row} and writes
-a row variable, say $\rho$, for it.  The effect above could therefore be read
-$\rho\,n\to\rho\,n$.  A row variable ranges over whole stack prefixes, whereas
-the indexed variables of Section~2 range over single cells.
-
-For raw effects, alpha-renaming positive indices has no meaning.  Let
-$\pi\equiv_\alpha\pi'$ mean equality up to a bijective renaming of indices that
-preserves types and explicitness.  Implementations must freshen independently
-instantiated word specifications before attempting unification.
-
-\section{Sequential Composition}
-\label{sec:composition}
-
-Let
-\[
-  \pi_1=(L_1--R_1),\qquad \pi_2=(L_2--R_2).
-\]
-Composition inspects the touching boundary from its top inward.  If the current
-top symbols are $a=\tau[i]$ and $b=\upsilon[j]$, calculate
-$\rho=\tau\meet\upsilon$.  If undefined, composition clashes.  Otherwise make
-a fresh symbol $z=\rho[k]$, substitute $a$ and $b$ by $z$ everywhere in both
-working effects, remove the matched output/input pair, and continue.
-
-A direct functional presentation follows.  All indices in the two operands
-are assumed to be disjoint.  Let $\mathcal{C}$ denote raw composition.  The
-first two cases are
-\[
-\begin{aligned}
-\mathcal{C}(L_1,\epsilon,L_2,R_2)&=(L_2L_1--R_2),\\
-\mathcal{C}(L_1,R_1,\epsilon,R_2)&=(L_1--R_1R_2).
-\end{aligned}
-\]
-For the remaining case write $R_1=\widehat R_1a$ and
-$L_2=\widehat L_2b$.  If the types of $a$ and $b$ are incomparable,
-$\mathcal{C}$ is undefined.  Otherwise let $z$ be their fresh, more specific
-representative and let $\sigma=[a\mapsto z,b\mapsto z]$.  Then
-\[
- \mathcal{C}(L_1,R_1,L_2,R_2)=
- \mathcal{C}(\sigma L_1,\sigma\widehat R_1,
-             \sigma\widehat L_2,\sigma R_2).
-\]
-This notation makes every changed sequence explicit.  In the implementation,
-substitution mutates all four working sequences first; after that mutation the
-same recursive call is written
-$\mathcal{C}(L_1,R'_1,L'_2,R_2)$.  In particular, no unexplained
-$L'_1$ or $R'_2$ is required.  Concatenation order in the first base case
-reflects the implicit frame: inputs still required by $\pi_2$ lie beneath
-those already required by $\pi_1$.
-
-Define the totalized product
-\[
-\begin{aligned}
-\pi_1\odot\pi_2&=
-\begin{cases}
- \compact(\pi_1\seq\pi_2),&\text{if raw composition succeeds},\\
- \zero,&\text{otherwise},
-\end{cases}\\
-\zero\odot\pi&=\pi\odot\zero=\zero.
-\end{aligned}
-\]
-This is the operation used while reducing a source sequence.
-
-\paragraph{Worked derivation.}
-With
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
 \begin{lstlisting}
-1    literal integer ( -- n )
-2    literal integer ( -- n )
-+                    ( n n -- n )
-DUP                  ( x[1] -- x[1] x[1] )
+type X cell x
+type n number N
+type char c
+type addr a
+type c-addr ca
+type a-addr aa
+
+rel n < X
+rel char < n
+rel addr < X
+rel c-addr < addr
+rel a-addr < c-addr
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-each literal introduces a fresh numeric cell.  The fragment
-\texttt{1 2 + DUP} then has the derivation
-\[
-(\!--n)\seq(\!--n)=(\!--n\;n),
-\]
-\[
-(\!--n\;n)\seq(n\;n--n)=(\!--n),
-\]
-\[
-(\!--n)\seq(x[1]--x[1]\;x[1])
-=(\!--n[1]\;n[1]).
-\]
-The last step refines \texttt{x} to \texttt{n} and propagates that refinement
-to both outputs of \texttt{DUP}.  Running this example through the native
-evaluator with \texttt{ex1types.txt} and \texttt{ex1specs.txt} confirms the
-calculation:
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+
+Here \texttt{X}, \texttt{cell}, and \texttt{x} are aliases.  The relation
+\texttt{a-addr < c-addr} means that an aligned address is acceptable where a
+character address is required.  The loader calculates transitive subtype
+relationships, so it also knows that \texttt{a-addr} is an \texttt{addr} and
+an \texttt{X}.
+
+When two stack cells meet at a composition boundary, the checker applies a
+simple rule:
+
+\begin{itemize}
+  \item if the types are equal, keep that type;
+  \item if one type is a subtype of the other, keep the more specific type;
+  \item otherwise, report a type clash.
+\end{itemize}
+
+The checker does not search for a third common subtype when the two boundary
+types are unrelated.  This keeps matching deterministic but is less expressive
+than full lattice-based subtyping.
+
+\subsection{Stack effects and value identifiers}
+
+A stack effect has an input side and an output side:
+
+\begin{lstlisting}
+( input cells -- output cells )
+\end{lstlisting}
+
+An arbitrary deeper prefix passes through unchanged.  For example,
+\texttt{( n -- n )} can run on a stack containing other cells below the top
+number.  Type-system literature sometimes calls that arbitrary prefix a
+\emph{stack row}.  In implementation terms, it is simply a variable-length
+prefix that the word does not inspect.
+
+Types alone do not describe stack shuffles.  Square-bracket identifiers record
+which positions carry the same symbolic value:
+
+\begin{lstlisting}
+DUP   ( X[1] -- X[1] X[1] )
+SWAP  ( X[2] X[1] -- X[1] X[2] )
+OVER  ( X[2] X[1] -- X[2] X[1] X[2] )
+DROP  ( X -- )
+\end{lstlisting}
+
+Equal identifiers mean that the positions refer to the same abstract input.
+Different identifiers do not assert that concrete values are unequal.  An
+unindexed occurrence is treated as a fresh symbolic cell.  Before a word
+effect is used, its identifiers are renamed so that separate word calls cannot
+accidentally share variables.
+
+The bracket notation is explicit internal notation.  Standard Forth prose
+normally writes numeric suffixes, such as \texttt{n1 n2 -- n3}.  It omits the
+suffix when all displayed items of that type denote one value, as in
+\texttt{DUP ( x -- x x )}.  Section~\ref{sec:indices} returns to output
+formatting.
+
+\section{Checking Straight-Line Code}
+\label{sec:sequence}
+
+Suppose a checked prefix has one effect and the next word has another.  The
+checker compares the first effect's output with the next word's input, starting
+at the top of stack and moving toward deeper cells.
+
+The implementation can be described by the following pseudocode.  Here
+\texttt{replaceEverywhere} updates both input and output sides of both working
+effects.
+
+\begin{lstlisting}
+compose(first, second):
+    rename identifiers so the effects use disjoint names
+
+    while first has an output and second has an input:
+        actual   = top output of first
+        expected = top input of second
+
+        if actual.type and expected.type are unrelated:
+            return TYPE_CLASH
+
+        mergedType = the more specific boundary type
+        mergedId   = a fresh identifier
+        replaceEverywhere(actual, expected,
+                          mergedType, mergedId)
+        remove the matched output and input
+
+    preserve any unmatched input requirement
+    preserve any unmatched output result
+    return the combined effect
+\end{lstlisting}
+
+The global replacement step is important.  If a boundary match refines an
+\texttt{X} to \texttt{n}, every copy of that symbolic value must become
+\texttt{n}.  Updating only the two boundary positions would lose information
+carried through \texttt{DUP}, \texttt{SWAP}, or \texttt{OVER}.
+
+When the first output becomes empty before the second input, the remaining
+requirements of the second word become additional requirements of the whole
+phrase.  They are placed below the requirements already inferred for the first
+phrase.  When the second input becomes empty first, the unmatched output of
+the first phrase is retained below the second word's results.  This states the
+base cases directly and avoids ambiguous primed variables in the recursive
+definition.
+
+\subsection{Worked example: \texttt{1 2 + DUP}}
+
+The individual effects are:
+
+\begin{lstlisting}
+1    literal integer  ( -- n )
+2    literal integer  ( -- n )
++                     ( n n -- n )
+DUP                   ( X[1] -- X[1] X[1] )
+\end{lstlisting}
+
+The reduction proceeds in four steps:
+
+\begin{enumerate}
+  \item \texttt{1} leaves one fresh \texttt{n}.
+  \item \texttt{2} leaves a second fresh \texttt{n} above it.
+  \item \texttt{+} consumes both numbers and leaves one new \texttt{n}.
+  \item \texttt{DUP} accepts any \texttt{X}; matching refines that \texttt{X}
+        to \texttt{n}, and replacement updates both copies.
+\end{enumerate}
+
+The inferred phrase effect is:
+
+\begin{lstlisting}
+( -- n[1] n[1] )
+\end{lstlisting}
+
+The native trace exposes the same steps:
+
 \begin{lstlisting}
 1    ( -- n )
 2    ( -- n )
@@ -337,278 +282,252 @@ calculation:
 DUP  ( n[1] -- n[1] n[1] )
 < n[1] n[1]
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
 
-\begin{proposition}[Determinacy of raw composition]
-For fixed freshening and fresh-index policies, raw boundary composition either
-returns one effect or clashes.  Different choices of fresh positive indices
-produce alpha-equivalent effects.
-\end{proposition}
-
-\begin{proof}
-At each recursive step there is one pair of top boundary symbols.  The
-comparable meet, when it exists, is unique.  Substitution and removal therefore
-determine the next state.  The recursion decreases
-$\lvert R_1\rvert+\lvert L_2\rvert$ by two and terminates.  Fresh-index choices
-can change only variable names, hence the alpha-equivalence result.
-\end{proof}
-
-This proposition applies to raw effects.  Algebraic associativity of an ideal
-stack-effect product motivates the polycyclic-monoid account in
-\cite{poial1991,poial1994}; however, inserting a lossy compaction after every
-binary product can affect later identity information.  Consequently, algebraic
-laws of the raw domain do not automatically hold for the stored
-representation.
+For fixed identifier-renaming rules, this algorithm is deterministic.  Another
+implementation may choose different identifier numbers, but consistent
+renaming does not change the data-flow relationships.
 
 \section{Internal Identities and Forth-Style Output}
+\label{sec:indices}
 
-There are two separate normalization tasks.  Internally, alpha-equivalent
-identity variables should be renamed deterministically but retained.  For
-presentation, the Forth standard's style numbers same-typed items only as
-needed and renumbers them consecutively.  For example, an internal effect
-\[
- (x[7]\;x[8]--x[7]\;x[9])
-\]
-can be displayed as \texttt{( x1 x2 -- x1 x3 )}: the first result is the first
-input, while the other result has no stated correlation.  The special case
-\texttt{DUP ( x -- x x )} needs no suffix because all displayed \texttt{x}
-items denote the same value.
+Internal analysis and user-facing formatting have different requirements.
+The analyzer should retain every known identity relationship.  The printer
+should use consecutive suffixes in the standard Forth style.
 
-The current Gforth artifact does less.  After a successful operation it counts
-symbol occurrences over the result and its working sequence, traverses them in
-a deterministic order, and assigns small indices.  An index remains visible
-if it was explicit in a source specification or if the identity occurs more
-than twice.  An automatically introduced identity occurring once or twice is
-set to zero and printed without an index.  Thus an implicit
-$(n[7]--n[7])$ becomes $(n--n)$.  More seriously, the three identities in the
-example above can be printed as \texttt{( x x -- x x )}, hiding which input is
-preserved.
+For example, the internal effect
 
-The only practical advantage of that policy is short, backward-compatible
-output.  It gives the analysis no additional power.  Standard-style numbering
-is preferable for inferred effects: retain every equivalence class internally,
-renumber classes consecutively for display, and omit suffixes only when doing
-so is unambiguous under the Forth convention.
+\begin{lstlisting}
+( x[7] x[8] -- x[7] x[9] )
+\end{lstlisting}
 
-\begin{remark}[Current compaction is a widening]
-Removing an index preserves stack shape and per-position type constraints but
-forgets an equality constraint.  Consequently the implemented $\compact$ is
-deterministic and concise, but neither injective nor semantics-preserving for
-symbolic identity.  It is a conservative loss of correlation information.
-\end{remark}
+can be presented as:
 
-This is not merely a printer issue in the current artifact: compacted effects
-are stored and reused.  A faithful formalization must therefore define the
-implemented operators as ``raw operation followed by compaction.''  A revised
-implementation should keep raw identities in the dictionary and apply
-Forth-style formatting only at the output boundary.
+\begin{lstlisting}
+( x1 x2 -- x1 x3 )
+\end{lstlisting}
 
-\section{Branches: Two Paths, One Interface}
+This shows that the first result is the first input.  By contrast, an output
+such as \texttt{( x x -- x x )} hides that relationship.
+
+The current artifact keeps an identifier visible if it was written explicitly
+in a source specification or if the corresponding identity occurs more than
+twice in the working data.  An automatically created identity occurring once
+or twice may be printed without an identifier.  The implementation also stores
+that shortened effect for later use.  As a result, formatting can remove
+information needed by a later composition.
+
+There is no analysis benefit to this policy; its advantage is only shorter,
+backward-compatible output.  A revised implementation should:
+
+\begin{enumerate}
+  \item retain all identity classes in dictionary entries;
+  \item renumber them consecutively when an effect is displayed;
+  \item omit suffixes only when the Forth convention remains unambiguous.
+\end{enumerate}
+
+\section{Branches and Control-Flow Joins}
 \label{sec:branches}
 
-The central branch problem arises after, not inside, an \texttt{IF}.  The two
-arms may require different visible suffixes, leave different cells, or preserve
-different identities, but the following word and the inferred definition need
-one interface.  Equal stack depth is necessary but not sufficient: for
-example, one arm may leave an address where the other leaves a number.  A
-checker must either retain a disjunction of path effects, forget enough facts
-to form a safe common summary, restrict the accepted programs, or combine
-these strategies.  This checker chooses one partial, syntactic contract.
+A branch creates two possible stack states.  Code after the branch needs one
+interface.  Matching stack depth is not sufficient: one arm may leave an
+address where the other leaves a number, or the arms may preserve different
+input values.
 
-The operation is named \texttt{glb} in the code and is written $\meet$ here.
-The symbol $\sqcap$ does mean ``meet.''  It records the intended
-order-theoretic reading---greatest lower bound in a contract order---but the
-actual operator is the following algorithm, not an appeal to an unspecified
-lattice.
+A checker has several options.  It can retain a set of path-specific effects,
+compute a safe effect that forgets some facts, require programmer annotations,
+or reject programs for which it cannot construct one interface.  The current
+checker uses a partial syntactic operation named \texttt{glb} in the source.
+The name comes from earlier order-theoretic work, but the implementation should
+be understood through the algorithm below rather than through lattice
+terminology.
 
-Let $\pi=(L--R)$ and $\theta=(M--N)$.  Suppose first that $|L|>|M|$ and put
-$k=|L|-|M|$.  A common effect is possible only if
-\[
-                         |R|-|N|=k.                 \tag{1}
-\]
-Write the longer sides as
-\[
-                L=P\,L_s,\qquad R=Q\,R_s,
-                \qquad |P|=|Q|=k.
-\]
-The deep prefixes $P$ and $Q$ are the part of the implicit frame made visible
-by the longer effect.  The algorithm first unifies $P$ with $Q$ pairwise, so
-that this prefix is preserved.  It then unifies $L_s$ with $M$ and $R_s$ with
-$N$ pointwise.  The case $|M|>|L|$ is symmetric, and equal input lengths are
-the special case $k=0$.  A length failure in (1), or any incomparable pair of
-types, makes the operation undefined.
+\subsection{Equal visible depths}
 
-Here is the unequal-length case explicitly:
-\[
- \pi=(x[1]\;n--x[1]\;\mathit{char}),\qquad
- \theta=(n--\mathit{char}).
-\]
-For $\pi$, one cell of the otherwise implicit frame is displayed.  We have
-$k=1$ on both sides; $x[1]$ is unchanged, and the residual
-$n--\mathit{char}$ agrees with $\theta$.  Their common contract is therefore
-$\pi$.  In contrast,
-\[
- (x--x\;x)\qquad\hbox{and}\qquad(\epsilon--\epsilon)
-\]
-have input-length difference one and output-length difference two, so they do
-not merge.  This is why \texttt{IF DUP THEN}, with no corresponding
-\texttt{ELSE}, is rejected: only one run-time path leaves the extra cell.
+When both effects have the same number of inputs and outputs, the checker
+aligns corresponding positions.  Each pair must have compatible types.  The
+same global identifier replacement used for straight-line composition is then
+applied.
 
-With equal lengths, type refinement is pointwise.  For example,
-\[
-  (x\;\mathit{a\mbox{-}addr}--\epsilon),\qquad
-  (x\;\mathit{c\mbox{-}addr}--\epsilon)
-\]
-produce the stronger requirement
-$(x\;\mathit{a\mbox{-}addr}--\epsilon)$.  Composing the declared
-\texttt{IF ( flag -- )} effect then accounts for the selector.
+For example, these two store-like effects can be combined:
 
-The unequal-depth rule above also exposes an implementation detail.  The
-mathematical alignment compares the residual slices at offset $k$.  The
-current native helper \texttt{ev-spec-unify} starts its final vector traversal
-at offset zero.  Consequently the artifact can reject an unequal-depth merge
-when the displayed frame prefix and residual suffix have different types,
-even though the rule above accepts it.  Cases in which broad \texttt{x} cells
-make both alignments compatible can conceal this discrepancy.  It is recorded
-as a current implementation limitation rather than built into the rule.
+\begin{lstlisting}
+( X a-addr -- )
+( X c-addr -- )
+\end{lstlisting}
 
-A second limitation appears even without type differences.  Consider
+The common interface requires \texttt{a-addr}, because it is the more specific
+address type accepted by both declarations.  The declared effect
+\texttt{IF ( flag -- )} is composed separately and accounts for the selector.
+
+\subsection{Unequal visible depths}
+
+Effects of different displayed depths can still describe compatible behavior
+because each effect omits an unchanged deeper prefix.  Let the first effect
+show \texttt{k} more inputs than the second.  A join is possible only if it
+also shows exactly \texttt{k} more outputs.  Those extra deep cells must be
+preserved by the longer effect.  The remaining input and output positions are
+then compared with the shorter effect.
+
+For example:
+
+\begin{lstlisting}
+longer:   ( X[1] n -- X[1] char )
+shorter:  (      n --      char )
+\end{lstlisting}
+
+The longer effect makes one cell of the implicit prefix visible.  It preserves
+that cell, and its remaining \texttt{n -- char} behavior agrees with the
+shorter effect.  The common interface is the longer effect.
+
+The following pair is incompatible:
+
+\begin{lstlisting}
+( X -- X X )
+(   --     )
+\end{lstlisting}
+
+The input-depth difference is one, but the output-depth difference is two.
+This is why \texttt{IF DUP THEN}, with no matching \texttt{ELSE}, is rejected:
+only one runtime path leaves the extra item.
+
+The intended algorithm compares the shorter effect with the remaining slices
+of the longer effect after the \texttt{k}-cell prefix.  The current native
+helper starts this final comparison at vector offset zero instead of offset
+\texttt{k}.  It can therefore reject a valid unequal-depth join when the
+prefix and the remaining suffix have different types.  This is an
+implementation defect, not part of the intended rule.
+
+\subsection{The \texttt{MAYSWAP} limitation}
+
+Consider:
+
 \begin{lstlisting}
 : MAYSWAP  IF SWAP THEN ;
 \end{lstlisting}
-The true arm swaps two cells and the false arm preserves them.  A conventional
-single Forth summary that makes no unsupported value claim is
-\begin{lstlisting}
-( x1 x2 flag -- x3 x4 )
-\end{lstlisting}
-while a precise analysis would retain the disjunction ``\texttt{x2 x1} or
-\texttt{x1 x2}.''  The current syntactic meet instead makes the two inputs one
-identity and reports
-\begin{lstlisting}
-( x[1] x[1] flag -- x[1] x[1] )
-\end{lstlisting}
-That restricted contract is not the general effect of \texttt{MAYSWAP}.  It
-illustrates why a syntactic meet that strengthens preconditions must not be
-confused with a sound over-approximation of both run-time paths.
 
-Thus $\meet$ is useful operational notation, but the name \texttt{glb} alone
-does not prove that the code computes a semantic greatest lower bound.  Such a
-proof needs an operational meaning for primitive effects, an explicit
-variance-aware contract order, and a decision about whether path summaries may
-be disjunctive.  No such semantic soundness theorem is claimed here.
+The true arm swaps two cells; the false arm preserves them.  A standard
+single-effect summary that makes no unsupported identity claim is:
 
-\section{Iteration: What One Versus Two Can Establish}
+\begin{lstlisting}
+( X1 X2 flag -- X3 X4 )
+\end{lstlisting}
+
+A more precise analysis would retain two alternatives: the outputs are either
+\texttt{X2 X1} or \texttt{X1 X2}.  The current syntactic join instead forces
+the two inputs into one identity and reports:
+
+\begin{lstlisting}
+( X[1] X[1] flag -- X[1] X[1] )
+\end{lstlisting}
+
+That is not the general effect of \texttt{MAYSWAP}.  It demonstrates why
+unifying branch variables is not automatically a sound summary of both
+runtime paths.  A soundness result would need a defined meaning for primitive
+effects, explicit rules for input and output constraints, and either a safe
+loss of information or a representation of alternative effects.
+
+\section{Repeated Code}
 \label{sec:loops}
 
-A loop has a back edge: the abstract stack produced by one pass must be usable
-again at the loop header.  A conventional abstract interpreter records a
-header state $I$, propagates the body through it, joins the result back into
-$I$, and iterates until a post-fixpoint is reached (with widening when needed)
-\cite{cousot1977}.  WebAssembly takes another route: block and loop label types
-are declared, and validation checks every transfer against those types.  The
-present checker does neither.  It uses a local operation inherited from the
-stack-effect calculus.
+A loop introduces a back edge.  The stack state produced by one pass must be
+valid at the next pass, and the state reported after the loop must cover every
+possible exit.
 
-\begin{definition}[One-versus-two repeated summary]
-For an effect $\pi$, define
-\[
-  \pi^\star_2 = \pi\meet(\pi\seq\pi)
-\]
-when both raw composition and the syntactic effect meet succeed; compact the
-result before storing it.
-\end{definition}
+A conventional data-flow analyzer maintains an abstract stack at the loop
+header, propagates it through the body, merges the result back at the header,
+and repeats until the state stops changing.  That process computes a fixed
+point \cite{cousot1977}.  Another design is to require a declared loop
+interface and check every back edge against it.
 
-The test is finite and catches any nonzero net stack-depth change, because the
-depth changes of $\pi$ and $\pi^2$ are respectively $d$ and $2d$.  Agreement
-requires $d=0$.  That useful depth fact must not be generalized into a claim
-that the returned symbolic effect is an invariant for every iteration count.
-The problem can be seen without subtyping.
+The current evaluator uses a smaller local test:
 
-Let \texttt{x} be the only data-cell type and declare two synthetic
-primitives; \texttt{NEXT?} obtains an unconstrained termination flag:
 \begin{lstlisting}
-P      ( x[1] x[2] -- x[3] x[1] )
+onePass = effect(body)
+twoPass = compose(effect(body), effect(body))
+summary = commonEffect(onePass, twoPass)
+\end{lstlisting}
+
+This test terminates immediately and detects every nonzero net stack-depth
+change: if one pass changes the depth by one cell, two passes change it by two,
+so their interfaces cannot agree.  The test does not establish that the
+returned identity relationships hold after every number of passes.
+
+\subsection{Counterexample}
+
+The limitation can be shown with one data-cell type and two synthetic words:
+
+\begin{lstlisting}
+P      ( X[1] X[2] -- X[3] X[1] )
 NEXT?  ( -- flag )
 UNTIL  ( flag -- )
 \end{lstlisting}
-The last two effects cancel at the data boundary, so one complete loop pass has
-the effect of \texttt{P}.  On concrete symbolic names, that pass maps
-$A\,B$ to $C\,A$, two passes map it
-to $D\,C$, and three map it to $E\,D$.  Up to consecutive renaming,
-\[
-\begin{aligned}
- \pi   &=(x[1]\;x[2]--x[3]\;x[1]),\\
- \pi^2 &=(x[1]\;x[2]--x[3]\;x[4]),\\
- \pi^3 &=(x[1]\;x[2]--x[3]\;x[4]).
-\end{aligned}
-\]
-Only the one-pass effect says that the top result is the original lower input.
-Nevertheless, the current syntactic meet can unify the unrelated variable in
-$\pi^2$ with that input.  Because \texttt{NEXT?} may return true after any pass, this loop has arbitrary
-finite execution counts, yet it is accepted:
+
+\texttt{NEXT?} supplies a termination flag.  It is immediately consumed by
+\texttt{UNTIL}, so one complete loop pass has the data-stack effect of
+\texttt{P}.
+
+Using symbolic values, repeated \texttt{P} executions behave as follows:
+
+\begin{lstlisting}
+input:         A B
+one pass:      C A
+ two passes:   D C
+three passes:  E D
+\end{lstlisting}
+
+Only one pass preserves the original lower input in the top result.  The
+two-pass and three-pass effects contain no output tied to either original
+input.  Nevertheless, the current join can identify an unrelated two-pass
+variable with the original input.  It accepts:
+
 \begin{lstlisting}
 : TEST  BEGIN P NEXT? UNTIL ;
 \end{lstlisting}
-and the native artifact reports
+
+and reports:
+
 \begin{lstlisting}
-TEST ( x[2] x[1] -- x[3] x[2] )
+TEST ( X[2] X[1] -- X[3] X[2] )
 \end{lstlisting}
-which is alpha-equivalent to the one-pass correlation.  Composing that reported
-summary with itself produces the uncorrelated two-pass effect, not the reported
-summary.  Therefore a checker requiring an inductive or idempotent summary
-would reject this candidate (or weaken it to an uncorrelated summary) even
-though the one-versus-two routine accepts it.
 
-This example also qualifies the phrase ``strictly weaker.''  In a depth-only
-domain the one-versus-two test already proves zero net depth, and a fixpoint
-analysis may accept the same loop with a less precise invariant.  The precise
-claim is not that every fixpoint checker rejects more programs.  It is that
-$\pi\meet\pi^2$, with the implemented syntactic meet, is not by itself a proof
-that its returned type-and-identity contract describes all $\pi^j$.
+This report is equivalent, after renaming, to the one-pass relationship.
+Composing the reported summary with itself loses that relationship, so the
+summary is not stable.  A checker requiring an inductive loop interface would
+reject this candidate or weaken it to an interface with no input/output
+identity claim.
 
-The native word \texttt{ev-spec-pistar} implements exactly this local rule, and
-the declarative \texttt{repeat} constructor calls it.  It does not calculate a
-control-flow fixpoint or check the result for inductiveness.  The notation
-$\pi^\star_2$ is used to avoid confusing the implementation with Kleene star.
+This example gives the precise limitation.  The one-versus-two rule is useful
+for depth checking, but it is not a proof that the returned typed data-flow
+summary covers arbitrary iteration counts.
 
-\section{Declarative Source Semantics}
+\section{Processing Forth Source}
+\label{sec:source}
 
-The effect algebra is only one layer of a source checker.  Forth parser words
-can consume names or delimited text, definitions extend the dictionary, and
-control words are immediate.  The specification format attaches metadata such
-as
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+Stack-effect composition alone cannot process Forth source.  Some words consume
+the next name, scan to a delimiter, start a definition, end a definition, or
+execute immediately during compilation.  The specification format records
+these roles:
+
 \begin{lstlisting}
-"("      parse until ")"       ( -- )
-CONSTANT parse word define     ( x -- )
-VARIABLE parse word define     ( -- a-addr )
-:        parse word define colon ( -- )
-IF       control if            ( flag -- )
+"("      parse until ")"          ( -- )
+CONSTANT parse word define        ( X -- )
+VARIABLE parse word define        ( -- a-addr )
+:        parse word define colon  ( -- )
+;        control end              ( -- )
+IF       control if               ( flag -- )
+literal integer                   ( -- n )
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-Ordinary consumed comments are not trusted as type declarations.  Thus a
-source comment \texttt{( -- n )} cannot override inference.  Recognized
-locals syntax may provide a provisional definition shape.
 
-There are two different effects around a control word.  For example,
-\texttt{IF} consumes a run-time data-stack flag, but while compiling it also
-places an \texttt{orig} item on the Forth control-flow stack; \texttt{THEN}
-resolves that item \cite{forth2012}.  The present profile records the first as
-\texttt{( flag -- )} and records the second only as parser metadata such as
-\texttt{control if} or \texttt{control fi}.  Structural parsing catches
-misnested or missing delimiters, but the control-flow stack is not represented
-as a second typed stack effect.  Adding effects over standard items such as
-\texttt{orig}, \texttt{dest}, and \texttt{do-sys} would permit compile-time
-stack checking independently of the run-time data-stack analysis.
+Ordinary comments are consumed but are not trusted as type declarations.
+Thus a source comment such as \texttt{( -- n )} cannot override an inferred
+effect.  A recognized locals declaration may provide a provisional definition
+shape, but that is a separate parser feature.
 
-Structured controls are supplied through paired \texttt{syntax:} and
-\texttt{effect:} descriptions.  A conditional can be specified as follows (the demo spelling \texttt{FI} is a
-synonym for the usual \texttt{THEN}):
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+\subsection{Declarative control structures}
+
+Control syntax can be described by a source pattern and an effect recipe.  The
+demo spelling \texttt{FI} is a synonym for the usual \texttt{THEN}:
+
 \begin{lstlisting}
 syntax:
   IF <then branch> [ELSE <else branch>] FI
@@ -616,88 +535,53 @@ effect:
   IF
   either <then branch> <else branch>
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-The effect-template language is
-\[
-E ::= \epsilon \mid \langle s\rangle \mid c \mid E_1E_2
-    \mid \mathsf{either}(E_1,E_2) \mid \mathsf{repeat}(E),
-\]
-where $\langle s\rangle$ refers to a captured source segment and $c$ is a
-control-word runtime effect.  Its implemented semantics is
-\begin{align*}
-\eval{\epsilon}&=\id,\\
-\eval{\langle s\rangle}&=X_s,\\
-\eval{c}&=\Gamma(c),\\
-\eval{E_1E_2}&=\eval{E_1}\odot\eval{E_2},\\
-\eval{\mathsf{either}(E_1,E_2)}&=
-  \overline{\meet}(\eval{E_1},\eval{E_2}),\\
-\eval{\mathsf{repeat}(E)}&=
-  \overline{\star}_2(\eval{E}),
-\end{align*}
-where bars denote totalization with $\zero$ and include compaction after a
-successful raw operation.
 
-\section{The \texttt{ex1} Input/Output Example}
-\label{sec:ex1}
+The recipe language has three important operations: sequence captured regions,
+combine two alternatives, and apply the one-versus-two test to a repeated
+region.  Bare control words contribute their declared runtime data-stack
+effects.  Parser behavior and data-stack behavior therefore remain separate
+from the combination algorithms.
 
-The bundled \texttt{real} profile gives a complete, reproducible example of
-the evaluator interface.  It consists of the three files
-\texttt{ex1types.txt}, \texttt{ex1specs.txt}, and \texttt{ex1prog.txt}.  The
-launcher command is
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+\subsection{The compile-time control-flow stack}
+
+A control word has both a runtime role and a compilation role.  At runtime,
+\texttt{IF} consumes a flag.  During compilation, the Forth standard describes
+\texttt{IF} as producing an \texttt{orig} item on the control-flow stack;
+\texttt{THEN} resolves that item \cite{forth2012}.
+
+The current checker records \texttt{( flag -- )} as the runtime data-stack
+effect and records \texttt{control if} as parser metadata.  Structural parsing
+catches missing or misnested delimiters, but it does not represent the
+control-flow stack as a second typed stack.  A future extension could assign
+compile-time effects over items such as \texttt{orig}, \texttt{dest}, and
+\texttt{do-sys}, independently of runtime data-stack effects.
+
+\section{Complete Example}
+\label{sec:example}
+
+The bundled \texttt{real} profile consists of:
+
+\begin{itemize}
+  \item \path{ex1types.txt}, containing types and subtype edges;
+  \item \path{ex1specs.txt}, containing word and parser specifications;
+  \item \path{ex1prog.txt}, containing the checked source.
+\end{itemize}
+
+Run it from the artifact root with:
+
 \begin{lstlisting}
 ./run-evaluator-gforth.sh real
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-or, equivalently, an explicit invocation of
-\texttt{gforth-evaluator.fs} with \texttt{--types}, \texttt{--specs}, and
-\texttt{--prog} arguments.
 
-\par\noindent\begin{minipage}{\linewidth}
-\subsection{Type input}
+\subsection{Representative profile entries}
 
-The type file declares canonical names, aliases, subtype edges, and scanner
-delimiters.  Its essential declarations are:
-\begin{lstlisting}
-type X cell x
-type n number N
-type char c
-type flag boolean f
-type addr a
-type c-addr ca
-type a-addr aa
-type xt
+The type declarations include \texttt{X}, \texttt{n}, \texttt{char},
+\texttt{flag}, \texttt{addr}, \texttt{c-addr}, and \texttt{a-addr}.  Relevant
+word declarations are:
 
-rel n < X
-rel flag < n
-rel addr < X
-rel char < n
-rel c-addr < addr
-rel a-addr < c-addr
-rel xt < X
-scanner EOL "\n"
-\end{lstlisting}
-\end{minipage}\par
-For example, \texttt{X}, \texttt{cell}, and \texttt{x} name one canonical
-type, while \texttt{a-addr} is more precise than \texttt{c-addr}.  The
-loader computes the transitive closure, so it also knows
-$\mathit{a\mbox{-}addr}<\mathit{addr}<X$.
-
-\subsection{Specification input}
-
-The specification file supplies both runtime effects and source-processing
-metadata.  Representative entries are:
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
 \begin{lstlisting}
 DUP      ( X[1] -- X[1] X[1] )
 SWAP     ( X[2] X[1] -- X[1] X[2] )
-"("      parse until ")" ( -- )
-:        parse word define colon ( -- )
-;        control end ( -- )
 literal integer ( -- n )
 IF       control if ( flag -- )
 ELSE     control else ( -- )
@@ -711,29 +595,23 @@ DP       ( -- a-addr )
 C@       ( c-addr -- char )
 0=       ( n -- flag )
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-Thus the same input describes ordinary words, literal recognition, parser
-words, defining words, and control roles.  The indexed effects of \texttt{DUP}
-and \texttt{SWAP} preserve correlations; \texttt{@} and \texttt{C@} exercise
-the address subtype chain.  \texttt{DP} is a system-specific demo word denoting
-the data-space (dictionary) pointer; it is not assumed implicitly and has the
-declaration \texttt{DP ( -- a-addr )} shown above.
 
-The current dictionary accepts one effect declaration per word, so it cannot
-directly overload \texttt{0=} with separate \texttt{( n -- flag )} and
-\texttt{( u -- flag )} entries.  A profile can instead declare their common
-accepted supertype.  For maximum Forth compatibility, the bundled
-\texttt{forth2012specs.txt} uses \texttt{0= ( x -- flag )}; a stricter numeric
-profile can introduce an \texttt{integer} type above both \texttt{n} and
-\texttt{u} and use \texttt{( integer -- flag )}.  True multiple-effect
-selection, as supported in other Forth typing work, remains a useful extension.
+\texttt{DP} is a system-specific demo word for the data-space or dictionary
+pointer.  It is not assumed by the checker; its \texttt{( -- a-addr )} effect
+is explicitly declared.
 
-\subsection{Program input and inferred output}
+The current specification dictionary accepts one effect per word.  It cannot
+directly declare both \texttt{0= ( n -- flag )} and
+\texttt{0= ( u -- flag )}.  A profile can instead use a shared accepted type.
+The bundled Forth-2012-like profile declares \texttt{0= ( x -- flag )}, which
+accepts both signed and unsigned cells.  A stricter profile can introduce an
+\texttt{integer} supertype above \texttt{n} and \texttt{u}.  Direct support
+for multiple effects or overload selection would preserve more precision.
 
-The program file defines five words and then checks one top-level sequence:
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+\subsection{Program and output}
+
+The program defines five words and checks one top-level phrase:
+
 \begin{lstlisting}
 : PEEK2 DUP @ SWAP @ ;
 : MAYSWAP IF SWAP FI ;
@@ -743,12 +621,9 @@ The program file defines five words and then checks one top-level sequence:
 
 DP DP C@ 0= KEEPIF
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-The source layout is immaterial outside parsed strings and comments.  The
-native run writes the following exact effects to \texttt{ex1prog.txt.log}:
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+
+The exact native log contains:
+
 \begin{lstlisting}
 PEEK2   ( a-addr[1] -- X[2] X )
 MAYSWAP ( X[1] X[1] flag -- X[1] X[1] )
@@ -756,18 +631,14 @@ NLOOP   ( n[1] -- n[1] )
 ULOOP   ( n[1] -- n[1] )
 KEEPIF  ( X[1] flag -- X[1] X[1] )
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-The \texttt{MAYSWAP} line is reproducible artifact output, but it is not the
-proper general interface of that word.  In standard-style notation the safe
-non-disjunctive summary is \texttt{( X1 X2 flag -- X3 X4 )}; a more precise
-system would retain the two possible output orders.  The repeated index in the
-actual line makes every \texttt{X} one symbolic value and is too restrictive,
-as explained in Section~\ref{sec:branches}.
 
-The top-level trace ends with
-\par\begin{samepage}
-\noindent\begin{minipage}{\linewidth}
+The \texttt{MAYSWAP} line is retained to make the artifact output
+reproducible, but Section~\ref{sec:branches} explains why it is too
+restrictive.  Its general single-effect interface should not claim that all
+four \texttt{X} positions hold one value.
+
+The top-level trace ends with:
+
 \begin{lstlisting}
 DP      ( -- a-addr[1] )
 DP      ( -- a-addr )
@@ -776,325 +647,242 @@ C@      ( a-addr -- char )
 KEEPIF  ( a-addr[1] flag -- a-addr[1] a-addr[1] )
 < a-addr[1] a-addr[1]
 \end{lstlisting}
-\end{minipage}
-\end{samepage}\par
-Type refinement occurs at \texttt{C@}: the producer yields
-\texttt{a-addr}, while \texttt{C@} requires \texttt{c-addr}.  Since
-$\mathit{a\mbox{-}addr}<\mathit{c\mbox{-}addr}$, composition succeeds and
-retains the more precise address information.  The flag from \texttt{0=} is
-then consumed by \texttt{KEEPIF}; both branches duplicate the surviving
-address, yielding the final pair of correlated \texttt{a-addr} cells.  The
-current native evaluator was run on both this complete profile and the
-command-line example in Section~\ref{sec:composition}; both produced the
-outputs shown above.
 
-\subsection{Acyclic effect equations}
+\texttt{C@} requires \texttt{c-addr}; \texttt{DP} provides the more specific
+\texttt{a-addr}, so matching succeeds.  In this profile \texttt{char} is a
+subtype of \texttt{n}, so \texttt{0=} accepts the result.  \texttt{KEEPIF}
+consumes the flag and duplicates the surviving address on either branch.
 
-Fix a finite parsed tree $T$ for one source body and environment $\Gamma$.
-Assume every undecomposed leaf has already been assigned an effect by word
-lookup, literal classification, or an earlier definition.  Associate a
-variable $X_A$ with every tree node $A$:
-\begin{align*}
- X_A&=\Gamma(A) &&\text{if $A$ is a leaf},\\
- X_A&=X_B\odot X_C &&\text{if $A$ sequences children $B,C$},\\
- X_A&=\widehat{\eval{E}}_X &&\text{if $A$ applies control template $E$}.
-\end{align*}
-Every right-hand side mentions only proper descendants, so the dependency
-graph is acyclic.
+\section{What the Implementation Computes}
+\label{sec:implementation}
 
-\begin{theorem}[Exact characterization of parsed-body checking]
-Let $T$ and $\Gamma$ satisfy the assumptions above.  The induced equation
-system has exactly one solution in
-\[
-D=\{\text{compacted effects}\}\cup\{\zero\}.
-\]
-For every segment $A$, the body evaluator returns its solution value $X_A$;
-it reports a clash at $A$ exactly when $X_A=\zero$.  The body is accepted if
-and only if the root value is nonzero.
-\end{theorem}
+After one non-recursive source body has been parsed, its evaluation is a
+post-order traversal of a finite syntax tree:
 
-\begin{proof}
-Proceed by induction on node height.  A leaf is fixed by $\Gamma$.  At a
-sequence node, the induction hypothesis uniquely fixes both child values and
-$\odot$ is a deterministic total function on $D$.  At a control node,
-structural induction on $E$ uniquely determines the result because each
-constructor invokes a deterministic totalized operator.  The evaluator visits
-the same children and applies the same operator.  Therefore it computes the
-unique equation value at every node, including the root.
-\end{proof}
+\begin{itemize}
+  \item a leaf obtains an effect from word lookup or literal classification;
+  \item a sequence node invokes straight-line composition;
+  \item a branch node invokes the common-effect operation;
+  \item a repetition node invokes the one-versus-two operation.
+\end{itemize}
 
-This is an exactness theorem for the implemented, post-parse computation; it is
-not a conventional progress-and-preservation theorem.  It does not cover the
-outer interpreter's evolving dictionary, provisional forward-reference
-summaries, recursion, or the semantic correctness of primitive specifications.
+Every node depends only on its children, and each implemented operation is
+deterministic.  The parsed body therefore has one implementation result: an
+effect or a clash.  This is a characterization of the program executed by the
+checker, not a type-soundness theorem.  It does not prove that primitive
+specifications match runtime behavior, and it does not cover unrestricted
+recursion, dynamic execution, or all dictionary construction.
 
-\section{Native Gforth Implementation}
+The native implementation is the single source file
+\path{gforth-evaluator.fs}.  Its main components are organized by prefix:
 
-The implementation is the single source file
-\texttt{gforth-evaluator.fs}.  Its word families mirror the formal layers:
-\begin{center}
-\begin{tabular}{@{}p{0.39\linewidth}p{0.55\linewidth}@{}}
-\hline
-Formal role & Representative Gforth words\\
-\hline
-canonical types and relation & \texttt{ev-ts-*}\\
-typed indexed symbols & \texttt{ev-sym-*}\\
-stack-effect records & \texttt{ev-spec-*}\\
-linear reduction and normalization & \texttt{ev-spec-list-*}\\
-specification dictionary & \texttt{ev-ss-*}\\
-source scanning and program parsing & \texttt{ev-sc-*}, \texttt{ev-parse-*}\\
-diagnostics and log output & \texttt{ev-diag-*}, \texttt{ev-log-*}\\
-command-line driver & \texttt{ev-parse-args}, \texttt{ev-run-native}\\
-\hline
-\end{tabular}
-\end{center}
+\begin{itemize}
+  \item \texttt{ev-ts-*}: types, aliases, and subtype relationships;
+  \item \texttt{ev-sym-*}: typed cells and symbolic identifiers;
+  \item \texttt{ev-spec-*}: stack effects and the three combination algorithms;
+  \item \texttt{ev-ss-*}: specification dictionary;
+  \item \texttt{ev-sc-*} and \texttt{ev-parse-*}: scanning and source parsing;
+  \item \texttt{ev-diag-*} and \texttt{ev-log-*}: diagnostics and logs.
+\end{itemize}
 
-Strings, growable vectors, source spans, type symbols, effects, and control
-expressions are represented by explicitly allocated Gforth records.  The
-checker normalizes CR, LF, and CRLF input, clones mutable dictionary effects
-before evaluation, allocates disjoint wildcard ranges, and builds the final
-annotation from the same normalized working value as the final effect.  The
-launcher reserves a 4 MiB dictionary.
+Effects are mutable records.  Dictionary effects are deep-cloned before use,
+independent branches receive disjoint identifier ranges, and input line
+endings are normalized.  These details prevent one analysis from changing a
+later dictionary lookup.
 
-For effects of visible sizes $m$ and $n$, boundary matching itself performs at
-most $\min(m,n)$ recursive matches.  The actual cost is higher because each
-match substitutes through the current working vectors.  With this
-representation, reducing a program of $N$ words is roughly quadratic in the
-largest intermediate symbolic effect in the worst case.  A union--find
-representation for identities and persistent stack rows would reduce copying.
+Boundary matching is linear in the shorter touching boundary, but every match
+currently substitutes through complete working vectors.  Large intermediate
+effects can therefore make reduction roughly quadratic in effect size.  A
+union--find structure for identifier classes would reduce repeated copying.
 
-Mutation imposes three implementation obligations:
-\begin{enumerate}
-  \item dictionary effects must be deep-cloned before evaluation;
-  \item independently evaluated branches need disjoint wildcard ranges;
-  \item normalization and wildcard allocation must be deterministic across
-        repeated native runs.
-\end{enumerate}
-All three are handled explicitly by the current Gforth source.
+\section{Artifact and Evaluation}
+\label{sec:artifact}
 
-\section{Artifact Contents and Evaluation}
+\subsection{Artifact manifest}
 
-\subsection{Manifest and reproduction}
+The files required for the paper example are included explicitly.  The main
+artifact paths are:
 
-The example in Section~\ref{sec:ex1} is not reproduced by the Forth-2012 files
-alone.  Its required input trio is \texttt{ex1types.txt},
-\texttt{ex1specs.txt}, and \texttt{ex1prog.txt}.  The accompanying artifact
-contains the following paths:
-\begin{center}
-\small
-\begin{tabular}{@{}p{0.38\linewidth}p{0.53\linewidth}@{}}
-\hline
-Path & Role\\
-\hline
-\texttt{gforth-evaluator.fs} & native checker\\
-\texttt{run-evaluator-gforth.sh}, \texttt{.bat} & Unix and Windows launchers\\
-\texttt{ex1types.txt}, \texttt{ex1specs.txt}, \texttt{ex1prog.txt} & complete Section~\ref{sec:ex1} profile\\
-\texttt{forth2012types.txt}, \texttt{forth2012specs.txt}, \texttt{forth2012prog.txt} & larger Forth-2012-like profile\\
-\texttt{testdata/positive}, \texttt{testdata/negative} & regression corpus\\
-\texttt{README.md}, \texttt{EVALUATOR.md} & formats, commands, and limitations\\
-\hline
-\end{tabular}
-\end{center}
-From the artifact root, the exact command for the paper example is
-\begin{lstlisting}
-./run-evaluator-gforth.sh real
-\end{lstlisting}
-The launcher selects the three \texttt{ex1} files and creates
-\texttt{ex1prog.txt.log}; that log is output, not a required input.  An archive
-that omits the \texttt{ex1} trio cannot reproduce the named example.  The
-essential declarations and complete source are also printed in this paper so
-that the example does not depend on undocumented Forth idioms.
+\begin{itemize}
+  \item \path{gforth-evaluator.fs}: native checker;
+  \item \path{run-evaluator-gforth.sh} and
+        \path{run-evaluator-gforth.bat}: launchers;
+  \item \path{ex1types.txt}, \path{ex1specs.txt}, and
+        \path{ex1prog.txt}: the example in Section~\ref{sec:example};
+  \item \path{forth2012types.txt}, \path{forth2012specs.txt}, and
+        \path{forth2012prog.txt}: the larger Forth-2012-like profile;
+  \item \path{testdata/positive} and \path{testdata/negative}: regression
+        programs;
+  \item \path{README.md} and \path{EVALUATOR.md}: formats and commands.
+\end{itemize}
+
+The launcher creates \path{ex1prog.txt.log}; the log is output, not a required
+input.  An archive containing only the Forth-2012 files cannot reproduce the
+\texttt{ex1} example.
 
 \subsection{Regression results}
 
-The checked-in corpus has 29 programs: 13 positive and 16 negative.  The
-positive set consists of seven Forth-2012-profile examples, five custom-profile
-examples, and one article profile.  A fresh batch execution of the current
-\texttt{gforth-evaluator.fs} accepts all 13 positive programs.  Fourteen of the
-16 negative programs terminate with diagnostics.  The two misses are
-\texttt{linear\_clash.fs} and \texttt{top\_level\_clash.fs}, both involving the
-linear fragment \texttt{DP 1+}.  These cases identify gaps in top-level
-linear checking.
+The checked-in corpus contains 29 programs: 13 expected accepts and 16
+expected rejects.  A current native run produces the following results:
 
 \begin{center}
 \small
-\begin{tabular}{@{}p{0.34\linewidth}rrp{0.27\linewidth}@{}}
+\begin{tabular}{@{}lrrl@{}}
 \hline
-Corpus class & Programs & Expected & Current Gforth result\\
+Corpus class & Programs & Expected & Result \\
 \hline
-Forth-2012 positive & 7 & accept & 7 accepted\\
-Custom-profile positive & 5 & accept & 5 accepted\\
-Article positive & 1 & accept & 1 accepted\\
-Negative & 16 & reject & 14 rejected, 2 missed\\
+Forth-2012 positive & 7 & accept & 7 accepted \\
+Custom-profile positive & 5 & accept & 5 accepted \\
+Article positive & 1 & accept & 1 accepted \\
+Negative & 16 & reject & 14 rejected, 2 missed \\
 \hline
 \end{tabular}
 \end{center}
 
-The declarative Forth-2012 environment contains 50 lines of type declarations
-and 278 lines of vocabulary/control specifications.  The current native
-checker is 4,424 lines of Gforth.  These counts establish nontrivial scale, but
-they are not a performance benchmark or a soundness evaluation.  In
-particular, the corpus is regression evidence for the implemented semantics;
-it cannot expose an error shared by the checker and its specifications.
+The missed negative tests are \path{linear_clash.fs} and
+\path{top_level_clash.fs}, both involving the top-level phrase
+\texttt{DP 1+}.  They document a gap in top-level linear checking.
 
-\section{Relation to Other Typed Stack Systems}
+The Forth-2012 environment contains 50 lines of type declarations and 278
+lines of vocabulary and control specifications.  The native checker is 4,424
+lines of Gforth.  These counts show nontrivial scale but do not establish
+soundness or performance.  A regression corpus cannot reveal an error shared
+by the checker, its profile, and the expected result.
+
+\section{Related Work}
 \label{sec:related}
 
-\paragraph{Forth notation and algebraic effects.}
-The Forth standard uses stack comments and numeric suffixes to distinguish
-same-typed items, but does not make every comment a static judgment
-\cite{forth2012,rather1996}.  Earlier work by the present author developed
-algebraic composition, multiple effects, typed wildcards, inheritance, and
-must-analysis operators
-\cite{poial1991,poial1992,poial1994,poial2002,poial2006}.  The present artifact
-puts a subset of those ideas into one source-processing tool with inferred
-colon definitions, externally declared controls, and diagnostics.  Its lack of
-direct multiple-effect declarations should be noted: the earlier theory is
-more expressive on that point than the current input format.
+\paragraph{Forth stack effects.}
+The Forth standard uses stack comments and numeric suffixes but does not make
+every comment a static judgment \cite{forth2012,rather1996}.  Earlier work by
+the present author developed algebraic composition, multiple effects, typed
+wildcards, inheritance, and must-analysis operators
+\cite{poial1991,poial1992,poial1994,poial2002,poial2006}.  The current artifact
+combines a subset of those mechanisms with source parsing, external control
+declarations, inferred definitions, and diagnostics.  Its input format is less
+expressive than the earlier multiple-effect work because it currently accepts
+one effect per word.
 
 \paragraph{StrongForth.}
-StrongForth, developed by Stephan Becher, explores a direct response to legacy
-compatibility: design and use a Forth system around static typing rather than
-require an optional checker to accept arbitrary existing Forth.  Recent articles describe object-oriented typing,
-programming practice, and word overloading
+StrongForth, developed by Stephan Becher, integrates static typing into a Forth
+system.  Recent articles cover object-oriented typing, programming practice,
+and word overloading
 \cite{becher2025objects,becher2025practice,becher2025overloading}.  Overloading
-is particularly relevant to words such as \texttt{0=} and \texttt{EXECUTE},
-for which one weak common type can lose useful distinctions.  StrongForth is an
-integrated typed dialect and can attach language meaning to those mechanisms;
-the present work instead leaves the target Forth unchanged and loads an
-external, currently single-effect profile.  The systems therefore answer
-different questions, and StrongForth demonstrates that the restrictions of
-this artifact are not restrictions of Forth-like syntax itself.
+is relevant to words such as \texttt{0=} and \texttt{EXECUTE}, where one broad
+common type loses distinctions.  StrongForth targets a typed Forth dialect;
+the present checker leaves the target system unchanged and applies an
+external profile.  StrongForth therefore demonstrates that limitations of the
+current artifact are not inherent limitations of Forth syntax.
 
-\paragraph{Optional, pluggable Forth typing.}
-Riegler's 2015 thesis is the closest comparison in goals
-\cite{riegler2015}.  Its Haskell prototype offers optional checkers at several
-levels, from stack underflow/overflow checking to stronger static type
-consistency, and treats subtyping, control structures, reference types,
+\paragraph{Optional and pluggable Forth typing.}
+Riegler's thesis presents a Haskell prototype with optional checkers ranging
+from stack underflow and overflow checks to stronger static type consistency
+\cite{riegler2015}.  It covers subtyping, control structures, reference types,
 multiple stack effects, compile-time programming, object orientation, and
-higher-order programming.  It reports that gradual checking can improve stack
-discipline with relatively few annotations, although higher-order uses need
-annotations.  The current artifact contributes a native Gforth implementation,
-external parser/control profiles, symbolic source traces, and the parsed-body
-characterization of Section~\ref{sec:ex1}; it is narrower in multiple effects,
-compile-time stack typing, and higher-order features.  These are complementary
-experiments rather than evidence that one fixed strictness works for all
-legacy code.
+higher-order programming.  The present artifact adds a native Gforth
+implementation, external parser and control profiles, and source-oriented
+traces, but is narrower in multiple effects, compile-time stack typing, and
+higher-order features.
 
-\paragraph{Compositional low-level typing.}
-Stoddart and Knaggs study inference for stack-based languages
-\cite{stoddart1993}, and Saabas and Uustalu give compositional systems for
+\paragraph{Other stack-machine type systems.}
+Stoddart and Knaggs study type inference for stack-based languages
+\cite{stoddart1993}.  Saabas and Uustalu give compositional systems for
 stack-based low-level code \cite{saabas2006}.  Their instruction languages are
-more fixed than Forth source: they do not need an open-ended outer interpreter
-in which a word consumes the next name or changes parsing behavior.  In return,
-a fixed instruction and control model makes conventional typing rules and
-metatheory easier to state.
+more fixed than Forth source and do not need to model an open-ended outer
+interpreter in which words consume source text or create definitions.  A fixed
+instruction set makes conventional typing rules and soundness arguments easier
+to state.
 
-\paragraph{WebAssembly 3.0.}
+\paragraph{WebAssembly.}
 The current online WebAssembly Core Specification identifies itself as Release
-3.0, dated 23 July 2026 \cite{wasm3}.  Wasm does not infer a loop interface by
-comparing one and two body executions.  A block type declares the operand
-types consumed and produced; a control stack records each active block's
-label type and stack height; and branches are checked against the target
-label.  A loop branch targets the declared loop-label input, so every back edge
-is checked directly.  Unreachable code receives a controlled form of stack
-polymorphism.  The fixed bytecode and declared signatures support progress and
-preservation results and mechanized validation
-\cite{watt2018,mcdermott2022}.
+3.0, dated 23 July 2026 \cite{wasm3}.  WebAssembly does not infer a loop
+interface by comparing one and two body executions.  A block type declares the
+operand types consumed and produced.  A control stack records each active
+block's label type and stack height, and every branch is checked against its
+target label.  A loop back edge therefore targets a declared loop-label input.
+WebAssembly also defines controlled stack polymorphism for unreachable code
+and has substantial mechanized metatheory \cite{watt2018,mcdermott2022}.
 
-The contrast locates the present trade-off.  Wasm gives stronger loop and
-branch guarantees because its control syntax and block interfaces are fixed
-and explicit.  This Forth checker tries to infer interfaces from annotation-light
-source while loading parser and control behavior as data.  Symbolic identity
-and retargetability are additions, but compaction, syntactic branch meet, and
-the one-versus-two loop rule are costs of this particular design, not inherent
-features of concatenative type checking.
+This comparison locates the trade-off.  WebAssembly obtains stronger branch
+and loop guarantees from fixed control syntax and explicit block interfaces.
+The present Forth checker tries to infer interfaces from source while loading
+parser and control behavior as data.  Retargetability and source-level Forth
+support are benefits; lossy normalization, the syntactic branch join, and the
+one-versus-two loop rule are costs of this implementation strategy.
 
-\paragraph{First-class concatenative functions.}
-A \emph{stack row} is the arbitrary untouched prefix introduced in Section~3.
-A row variable $\rho$ lets one write the type of \texttt{DUP} schematically as
-``for every prefix $\rho$ and cell type $a$,
-$\rho\,a\to\rho\,a\,a$.''  A first-class quotation is itself a value carrying
-such a stack transformation.  If a word accepts a quotation that must work for
-\emph{every} $\rho$, the universal quantifier occurs inside the argument type.
-This placement is what ``rank-$n$'' (in the common case, rank-2) polymorphism
-means; it is more demanding than choosing $\rho$ once for the whole call.
+\paragraph{Higher-order concatenative code.}
+A generic stack-prefix parameter stands for any unchanged sequence below a
+word's visible operands.  A first-class quotation is a value that itself has a
+stack transformation.  Some higher-order words require a quotation that works
+for every possible stack prefix.  In type-system terminology, the generic
+parameter then appears inside a function argument type; this is often called
+higher-rank, or rank-2, polymorphism.  The term describes where the generic
+parameter is introduced, not the number of stack cells.
 
 A recent account of the IV language avoids automatic inference of these nested
-quantifiers by requiring definition annotations, extending operator types
-across stack depths, and giving execution and composition operators explicit
-parameters \cite{dinikeev2025}.  The current checker has indexed cell variables
-and an implicit frame, but no type for quotation values and no algorithm that
-unifies explicit row variables.  Supporting first-class quotations therefore
-requires an extension of the type language, not merely another vocabulary
-entry.
+generic types by requiring definition annotations and explicit parameters for
+execution and composition operators \cite{dinikeev2025}.  The current checker
+has an implicit unchanged prefix but no quotation type and no general
+algorithm for prefix variables.  Supporting first-class quotations therefore
+requires an extension of the type language, not another primitive word entry.
 
-\section{Limitations and Research Directions}
+\section{Limitations and Next Steps}
 
-The implementation realizes a restricted static analysis with the following
-scope limitations.
+The current implementation has the following known limits:
+
 \begin{itemize}
-  \item Acceptance is relative to trusted primitive and parser specifications.
-        An incorrect declaration can make the result unsound with respect to
-        concrete execution.
-  \item Comparable type meet rejects incomparable types even if the declared
-        poset contains a useful third lower bound.  The input format also has
-        no direct multiple-effect overload for one word.
-  \item Compaction stores away some implicit correlations instead of limiting
-        abbreviation to Forth-style output.
-  \item Branch meet is syntactic and may strengthen a precondition rather than
-        compute a safe summary of both paths.  \texttt{MAYSWAP} is a concrete
-        example.  In addition, the native unequal-depth helper currently
-        aligns its residual comparison at offset zero rather than $k$.
-  \item $\pi^\star_2$ is not an inductive loop-invariant computation; the
-        \texttt{P} example in Section~\ref{sec:loops} is accepted with a
-        non-idempotent reported summary.
-  \item Control words are parsed structurally, but their standard compile-time
-        control-flow-stack effects are not typed.
-  \item Non-local effects such as \texttt{THROW}, return-stack manipulation,
-        dynamic execution, and unrestricted metaprogramming are approximated
-        or outside the model.
-  \item The parsed-body theorem excludes recursive dictionary construction and
-        forward-reference machinery.
-  \item Two checked-in top-level negative tests are not currently rejected.
+  \item Primitive and parser specifications are trusted.  An incorrect
+        declaration can make a program appear valid.
+  \item Only equal or subtype-related boundary types match; one word cannot
+        yet have several alternative primitive effects.
+  \item Normalization can remove identity relationships that later checks
+        need.
+  \item Branch joining can impose unsupported identity constraints, as
+        \texttt{MAYSWAP} shows.  The unequal-depth implementation also uses the
+        wrong comparison offset in some cases.
+  \item Loop checking compares one pass with two and does not compute an
+        inductive header state.
+  \item Compile-time control-flow items are parsed structurally but are not
+        represented as typed stack effects.
+  \item Return-stack manipulation, unrestricted \texttt{EXECUTE}, non-local
+        \texttt{THROW}, self-modifying definitions, and unrestricted
+        metaprogramming require additional models.
+  \item Recursive dictionary construction and general forward references are
+        outside the deterministic parsed-body characterization.
+  \item Two top-level negative regression cases are currently missed.
 \end{itemize}
 
-The immediate engineering priorities are to retain identity classes internally,
-format inferred effects in consecutive Forth-standard style, correct the
-unequal-depth alignment, and repair the top-level clash path.  A union--find
-representation would avoid repeated whole-effect substitution.  Language-level
-extensions include multiple primitive effects, an explicit compile-time
-control-flow stack, row variables and quotation types, disjunctive branch
-summaries, and a control-flow fixpoint for loops.  A semantic development would
-add an operational model for primitives, variance-aware pre/post contracts,
-and a mechanized soundness argument for the parser-to-equation translation.
+The immediate engineering priorities are to preserve identity classes
+internally, adopt standard-style output, fix unequal-depth alignment, and
+repair top-level clash reporting.  Subsequent extensions can add multiple
+primitive effects, typed compile-time control items, explicit stack-prefix and
+quotation types, branch alternatives, and fixed-point loop analysis.  A
+semantic soundness result also requires an operational model for trusted
+primitives and precise rules for input and output constraints.
 
 \section{Conclusion}
 
-This work is specifically a configurable source-level checker for Forth, not a
-general account of all concatenative type systems.  Its useful core is small:
-subtype-aware boundary unification composes straight-line words, indexed cells
-carry value correlations through stack shuffles, and external profiles describe
-Forth's parser, dictionary words, and control syntax.  Once a non-recursive body
-has been parsed, the checker performs a deterministic bottom-up evaluation of
-those declarations.
+This work describes a configurable source-level checker for Forth rather than
+a general type system for every concatenative language.  Its core mechanisms
+are subtype-aware boundary matching, symbolic value identifiers, and external
+profiles for Forth words and parser behavior.  These mechanisms provide useful
+checking for straight-line source and support reproducible inference for
+non-recursive definitions.
 
-Branches and loops are where stack depth alone stops being enough.  The paper
-has made the current answers explicit rather than treating the names
-\texttt{glb} and \texttt{pistar} as guarantees: branch combination is a partial
-syntactic contract with known alignment and generality problems, and repetition
-compares only one execution with two.  The \texttt{MAYSWAP} and \texttt{P}
-examples delimit those claims.  StrongForth, Riegler's pluggable checker, and
-WebAssembly demonstrate other viable points in the design space.
+Branches and loops require more than stack-depth equality.  The current
+branch operator and one-versus-two loop test are executable experiments with
+clearly identified limits, not substitutes for path-sensitive control-flow
+analysis or inductive invariants.  The \texttt{MAYSWAP} and \texttt{P}
+examples make those limits concrete.
 
-The artifact is therefore useful as configurable, executable stack-effect
-documentation and as an experimental platform, but not yet as a sound static
-semantics for arbitrary Forth.  Preserving identities internally, adopting
-standard-style output, supporting multiple effects and compile-time control
-items, and replacing local repetition by an inductive analysis are concrete
-steps from this prototype toward that stronger goal.
+The artifact is useful as executable stack-effect documentation and as a
+platform for experiments with different Forth profiles.  Preserving identities
+internally, supporting alternative effects and compile-time control items, and
+using fixed-point loop analysis are direct steps toward stronger guarantees.
 
 \begin{thebibliography}{99}
+\small
+\raggedright
 
 \bibitem{becher2025objects}
 S. Becher.
@@ -1156,8 +944,7 @@ pp. 400--406, 1992.
 \bibitem{poial1994}
 J. Pöial.
 \newblock Algebraic specifications of stack effects.
-\newblock \emph{Forth Dimensions}, 16(4):18--20,
-November/December 1994.
+\newblock \emph{Forth Dimensions}, 16(4):18--20, November/December 1994.
 \newblock \url{https://www.forth.org/fd/FD-V16N4.pdf}.
 
 \bibitem{poial2002}
@@ -1182,6 +969,13 @@ J. Pöial.
 Vienna, Austria, pp. 20--23, 2008.
 \newblock \url{https://www.complang.tuwien.ac.at/anton/euroforth/ef08/papers/poial.pdf}.
 
+\bibitem{rather1996}
+E. D. Rather, D. R. Colburn, and C. H. Moore.
+\newblock The evolution of Forth.
+\newblock In \emph{History of Programming Languages---II}, pp. 625--670,
+ACM, 1996.
+\newblock \href{https://doi.org/10.1145/234286.1057832}{doi:10.1145/234286.1057832}.
+
 \bibitem{riegler2015}
 G. Riegler.
 \newblock \emph{Evaluation and Implementation of an Optional, Pluggable Type
@@ -1189,13 +983,6 @@ System for Forth}.
 \newblock Diploma thesis, Technische Universit\"at Wien, 2015.
 \newblock \href{https://doi.org/10.34726/hss.2015.27899}{doi:10.34726/hss.2015.27899}.
 \newblock \url{https://repositum.tuwien.at/handle/20.500.12708/7117}.
-
-\bibitem{rather1996}
-E. D. Rather, D. R. Colburn, and C. H. Moore.
-\newblock The evolution of Forth.
-\newblock In \emph{History of Programming Languages---II}, pp. 625--670,
-ACM, 1996.
-\newblock \href{https://doi.org/10.1145/234286.1057832}{doi:10.1145/234286.1057832}.
 
 \bibitem{saabas2006}
 A. Saabas and T. Uustalu.
