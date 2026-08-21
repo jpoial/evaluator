@@ -15,8 +15,6 @@
 \displaywidowpenalty=10000
 \setlength{\parskip}{0.25em}
 
-% Listings are deliberately unboxed.  Framed listings in earlier versions
-% could collide visually with nearby prose and page boundaries.
 \lstset{
   basicstyle=\ttfamily\small,
   columns=fullflexible,
@@ -31,8 +29,7 @@
   breakatwhitespace=true
 }
 
-\title{Configurable Source-Level Type Checking for Forth\\
-with Symbolic Stack Effects}
+\title{Configurable Static Type Checking for Forth}
 \author{Jaanus Pöial\\Tallinn University of Technology}
 \date{}
 
@@ -67,7 +64,7 @@ prototype rather than to stack languages in general.
 \end{abstract}
 
 \noindent\textbf{Keywords:} Forth; static analysis; stack effect; type checking;
-symbolic execution; concatenative language.
+symbolic execution; concatenative languages.
 
 \section{Introduction}
 
@@ -84,7 +81,7 @@ constrains only the visible top part of the stack; cells below that part remain
 unchanged.  A colon definition introduces a new word:
 
 \begin{lstlisting}
-: SQUARED  DUP * ;
+: SQUARED  ( n -- n*n ) DUP * ;
 \end{lstlisting}
 
 A conventional Forth system treats a stack effect as documentation.  The
@@ -200,7 +197,7 @@ suffix when all displayed items of that type denote one value, as in
 \texttt{DUP ( x -- x x )}.  Section~\ref{sec:indices} returns to output
 formatting.
 
-\section{Checking Straight-Line Code}
+\section{Checking Code Sequences}
 \label{sec:sequence}
 
 Suppose a checked prefix has one effect and the next word has another.  The
@@ -246,7 +243,7 @@ the first phrase is retained below the second word's results.  This states the
 base cases directly and avoids ambiguous primed variables in the recursive
 definition.
 
-\subsection{Worked example: \texttt{1 2 + DUP}}
+\subsection{Example: \texttt{1 2 + DUP}}
 
 The individual effects are:
 
@@ -287,7 +284,7 @@ For fixed identifier-renaming rules, this algorithm is deterministic.  Another
 implementation may choose different identifier numbers, but consistent
 renaming does not change the data-flow relationships.
 
-\section{Internal Identities and Forth-Style Output}
+\section{Internal Identities}
 \label{sec:indices}
 
 Internal analysis and user-facing formatting have different requirements.
@@ -306,7 +303,7 @@ can be presented as:
 ( x1 x2 -- x1 x3 )
 \end{lstlisting}
 
-This shows that the first result is the first input.  By contrast, an output
+This shows that the second element from the top is the second input (x1).  By contrast, an output
 such as \texttt{( x x -- x x )} hides that relationship.
 
 The current artifact keeps an identifier visible if it was written explicitly
@@ -397,7 +394,7 @@ helper starts this final comparison at vector offset zero instead of offset
 prefix and the remaining suffix have different types.  This is an
 implementation defect, not part of the intended rule.
 
-\subsection{The \texttt{MAYSWAP} limitation}
+\subsection{The \texttt{MAYSWAP} example}
 
 Consider:
 
@@ -426,7 +423,7 @@ runtime paths.  A soundness result would need a defined meaning for primitive
 effects, explicit rules for input and output constraints, and either a safe
 loss of information or a representation of alternative effects.
 
-\section{Repeated Code}
+\section{Loop Invariants}
 \label{sec:loops}
 
 A loop introduces a back edge.  The stack state produced by one pass must be
@@ -653,7 +650,7 @@ KEEPIF  ( a-addr[1] flag -- a-addr[1] a-addr[1] )
 subtype of \texttt{n}, so \texttt{0=} accepts the result.  \texttt{KEEPIF}
 consumes the flag and duplicates the surviving address on either branch.
 
-\section{What the Implementation Computes}
+\section{Computing Process}
 \label{sec:implementation}
 
 After one non-recursive source body has been parsed, its evaluation is a
