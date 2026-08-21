@@ -14,6 +14,7 @@
 \clubpenalty=10000
 \displaywidowpenalty=10000
 \setlength{\parskip}{0.25em}
+\pagestyle{empty}
 
 \lstset{
   basicstyle=\ttfamily\small,
@@ -35,6 +36,7 @@
 
 \begin{document}
 \maketitle
+\thispagestyle{empty}
 
 \begin{abstract}
 Forth words exchange operands through a data stack, and Forth source may also
@@ -48,12 +50,13 @@ value flow through words such as \texttt{DUP}, \texttt{SWAP}, and
 Straight-line code is checked by matching the output of one word with the
 input of the next.  Branches are combined only when the implementation can
 construct one common stack interface.  Repetition uses a finite test that
-compares one pass with two passes.  The paper explains each algorithm with
-source examples and pseudocode, including unequal branch depths and a loop
-counterexample.  It also separates the implemented checks from stronger
-claims: normalization can lose value-flow information, the current branch
-operator is not a sound summary for every program, and the loop test does not
-compute an inductive invariant.
+compares one pass with two passes.  The paper presents each algorithm through
+source examples and pseudocode.  The
+examples include unequal branch depths and a loop counterexample.  The paper
+also distinguishes implemented checks from stronger guarantees.  Normalization
+can discard value-flow information.  Moreover, the current branch operator is
+not a sound summary for every program, and the loop test does not compute an
+inductive invariant.
 
 The type hierarchy, primitive stack effects, parser words, defining words,
 literals, and control structures are supplied in text files.  The native
@@ -101,9 +104,9 @@ The evaluator in this project reads three inputs:
 It infers effects for source phrases and colon definitions without executing
 the program.  An earlier Java implementation established the basic framework
 \cite{poial2008}; the artifact studied here is the native Gforth version.  The
-same engine can use a permissive profile that mostly checks stack depth or a
-narrower profile that distinguishes numbers, flags, address classes, and
-execution tokens.
+engine supports either permissive or restrictive profiles.  A permissive
+profile primarily checks stack depth.  A restrictive profile can distinguish
+numbers, flags, address classes, and execution tokens.
 
 The checker addresses four tasks beyond tokenization:
 
@@ -172,8 +175,8 @@ A stack effect has an input side and an output side:
 An arbitrary deeper prefix passes through unchanged.  For example,
 \texttt{( n -- n )} can run on a stack containing other cells below the top
 number.  Type-system literature sometimes calls that arbitrary prefix a
-\emph{stack row}.  In implementation terms, it is simply a variable-length
-prefix that the word does not inspect.
+\emph{stack row}.  In this implementation, it is a variable-length prefix that
+the word does not inspect.
 
 Types alone do not describe stack shuffles.  Square-bracket identifiers record
 which positions carry the same symbolic value:
@@ -303,17 +306,19 @@ can be presented as:
 ( x1 x2 -- x1 x3 )
 \end{lstlisting}
 
-This shows that the second element from the top is the second input (x1).  By contrast, an output
-such as \texttt{( x x -- x x )} hides that relationship.
+This notation shows that the deeper output cell is the first input
+(\texttt{x1}).  By contrast, \texttt{( x x -- x x )} conceals that
+relationship.
 
-The current artifact keeps an identifier visible if it was written explicitly
-in a source specification or if the corresponding identity occurs more than
-twice in the working data.  An automatically created identity occurring once
-or twice may be printed without an identifier.  The implementation also stores
-that shortened effect for later use.  As a result, formatting can remove
-information needed by a later composition.
+The current artifact retains a visible identifier in either of two cases.  The
+identifier must have been written explicitly in a source specification, or its
+identity must occur more than twice in the working data.  An automatically
+created identity occurring once or twice may be printed without an identifier.
+The implementation also stores the abbreviated effect for subsequent use.
+Consequently, formatting can remove information required by a later
+composition.
 
-There is no analysis benefit to this policy; its advantage is only shorter,
+This policy provides no analytical benefit.  It provides only concise,
 backward-compatible output.  A revised implementation should:
 
 \begin{enumerate}
@@ -330,13 +335,12 @@ interface.  Matching stack depth is not sufficient: one arm may leave an
 address where the other leaves a number, or the arms may preserve different
 input values.
 
-A checker has several options.  It can retain a set of path-specific effects,
-compute a safe effect that forgets some facts, require programmer annotations,
-or reject programs for which it cannot construct one interface.  The current
-checker uses a partial syntactic operation named \texttt{glb} in the source.
-The name comes from earlier order-theoretic work, but the implementation should
-be understood through the algorithm below rather than through lattice
-terminology.
+A checker can retain path-specific effects or compute a conservative effect
+that discards selected facts.  It can instead require annotations or reject a
+program when no common interface can be constructed.  The current checker uses
+a partial syntactic operation named \texttt{glb} in the source.  Earlier
+order-theoretic work motivated this name.  The algorithm below, rather than
+lattice terminology, defines the implemented operation.
 
 \subsection{Equal visible depths}
 
@@ -383,9 +387,9 @@ The following pair is incompatible:
 (   --     )
 \end{lstlisting}
 
-The input-depth difference is one, but the output-depth difference is two.
-This is why \texttt{IF DUP THEN}, with no matching \texttt{ELSE}, is rejected:
-only one runtime path leaves the extra item.
+The input-depth difference is one, whereas the output-depth difference is two.
+Consequently, \texttt{IF DUP THEN}, without a matching \texttt{ELSE}, is
+rejected because only one runtime path leaves the additional item.
 
 The intended algorithm compares the shorter effect with the remaining slices
 of the longer effect after the \texttt{k}-cell prefix.  The current native
@@ -419,9 +423,9 @@ the two inputs into one identity and reports:
 
 That is not the general effect of \texttt{MAYSWAP}.  It demonstrates why
 unifying branch variables is not automatically a sound summary of both
-runtime paths.  A soundness result would need a defined meaning for primitive
-effects, explicit rules for input and output constraints, and either a safe
-loss of information or a representation of alternative effects.
+runtime paths.  A soundness result requires a semantics for primitive effects and explicit
+rules for input and output constraints.  It also requires either conservative
+information loss or a representation of alternative effects.
 
 \section{Loop Invariants}
 \label{sec:loops}
@@ -431,12 +435,12 @@ valid at the next pass, and the state reported after the loop must cover every
 possible exit.
 
 A conventional data-flow analyzer maintains an abstract stack at the loop
-header, propagates it through the body, merges the result back at the header,
-and repeats until the state stops changing.  That process computes a fixed
-point \cite{cousot1977}.  Another design is to require a declared loop
-interface and check every back edge against it.
+header.  It propagates the stack through the body and merges the result at the
+header.  The analysis repeats until the state stabilizes and thereby computes
+a fixed point \cite{cousot1977}.  Another design requires a declared loop
+interface and checks every back edge against it.
 
-The current evaluator uses a smaller local test:
+The current evaluator instead uses a bounded local test:
 
 \begin{lstlisting}
 onePass = effect(body)
@@ -444,10 +448,10 @@ twoPass = compose(effect(body), effect(body))
 summary = commonEffect(onePass, twoPass)
 \end{lstlisting}
 
-This test terminates immediately and detects every nonzero net stack-depth
-change: if one pass changes the depth by one cell, two passes change it by two,
-so their interfaces cannot agree.  The test does not establish that the
-returned identity relationships hold after every number of passes.
+This test has constant iteration depth.  It detects every nonzero net change in
+stack depth.  If one pass changes the depth by one cell, two passes change it
+by two; therefore, their interfaces cannot agree.  The test does not establish
+that the returned identity relationships hold after every number of passes.
 
 \subsection{Counterexample}
 
@@ -493,8 +497,8 @@ summary is not stable.  A checker requiring an inductive loop interface would
 reject this candidate or weaken it to an interface with no input/output
 identity claim.
 
-This example gives the precise limitation.  The one-versus-two rule is useful
-for depth checking, but it is not a proof that the returned typed data-flow
+This counterexample identifies the precise limitation.  The one-versus-two rule
+detects depth changes, but it does not prove that the returned typed data-flow
 summary covers arbitrary iteration counts.
 
 \section{Processing Forth Source}
@@ -523,7 +527,8 @@ shape, but that is a separate parser feature.
 \subsection{Declarative control structures}
 
 Control syntax can be described by a source pattern and an effect recipe.  The
-demo spelling \texttt{FI} is a synonym for the usual \texttt{THEN}:
+example profile uses \texttt{FI} as a synonym for the standard \texttt{THEN}
+spelling:
 
 \begin{lstlisting}
 syntax:
@@ -533,11 +538,11 @@ effect:
   either <then branch> <else branch>
 \end{lstlisting}
 
-The recipe language has three important operations: sequence captured regions,
-combine two alternatives, and apply the one-versus-two test to a repeated
-region.  Bare control words contribute their declared runtime data-stack
-effects.  Parser behavior and data-stack behavior therefore remain separate
-from the combination algorithms.
+The recipe language provides three principal operations.  It sequences captured
+regions, combines two alternatives, and applies the one-versus-two test to a
+repeated region.  Bare control words contribute their declared runtime
+data-stack effects.  Parser behavior and data-stack behavior therefore remain
+separate from the combination algorithms.
 
 \subsection{The compile-time control-flow stack}
 
@@ -593,17 +598,18 @@ C@       ( c-addr -- char )
 0=       ( n -- flag )
 \end{lstlisting}
 
-\texttt{DP} is a system-specific demo word for the data-space or dictionary
-pointer.  It is not assumed by the checker; its \texttt{( -- a-addr )} effect
-is explicitly declared.
+\texttt{DP} is a system-specific example word for the data-space or dictionary
+pointer.  The checker does not assign this effect implicitly.  The profile
+explicitly declares \texttt{( -- a-addr )}.
 
 The current specification dictionary accepts one effect per word.  It cannot
 directly declare both \texttt{0= ( n -- flag )} and
-\texttt{0= ( u -- flag )}.  A profile can instead use a shared accepted type.
-The bundled Forth-2012-like profile declares \texttt{0= ( x -- flag )}, which
-accepts both signed and unsigned cells.  A stricter profile can introduce an
-\texttt{integer} supertype above \texttt{n} and \texttt{u}.  Direct support
-for multiple effects or overload selection would preserve more precision.
+\texttt{0= ( u -- flag )}.  A profile can instead specify a shared accepted
+type.  For example, the bundled Forth-2012-like profile declares
+\texttt{0= ( x -- flag )}.  This effect accepts both signed and unsigned cells.
+A stricter profile can introduce an \texttt{integer} supertype above
+\texttt{n} and \texttt{u}.  Direct support for multiple effects or overload
+selection would preserve greater precision.
 
 \subsection{Program and output}
 
@@ -665,10 +671,11 @@ post-order traversal of a finite syntax tree:
 
 Every node depends only on its children, and each implemented operation is
 deterministic.  The parsed body therefore has one implementation result: an
-effect or a clash.  This is a characterization of the program executed by the
-checker, not a type-soundness theorem.  It does not prove that primitive
-specifications match runtime behavior, and it does not cover unrestricted
-recursion, dynamic execution, or all dictionary construction.
+effect or a clash.  This property characterizes the program executed by the
+checker; it is not a type-soundness theorem.  In particular, it does not show
+that primitive specifications agree with runtime behavior.  It also excludes
+unrestricted recursion, dynamic execution, and some forms of dictionary
+construction.
 
 The native implementation is the single source file
 \path{gforth-evaluator.fs}.  Its main components are organized by prefix:
@@ -742,9 +749,9 @@ The missed negative tests are \path{linear_clash.fs} and
 
 The Forth-2012 environment contains 50 lines of type declarations and 278
 lines of vocabulary and control specifications.  The native checker is 4,424
-lines of Gforth.  These counts show nontrivial scale but do not establish
-soundness or performance.  A regression corpus cannot reveal an error shared
-by the checker, its profile, and the expected result.
+lines of Gforth.  These counts document the artifact's scale but do not establish soundness or
+performance.  A regression corpus cannot reveal an error shared by the
+checker, its profile, and the expected result.
 
 \section{Related Work}
 \label{sec:related}
@@ -783,29 +790,29 @@ higher-order features.
 
 \paragraph{Other stack-machine type systems.}
 Stoddart and Knaggs study type inference for stack-based languages
-\cite{stoddart1993}.  Saabas and Uustalu give compositional systems for
-stack-based low-level code \cite{saabas2006}.  Their instruction languages are
-more fixed than Forth source and do not need to model an open-ended outer
-interpreter in which words consume source text or create definitions.  A fixed
-instruction set makes conventional typing rules and soundness arguments easier
-to state.
+\cite{stoddart1993}.  Saabas and Uustalu present compositional systems for
+stack-based low-level code \cite{saabas2006}.  These works assume more
+restricted instruction languages than Forth source.  They therefore do not
+model an extensible outer interpreter in which words consume source text or
+create definitions.  A fixed instruction set facilitates conventional typing
+rules and soundness arguments.
 
 \paragraph{WebAssembly.}
-The current online WebAssembly Core Specification identifies itself as Release
-3.0, dated 23 July 2026 \cite{wasm3}.  WebAssembly does not infer a loop
-interface by comparing one and two body executions.  A block type declares the
-operand types consumed and produced.  A control stack records each active
-block's label type and stack height, and every branch is checked against its
-target label.  A loop back edge therefore targets a declared loop-label input.
-WebAssembly also defines controlled stack polymorphism for unreachable code
-and has substantial mechanized metatheory \cite{watt2018,mcdermott2022}.
+The online WebAssembly Core Specification identifies itself as Release 3.0
+\cite{wasm3}.  WebAssembly does not infer a loop interface by comparing one and
+two executions of a body.  A block type declares the operand types consumed
+and produced.  A control stack records each active block's label type and stack
+height.  Every branch is checked against its target label.  A loop back edge
+therefore targets a declared loop-label input.  WebAssembly also defines
+controlled stack polymorphism for unreachable code and has mechanized
+metatheory \cite{watt2018,mcdermott2022}.
 
 This comparison locates the trade-off.  WebAssembly obtains stronger branch
 and loop guarantees from fixed control syntax and explicit block interfaces.
-The present Forth checker tries to infer interfaces from source while loading
-parser and control behavior as data.  Retargetability and source-level Forth
-support are benefits; lossy normalization, the syntactic branch join, and the
-one-versus-two loop rule are costs of this implementation strategy.
+The present Forth checker infers interfaces from source while loading parser
+and control behavior as data.  This strategy supports retargeting and
+source-level Forth analysis.  Its limitations include lossy normalization, the
+syntactic branch join, and the one-versus-two loop rule.
 
 \paragraph{Higher-order concatenative code.}
 A generic stack-prefix parameter stands for any unchanged sequence below a
@@ -862,20 +869,20 @@ primitives and precise rules for input and output constraints.
 This work describes a configurable source-level checker for Forth rather than
 a general type system for every concatenative language.  Its core mechanisms
 are subtype-aware boundary matching, symbolic value identifiers, and external
-profiles for Forth words and parser behavior.  These mechanisms provide useful
-checking for straight-line source and support reproducible inference for
-non-recursive definitions.
+profiles for Forth words and parser behavior.  These mechanisms check
+straight-line source and provide reproducible inference
+for non-recursive definitions.
 
-Branches and loops require more than stack-depth equality.  The current
-branch operator and one-versus-two loop test are executable experiments with
-clearly identified limits, not substitutes for path-sensitive control-flow
-analysis or inductive invariants.  The \texttt{MAYSWAP} and \texttt{P}
-examples make those limits concrete.
+Branches and loops require more than stack-depth equality.  The current branch
+operator and one-versus-two loop test are experimental
+mechanisms with documented limitations.  They do not replace path-sensitive
+control-flow analysis or inductive invariants.  The \texttt{MAYSWAP} and
+\texttt{P} examples demonstrate these limitations.
 
-The artifact is useful as executable stack-effect documentation and as a
-platform for experiments with different Forth profiles.  Preserving identities
-internally, supporting alternative effects and compile-time control items, and
-using fixed-point loop analysis are direct steps toward stronger guarantees.
+The artifact provides executable stack-effect documentation and a platform for
+experiments with different Forth profiles.  Stronger guarantees require the
+preservation of internal identities, alternative effects, typed compile-time
+control items, and fixed-point loop analysis.
 
 \begin{thebibliography}{99}
 \small
@@ -884,7 +891,7 @@ using fixed-point loop analysis are direct steps toward stronger guarantees.
 \bibitem{becher2025objects}
 S. Becher.
 \newblock Statische Typpr\"ufung und Objektorientierung.
-\newblock \emph{Forth--Magazin Vierte Dimension}, 41(1):11--14, 2025.
+\newblock \emph{Forth--Magazin Vierte Dimension}, 41(1):11--15, 2025.
 \newblock \url{https://forth-ev.de/wiki/res/lib/exe/fetch.php/vd-archiv:4d2025-01.pdf}.
 
 \bibitem{becher2025practice}
@@ -896,7 +903,7 @@ S. Becher.
 \bibitem{becher2025overloading}
 S. Becher.
 \newblock Statische Typpr\"ufung: \"Uberladung von W\"ortern.
-\newblock \emph{Forth--Magazin Vierte Dimension}, 41(3):14--16, 2025.
+\newblock \emph{Forth--Magazin Vierte Dimension}, 41(3):14--17, 2025.
 \newblock \url{https://forth-ev.de/wiki/res/lib/exe/fetch.php/vd-archiv:4d2025-03.pdf}.
 
 \bibitem{cousot1977}
@@ -998,7 +1005,7 @@ B. Stoddart and P. J. Knaggs.
 \bibitem{wasm3}
 WebAssembly Community Group.
 \newblock \emph{WebAssembly Core Specification, Release 3.0}.
-\newblock Editor: A. Rossberg, 23 July 2026.
+\newblock Editor: A. Rossberg; online specification.
 \newblock \url{https://webassembly.github.io/spec/core/}.
 
 \bibitem{watt2018}
