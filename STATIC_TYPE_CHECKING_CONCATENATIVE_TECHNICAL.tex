@@ -26,9 +26,12 @@
   xrightmargin=0.5em,
   aboveskip=0.6em,
   belowskip=0.6em,
-  breaklines=true,
+  breaklines=false,
   breakatwhitespace=true
 }
+
+% Stack effects must remain indivisible in running text.
+\newcommand{\stackeffect}[1]{\mbox{\texttt{#1}}}
 
 \title{Configurable Static Type Checking for Forth}
 \author{Jaanus Pöial\\Tallinn University of Technology}
@@ -173,7 +176,7 @@ A stack effect has an input side and an output side:
 \end{lstlisting}
 
 An arbitrary deeper prefix passes through unchanged.  For example,
-\texttt{( n -- n )} can run on a stack containing other cells below the top
+\stackeffect{( n -- n )} can run on a stack containing other cells below the top
 number.  Type-system literature sometimes calls that arbitrary prefix a
 \emph{stack row}.  In this implementation, it is a variable-length prefix that
 the word does not inspect.
@@ -195,9 +198,9 @@ effect is used, its identifiers are renamed so that separate word calls cannot
 accidentally share variables.
 
 The bracket notation is explicit internal notation.  Standard Forth prose
-normally writes numeric suffixes, such as \texttt{n1 n2 -- n3}.  It omits the
+normally writes numeric suffixes, such as \stackeffect{n1 n2 -- n3}.  It omits the
 suffix when all displayed items of that type denote one value, as in
-\texttt{DUP ( x -- x x )}.  Section~\ref{sec:indices} returns to output
+\stackeffect{DUP ( x -- x x )}.  Section~\ref{sec:indices} returns to output
 formatting.
 
 \section{Checking Code Sequences}
@@ -307,7 +310,7 @@ can be presented as:
 \end{lstlisting}
 
 This notation shows that the deeper output cell is the first input
-(\texttt{x1}).  By contrast, \texttt{( x x -- x x )} conceals that
+(\texttt{x1}).  By contrast, \stackeffect{( x x -- x x )} conceals that
 relationship.
 
 The current artifact retains a visible identifier in either of two cases.  The
@@ -358,7 +361,7 @@ For example, these two store-like effects can be combined:
 
 The common interface requires \texttt{a-addr}, because it is the more specific
 address type accepted by both declarations.  The declared effect
-\texttt{IF ( flag -- )} is composed separately and accounts for the selector.
+\stackeffect{IF ( flag -- )} is composed separately and accounts for the selector.
 
 \subsection{Unequal visible depths}
 
@@ -377,7 +380,7 @@ shorter:  (      n --      char )
 \end{lstlisting}
 
 The longer effect makes one cell of the implicit prefix visible.  It preserves
-that cell, and its remaining \texttt{n -- char} behavior agrees with the
+that cell, and its remaining \stackeffect{n -- char} behavior agrees with the
 shorter effect.  The common interface is the longer effect.
 
 The following pair is incompatible:
@@ -520,7 +523,7 @@ literal integer                   ( -- n )
 \end{lstlisting}
 
 Ordinary comments are consumed but are not trusted as type declarations.
-Thus a source comment such as \texttt{( -- n )} cannot override an inferred
+Thus a source comment such as \stackeffect{( -- n )} cannot override an inferred
 effect.  A recognized locals declaration may provide a provisional definition
 shape, but that is a separate parser feature.
 
@@ -551,7 +554,7 @@ A control word has both a runtime role and a compilation role.  At runtime,
 \texttt{IF} as producing an \texttt{orig} item on the control-flow stack;
 \texttt{THEN} resolves that item \cite{forth2012}.
 
-The current checker records \texttt{( flag -- )} as the runtime data-stack
+The current checker records \stackeffect{( flag -- )} as the runtime data-stack
 effect and records \texttt{control if} as parser metadata.  Structural parsing
 catches missing or misnested delimiters, but it does not represent the
 control-flow stack as a second typed stack.  A future extension could assign
@@ -600,13 +603,13 @@ C@       ( c-addr -- char )
 
 \texttt{DP} is a system-specific example word for the data-space or dictionary
 pointer.  The checker does not assign this effect implicitly.  The profile
-explicitly declares \texttt{( -- a-addr )}.
+explicitly declares \stackeffect{( -- a-addr )}.
 
 The current specification dictionary accepts one effect per word.  It cannot
-directly declare both \texttt{0= ( n -- flag )} and
-\texttt{0= ( u -- flag )}.  A profile can instead specify a shared accepted
+directly declare both \stackeffect{0= ( n -- flag )} and
+\stackeffect{0= ( u -- flag )}.  A profile can instead specify a shared accepted
 type.  For example, the bundled Forth-2012-like profile declares
-\texttt{0= ( x -- flag )}.  This effect accepts both signed and unsigned cells.
+\stackeffect{0= ( x -- flag )}.  This effect accepts both signed and unsigned cells.
 A stricter profile can introduce an \texttt{integer} supertype above
 \texttt{n} and \texttt{u}.  Direct support for multiple effects or overload
 selection would preserve greater precision.
