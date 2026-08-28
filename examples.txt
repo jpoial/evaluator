@@ -1,0 +1,19 @@
+
+: test1 3 4 5 - + ;
+
+: test2 OR FALSE SWAP ;
+
+: test3 SWAP DUP @ ;
+
+: test4 IF 1 + FI ;
+
+: test5 IF DUP ELSE 0 FI ;
+
+: test6  IF ROT ELSE @ FI ;
+
+: test7 BEGIN SWAP OVER WHILE INVERT REPEAT ;
+
+: test8 BEGIN KEY 0= UNTIL ;
+
+: test9 IF @ ELSE C@ FI ;
+

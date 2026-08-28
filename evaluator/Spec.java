@@ -303,23 +303,9 @@ public class Spec {
       int n2 = rightSide.size();
       int m1 = t.leftSide.size();
       int m2 = t.rightSide.size();
-      Spec slong = null;
-      Spec sshort = null;
-      int plen = 0;
-      if (n1 > m1) {
-         slong = (Spec)this.clone();
-         sshort = (Spec)t.clone();
-         plen = n1 - m1;
-         if ((n2 - m2) != plen) return null;
-      } else {
-         slong = (Spec)t.clone();
-         sshort = (Spec)this.clone();
-         plen = m1 - n1;
-         if ((m2 - n2) != plen) return null;
-      }
-      Spec result = slong.cprefix (plen, tsys, ss);
-      if (result != null) result = result.unify (sshort, tsys, ss);
-      return result;
+      if ((n1 - m1) != (n2 - m2)) return null;
+      if (n1 >= m1) return unify (t, tsys, ss);
+      return t.unify (this, tsys, ss);
    } // end of glb()
 
    /**
@@ -345,6 +331,19 @@ public class Spec {
    } // end of piStar()
 
    /**
+    * Creates a merged input or output symbol for comparable types.
+    * Inputs retain the subtype; outputs retain the supertype.
+    */
+   TypeSymbol mergedSymbol (TypeSymbol first, TypeSymbol second,
+      int relation, int position, boolean output) {
+      if (relation == 0) return null;
+      boolean secondWins = output ? relation == 1 : relation == 2;
+      TypeSymbol winner = secondWins ? second : first;
+      return new TypeSymbol (winner.ftype, position,
+         first.explicitIndex | second.explicitIndex);
+   } // end of mergedSymbol()
+
+   /**
     * Unify len first symbols of leftside and rightside,
     * return null if it is impossible.
     */
@@ -361,24 +360,9 @@ public class Spec {
             TypeSymbol m1 = (TypeSymbol)result.leftSide.get (i);
             TypeSymbol m2 = (TypeSymbol)result.rightSide.get (i);
             int rel = ts.relation (m1.ftype, m2.ftype);
-            TypeSymbol mnew = null;        
-            switch (rel) {
-               case 0: // type conflict
-                  return null;
-               case 1: // m1 win
-                  mnew = new TypeSymbol (m1.ftype, ++result.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               case 2: // m2 win
-                  mnew = new TypeSymbol (m2.ftype, ++result.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               case 3: // equal types
-                  mnew = new TypeSymbol (m1.ftype, ++result.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               default: throw new RuntimeException (" no relation!!!");
-            }
+            TypeSymbol mnew = mergedSymbol (m1, m2, rel,
+               ++result.maxPosIndex, false);
+            if (mnew == null) return null;
             result.substitute (m1, mnew);
             result.substitute (m2, mnew);
          }
@@ -390,8 +374,9 @@ public class Spec {
    } // end of cprefix()
 
    /**
-    * Unify this spec with t starting from the last symbol,
-    * return null, if it is impossible.
+    * Unifies this effect with a no-deeper effect. Inputs are merged
+    * contravariantly, while outputs retain only types and correlations
+    * guaranteed by both effects.
     */
    Spec unify (Spec t, TypeSystem ts, SpecSet ss) {
       if (t == null) return null;
@@ -401,71 +386,59 @@ public class Spec {
       int q2 = t.rightSide.size();
       if (p1 < q1) return null;
       if (p2 < q2) return null;
+      int leftOffset = p1 - q1;
+      int rightOffset = p2 - q2;
+      if (leftOffset != rightOffset) return null;
       Spec result = (Spec)this.clone();
       result.incrementWild (0);
       result.maxPosIndex = result.maxPos();
       Spec tc = (Spec)t.clone();
       tc.incrementWild (result.maxPosIndex);
-      tc.maxPosIndex = tc.maxPos();
-      if (q1 > 0) {
-         for (int i=0; i<q1; i++) {
-            TypeSymbol m1 = (TypeSymbol)result.leftSide.get (i);
-            TypeSymbol m2 = (TypeSymbol)tc.leftSide.get (i);
-            int rel = ts.relation (m1.ftype, m2.ftype);
-            TypeSymbol mnew = null;        
-            switch (rel) {
-               case 0: // type conflict
-                  return null;
-               case 1: // m1 win
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               case 2: // m2 win
-                  mnew = new TypeSymbol (m2.ftype, ++tc.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               case 3: // equal types
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               default: throw new RuntimeException (" no relation!!!");
-            }
-            result.substitute (m1, mnew);
-            result.substitute (m2, mnew);
-            tc.substitute (m1, mnew);
-            tc.substitute (m2, mnew);
-         }
+      tc.maxPosIndex = Math.max (result.maxPosIndex, tc.maxPos());
+      for (int i=0; i<q1; i++) {
+         TypeSymbol m1 = (TypeSymbol)result.leftSide.get (i + leftOffset);
+         TypeSymbol m2 = (TypeSymbol)tc.leftSide.get (i);
+         int rel = ts.relation (m1.ftype, m2.ftype);
+         TypeSymbol mnew = mergedSymbol (m1, m2, rel,
+            ++tc.maxPosIndex, false);
+         if (mnew == null) return null;
+         result.substitute (m1, mnew);
+         result.substitute (m2, mnew);
+         tc.substitute (m1, mnew);
+         tc.substitute (m2, mnew);
       }
-      if (q2 > 0) {
-         for (int i=0; i<q2; i++) {
-            TypeSymbol m1 = (TypeSymbol)result.rightSide.get (i);
-            TypeSymbol m2 = (TypeSymbol)tc.rightSide.get (i);
-            int rel = ts.relation (m1.ftype, m2.ftype);
-            TypeSymbol mnew = null;        
-            switch (rel) {
-               case 0: // type conflict
-                  return null;
-               case 1: // m1 win
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
+      TypeSymbol [] firstOutput = new TypeSymbol [p2];
+      TypeSymbol [] secondOutput = new TypeSymbol [p2];
+      TypeSymbol [] mergedOutput = new TypeSymbol [p2];
+      for (int i=0; i<p2; i++) {
+         TypeSymbol m1 = (TypeSymbol)result.rightSide.get (i);
+         TypeSymbol m2 = (i < rightOffset) ?
+            (TypeSymbol)result.leftSide.get (i) :
+            (TypeSymbol)tc.rightSide.get (i - rightOffset);
+         TypeSymbol mnew = null;
+         if (m1.equals (m2)) {
+            mnew = m1;
+         } else {
+            for (int j=0; j<i; j++) {
+               if (firstOutput [j].equals (m1) &
+                   secondOutput [j].equals (m2)) {
+                  mnew = mergedOutput [j];
                   break;
-               case 2: // m2 win
-                  mnew = new TypeSymbol (m2.ftype, ++tc.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               case 3: // equal types
-                  mnew = new TypeSymbol (m1.ftype, ++tc.maxPosIndex,
-                     m1.explicitIndex | m2.explicitIndex);
-                  break;
-               default: throw new RuntimeException (" no relation!!!");
+               }
             }
-            result.substitute (m1, mnew);
-            result.substitute (m2, mnew);
-            tc.substitute (m1, mnew);
-            tc.substitute (m2, mnew);
+            if (mnew == null) {
+               int rel = ts.relation (m1.ftype, m2.ftype);
+               mnew = mergedSymbol (m1, m2, rel,
+                  ++tc.maxPosIndex, true);
+               if (mnew == null) return null;
+            }
          }
+         firstOutput [i] = m1;
+         secondOutput [i] = m2;
+         mergedOutput [i] = mnew;
+         result.rightSide.set (i, (TypeSymbol)mnew.clone());
+      }
       result.maxPosIndex = tc.maxPosIndex;
-      }
       SpecList tmp = new SpecList();
       tmp.add (result);
       result = tmp.normalize (result, ts, ss);

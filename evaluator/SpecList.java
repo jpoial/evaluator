@@ -19,6 +19,7 @@ public class SpecList extends LinkedList<Spec> {
 
    static class NormInfo {
       int occurrences = 0;
+      int resultOccurrences = 0;
       int assignedIndex = 0;
       boolean explicitIndex = false;
    } // end of NormInfo
@@ -224,13 +225,13 @@ public class SpecList extends LinkedList<Spec> {
       Iterator<TypeSymbol> it2 = tv.iterator();
       while (it2.hasNext()) {
          t = (TypeSymbol)it2.next();
-         addts (subst, t, -1);
+         addResultTs (subst, t);
       }
       tv = result.rightSide;
       it2 = tv.iterator();
       while (it2.hasNext()) {
          t = (TypeSymbol)it2.next();
-         addts (subst, t, -1);
+         addResultTs (subst, t);
       }
       Iterator<Spec> spit = iterator();
       while (spit.hasNext()) {
@@ -326,13 +327,26 @@ public class SpecList extends LinkedList<Spec> {
    } // end of addts()
 
    /**
+    * Records one occurrence from the final composed effect.
+    * @param table normalization metadata by type symbol
+    * @param key symbol occurring in the final result
+    */
+   static void addResultTs (Hashtable<TypeSymbol, NormInfo> table,
+      TypeSymbol key) {
+      addts (table, key, -1);
+      ((NormInfo)table.get (key)).resultOccurrences++;
+   } // end of addResultTs()
+
+   /**
     * Tells whether a symbol should keep a visible wildcard index after
-    * normalization.
+    * normalization. Singleton indices in the final result carry no
+    * correlation, even when the symbol occurs in the internal trace.
     * @param info accumulated metadata for one symbol
     * @return true if the wildcard index should stay visible
     */
    static boolean needsIndex (NormInfo info) {
-      return info.explicitIndex | (info.occurrences > 2);
+      return (info.resultOccurrences > 1) &
+         (info.explicitIndex | (info.occurrences > 2));
    } // end of needsIndex()
 
    /**

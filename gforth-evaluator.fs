@@ -1506,14 +1506,16 @@ variable ev-eval-result
 
 0 cells constant ev-norm.key
 1 cells constant ev-norm.count
-2 cells constant ev-norm.assigned
-3 cells constant ev-norm.explicit
-4 cells constant /ev-norm
+2 cells constant ev-norm.result-count
+3 cells constant ev-norm.assigned
+4 cells constant ev-norm.explicit
+5 cells constant /ev-norm
 
 : ev-norm-new { key -- entry }
   /ev-norm ev-xalloc { entry }
   key entry ev-norm.key + !
   0 entry ev-norm.count + !
+  0 entry ev-norm.result-count + !
   0 entry ev-norm.assigned + !
   0 entry ev-norm.explicit + !
   entry ;
@@ -1541,13 +1543,21 @@ variable ev-eval-result
   then ;
 
 : ev-needs-index? ( entry -- flag )
-  dup ev-norm.explicit + @ 0<>
-  swap ev-norm.count + @ 2 > or ;
+  \ A final singleton carries no visible correlation, even if
+  \ it occurs repeatedly in the internal per-word trace.
+  dup ev-norm.result-count + @ 1 >
+  over ev-norm.explicit + @ 0<>
+  rot ev-norm.count + @ 2 > or and ;
 
 : ev-add-norm-pass1 { sym table -- }
   sym table ev-norm-touch { entry }
   1 entry ev-norm.count + +!
   sym ev-sym.explicit + @ if 1 entry ev-norm.explicit + ! then ;
+
+: ev-add-result-norm-pass1 { sym table -- }
+  sym table ev-add-norm-pass1
+  sym table ev-find-norm { entry }
+  1 entry ev-norm.result-count + +! ;
 
 : ev-add-norm-pass2 { sym table next -- next' }
   sym table ev-find-norm { entry }
@@ -1560,6 +1570,11 @@ variable ev-eval-result
 : ev-scan-norm-pass1-vec { vec table -- }
   vec ev-vec-count@ 0 ?do
     i vec ev-vec@ table ev-add-norm-pass1
+  loop ;
+
+: ev-scan-result-norm-pass1-vec { vec table -- }
+  vec ev-vec-count@ 0 ?do
+    i vec ev-vec@ table ev-add-result-norm-pass1
   loop ;
 
 : ev-scan-norm-pass2-left { vec table next -- next' }
@@ -1624,8 +1639,8 @@ variable ev-eval-result
   loop
   max result ev-spec-increment-wild
   16 ev-vec-new { table }
-  result ev-spec.left + @ table ev-scan-norm-pass1-vec
-  result ev-spec.right + @ table ev-scan-norm-pass1-vec
+  result ev-spec.left + @ table ev-scan-result-norm-pass1-vec
+  result ev-spec.right + @ table ev-scan-result-norm-pass1-vec
   list ev-vec-count@ 0 ?do
     i list ev-vec@ { sp }
     sp ev-spec.left + @ table ev-scan-norm-pass1-vec
@@ -1760,8 +1775,9 @@ variable ev-eval-result
     0
   then ;
 
-: ev-new-merged-sym { m1 m2 rel max -- sym max' }
-  rel 2 = if
+: ev-new-merged-sym { m1 m2 rel max output? -- sym max' }
+  \ Inputs retain the subtype; branch outputs retain the supertype.
+  output? if rel 1 = else rel 2 = then if
     m2 ev-sym.type + @
   else
     m1 ev-sym.type + @
@@ -1792,7 +1808,8 @@ variable ev-eval-result
             rel 0= if
               false to ok
             else
-              m1 m2 rel rmax ev-new-merged-sym { fresh newmax }
+              m1 m2 rel rmax false ev-new-merged-sym {
+                fresh newmax }
               newmax to rmax
               m1 fresh result ev-spec-substitute drop
               m2 fresh result ev-spec-substitute drop
@@ -1810,26 +1827,83 @@ variable ev-eval-result
     result ev-spec-normalize-self
   then ;
 
-: ev-spec-unify-side ( count result-vec tc-vec result tc tcmax
-  ts -- tcmax' ok )
-   { count result-vec tc-vec result tc tcmax ts }
+: ev-spec-unify-inputs ( count offset result tc tcmax ts --
+  tcmax' ok )
+   { count offset result tc tcmax ts }
+  result ev-spec.left + @ { rleft }
+  tc ev-spec.left + @ { tleft }
   tcmax { currentmax }
   true { ok }
   count 0 ?do
     ok if
-      i result-vec ev-vec@ { m1 }
-      i tc-vec ev-vec@ { m2 }
+      i offset + rleft ev-vec@ { m1 }
+      i tleft ev-vec@ { m2 }
       m1 ev-sym.type + @ m2 ev-sym.type + @ ts ev-ts-relation {
         rel }
       rel 0= if
         false to ok
       else
-        m1 m2 rel currentmax ev-new-merged-sym { fresh newmax }
+        m1 m2 rel currentmax false ev-new-merged-sym {
+          fresh newmax }
         newmax to currentmax
         m1 fresh result ev-spec-substitute drop
         m2 fresh result ev-spec-substitute drop
         m1 fresh tc ev-spec-substitute drop
         m2 fresh tc ev-spec-substitute drop
+      then
+    then
+  loop
+  currentmax ok ;
+
+: ev-find-output-pair { m1 m2 first second merged -- sym|0 }
+  first ev-vec-count@ 0 ?do
+    m1 i first ev-vec@ ev-sym=
+    m2 i second ev-vec@ ev-sym= and if
+      i merged ev-vec@ unloop exit
+    then
+  loop
+  0 ;
+
+: ev-spec-unify-outputs ( count offset result tc tcmax ts --
+  tcmax' ok )
+   { count offset result tc tcmax ts }
+  result ev-spec.left + @ { rleft }
+  result ev-spec.right + @ { rright }
+  tc ev-spec.right + @ { tright }
+  count 4 ev-max ev-vec-new { first }
+  count 4 ev-max ev-vec-new { second }
+  count 4 ev-max ev-vec-new { merged }
+  tcmax { currentmax }
+  true { ok }
+  count 0 ?do
+    ok if
+      i rright ev-vec@ { m1 }
+      i offset < if
+        i rleft ev-vec@
+      else
+        i offset - tright ev-vec@
+      then { m2 }
+      m1 ev-sym.type + @ m2 ev-sym.type + @ ts ev-ts-relation {
+        rel }
+      rel 0= if
+        false to ok
+      else
+        0 { fresh }
+        m1 m2 ev-sym= if
+          m1 to fresh
+        else
+          m1 m2 first second merged ev-find-output-pair to fresh
+          fresh 0= if
+            m1 m2 rel currentmax true ev-new-merged-sym {
+              newsym newmax }
+            newsym to fresh
+            newmax to currentmax
+          then
+        then
+        m1 first ev-vec-push
+        m2 second ev-vec-push
+        fresh merged ev-vec-push
+        fresh ev-sym-clone i rright ev-vec-set
       then
     then
   loop
@@ -1843,10 +1917,12 @@ variable ev-eval-result
     s1 ev-spec-right-count { p2 }
     s2 ev-spec-left-count { q1 }
     s2 ev-spec-right-count { q2 }
-    p1 q1 < if
+    p1 q1 < p2 q2 < or if
       0
     else
-      p2 q2 < if
+      p1 q1 - { left-offset }
+      p2 q2 - { right-offset }
+      left-offset right-offset <> if
         0
       else
         s1 ev-spec-clone { result }
@@ -1854,13 +1930,12 @@ variable ev-eval-result
         result ev-spec-max-pos { tcmax0 }
         s2 ev-spec-clone { tc }
         tcmax0 tc ev-spec-increment-wild
-        tc ev-spec-max-pos { tcmax1 }
-        q1 result ev-spec.left + @ tc ev-spec.left + @ result tc
-          tcmax1 ts ev-spec-unify-side { tcmax2 ok1 }
+        tc ev-spec-max-pos tcmax0 ev-max { tcmax1 }
+        q1 left-offset result tc tcmax1 ts ev-spec-unify-inputs {
+          tcmax2 ok1 }
         ok1 if
-          q2 result ev-spec.right + @ tc ev-spec.right + @
-            result tc tcmax2 ts ev-spec-unify-side { tcmax3 ok2
-            }
+          p2 right-offset result tc tcmax2 ts
+            ev-spec-unify-outputs { tcmax3 ok2 }
           ok2 if
             tcmax3 result ev-spec.max-pos + !
             result ev-spec-normalize-self
@@ -1882,30 +1957,14 @@ variable ev-eval-result
     s1 ev-spec-right-count { n2 }
     s2 ev-spec-left-count { m1 }
     s2 ev-spec-right-count { m2 }
-    n1 m1 > if
-      n1 m1 - { plen }
-      n2 m2 - plen <> if
-        0
-      else
-        s1 plen ts ev-spec-cprefix { prefix }
-        prefix 0= if
-          0
-        else
-          prefix s2 ts ev-spec-unify
-        then
-      then
+    n1 m1 - n2 m2 - <> if
+      0
     else
-      m1 n1 - { plen }
-      m2 n2 - plen <> if
-        0
+      n1 m1 >= if
+        s1 s2
       else
-        s2 plen ts ev-spec-cprefix { prefix }
-        prefix 0= if
-          0
-        else
-          prefix s1 ts ev-spec-unify
-        then
-      then
+        s2 s1
+      then ts ev-spec-unify
     then
   then ;
 
