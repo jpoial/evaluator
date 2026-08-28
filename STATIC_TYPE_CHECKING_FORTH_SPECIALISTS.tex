@@ -214,28 +214,39 @@ compact only when printing.
 \section{Branches and control words}
 
 Two arms of an \texttt{IF} must be represented by one contract for the code
-that follows.  The checker calls the combining operation \texttt{glb}.  For
-equal-depth effects it unifies corresponding inputs and outputs, again taking
-the more specific of comparable types.  A mismatch in stack depth is accepted
-only when the extra input cells and the same number of extra output cells form
-a preserved prefix---the implicit frame made explicit by the longer arm.
-Otherwise the merge clashes.
+that follows.  The checker calls the combining operation \texttt{glb}.  The
+operation is variance-aware: aligned inputs retain the more specific comparable
+type required by either arm, whereas aligned outputs retain the more general
+comparable type guaranteed after either arm.  An output identity is retained
+only when both arms establish the same pair of source identities.
+
+A mismatch in visible depth is accepted when the effect with $k$ extra inputs
+also has exactly $k$ extra outputs.  The shorter effect is then understood to
+preserve an implicit $k$-cell deep prefix, and its active suffix is aligned with
+the longer effect.  Otherwise the merge clashes.  The implementation still
+requires aligned types to be directly comparable; it does not search for a
+third common type.
 
 Consider two store-like branch effects requiring respectively
 \[
  (\texttt{x a-addr}--), \qquad (\texttt{x c-addr}--).
 \]
 Because \texttt{a-addr} is more specific than \texttt{c-addr}, their common
-contract requires \texttt{a-addr}.  For a complete conditional, the declared
+contract requires \texttt{a-addr}.  Conversely, output types are widened: the
+branches \texttt{@ ( a-addr -- x )} and
+\texttt{C@ ( c-addr -- char )} meet at
+\texttt{( a-addr -- x )}, because \texttt{x}, not \texttt{char}, is the
+postcondition guaranteed by both.  For a complete conditional, the declared
 \texttt{IF ( flag -- )} effect is composed with that branch contract, so the
 selector is consumed as well.
 
 The operation should not be read as a union of all concrete executions.  It is
-a \emph{must} contract: one input/output description required to be valid for
-both alternatives.  The current rule is syntactic and intentionally strict.
-It catches the common Forth error where only one path leaves a value, while
-allowing paths that merely expose different amounts of an otherwise preserved
-frame.
+a \emph{must} contract: one input/output description valid for both
+alternatives.  Contravariant inputs make every arm executable; covariant
+outputs avoid promising a result type or value identity that only one arm
+provides.  It catches the common Forth error where the paths have different net
+stack changes while allowing different visible depths that describe the same
+implicit frame.
 
 Control syntax is not hard-wired into the effect algebra.  A profile can
 describe a source form and how its captured regions are reduced:
@@ -337,8 +348,8 @@ Representative profile declarations are \texttt{@ ( a-addr -- x )},
 \texttt{C@ ( c-addr -- char )}, \texttt{0= ( n -- flag )}, and the indexed
 stack operators shown earlier.  The inferred definitions are:
 \begin{lstlisting}
-PEEK2   ( a-addr[1] -- x[2] x )
-MAYSWAP ( x[1] x[1] flag -- x[1] x[1] )
+PEEK2   ( a-addr -- x x )
+MAYSWAP ( x x flag -- x x )
 NLOOP   ( n[1] -- n[1] )
 ULOOP   ( n[1] -- n[1] )
 KEEPIF  ( x[1] flag -- x[1] x[1] )
@@ -378,12 +389,10 @@ inspect in Gforth.
 
 The checked-in regression corpus contains 29 programs: 13 expected accepts and
 16 expected rejects.  A current native batch accepts all 13 positive cases and
-rejects 14 negative cases.  The two known misses are
-\texttt{linear\_clash.fs} and \texttt{top\_level\_clash.fs}, both involving
-the top-level phrase \texttt{DP 1+}.  This is evidence about the artifact, not
-a soundness result; in particular it documents a real gap in top-level linear
-checking.  The profile is also an assumption: tests cannot reveal an error
-shared by a primitive declaration and its expected output.
+rejects all 16 negative cases with diagnostics.  This is evidence about the
+artifact, not a soundness result.  The profile is also an assumption: tests
+cannot reveal an error shared by a primitive declaration and its expected
+output.
 
 \section{Scope and next steps}
 
@@ -395,11 +404,11 @@ Its limits should remain visible:
   \item primitive and parser specifications are trusted;
   \item only comparable types unify;
   \item compaction can lose implicit identity information;
-  \item branch merge is a strict syntactic common contract;
+  \item branch merge is a single variance-aware common contract, not a set of
+        path-specific effects;
   \item loop checking compares only one and two iterations;
   \item recursion, forward references, quotations, non-local exits, and
-        unrestricted compile-time behavior are not covered generally;
-  \item two known negative regression cases are currently missed.
+        unrestricted compile-time behavior are not covered generally.
 \end{itemize}
 
 The most direct improvements are to retain raw correlations until display, fix

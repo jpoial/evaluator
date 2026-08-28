@@ -207,7 +207,7 @@ Square brackets mark an optional boundary/segment pair. Segment names are writte
 An `EFFECT` section defines how segment effects and control-role effects combine:
 
 - a sequence composes effects from left to right;
-- `EITHER a b ...` computes the greatest lower bound of alternatives;
+- `EITHER a b ...` computes the variance-aware meet of alternatives;
 - `REPEAT a ...` applies the repetition/idempotence operation;
 - `<SEGMENT>` references a parsed segment;
 - any other atom references a control role.
@@ -254,9 +254,18 @@ The implementation also provides operations used by control-flow analysis:
 
 - **normalization** — compact wildcard numbering;
 - **unification** — reconcile comparable effects;
-- **greatest lower bound** — join branch alternatives;
+- **branch meet (`glb`)** — align implicit stack prefixes, retain the common
+  subtype at inputs and the common supertype at outputs, and preserve only
+  correlations guaranteed by every alternative;
 - **idempotence and repetition** — verify and summarize loop effects;
-- **prefix closure** — unify corresponding input/output prefixes.
+- **prefix closure** — unify corresponding input/output prefixes for the
+  idempotence operation.
+
+The branch meet is partial: the input- and output-depth differences must agree,
+and every aligned type pair must be directly comparable in the loaded type
+relation. The evaluator does not search for an unrelated third common type.
+For example, branches with `@ ( a-addr -- x )` and
+`C@ ( c-addr -- char )` meet at `( a-addr -- x )`.
 
 ## Output
 

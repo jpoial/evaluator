@@ -18,7 +18,7 @@ This article develops a mathematical view of static analysis for Forth-like
 stack languages. The central object is the symbolic stack effect, a typed and
 identity-sensitive abstraction of how a word transforms the data stack. Three
 operations organize the calculus: composition of linear effects, branch merging
-as greatest lower bound in a must-analysis manner, and loop summarization by calculating
+as a variance-aware greatest lower bound in a contract order, and loop summarization by calculating
 idempotent effects. These operations provide a basis for reasoning about
 sequencing, control-flow joins, and repeated execution in Forth programs.
 \end{abstract}
@@ -41,8 +41,8 @@ repeated execution.
 This article formulates these questions in a stack-effect calculus. A
 non-clashing stack effect is a pair of symbolic stacks, with a separate clash
 element for failure; sequencing corresponds to multiplication; branch convergence
-is a greatest lower bound (most restrictive branch selected); and loop reasoning is approximated
-by an idempotent effect.
+is a variance-aware greatest lower bound of effect contracts; and loop reasoning is
+approximated by an idempotent effect.
 The calculus developed here follows the line of work
 in~\cite{poial1990,poial1991,poial2002,poial2006} and its executable
 implementation in~\cite{poial2008}.
@@ -135,21 +135,23 @@ partial and information-sensitive, but the semigroup intuition remains.
 
 \paragraph{Branch merging.}
 
-For control-flow joins we need an information order. Let $\gamma(e)$ be the set
-of concrete stack transformations represented by abstract effect $e$, and
-define $e_1 \leq e_2$ iff $\gamma(e_1) \subseteq \gamma(e_2)$.
+For control-flow joins we use an order on contracts rather than plain
+inclusion of their input/output relations.  A lower contract may impose a
+stronger input requirement but must make a weaker output promise.  Thus the
+input and output components have opposite variance.
 
-Thus $e_1 \leq e_2$ means that $e_1$ is at least as informative as $e_2$; it
-describes a smaller set of possible behaviors and therefore gives a stronger
-guarantee.
-
-In this order, branch convergence in a must-analysis is modeled by greatest
-lower bound $\operatorname{glb}(e_1, e_2)$.
+In this contract order, branch convergence is modeled by the operation named
+greatest lower bound $\operatorname{glb}(e_1, e_2)$.  Aligned inputs keep the
+more specific comparable type, intersecting the inputs on which either branch
+may safely execute.  Aligned outputs keep the more general comparable type,
+covering the results either branch may produce.  Output identities survive
+only when both branches establish the same source-identity pair.
 
 The direction matters. In may-analysis, one usually merges by least upper
 bound, because one wants all behaviors that may happen. Here the goal is the
-strongest effect guaranteed on all paths. Therefore the appropriate operator is
-$\operatorname{glb}$, not $\operatorname{lub}$.
+strongest representable contract guaranteed on all paths. The implementation
+also aligns an omitted deep prefix as unchanged and rejects unequal net stack
+changes or incomparable aligned types.
 
 For a conditional with branch effects $p$ and $q$, the abstract effect is
 $(\textit{flag} \; -- \; ) \cdot \operatorname{glb}(p, q)$, up to the exact
@@ -235,8 +237,8 @@ DP DP C@ 0= KEEPIF
 The generated log records the inferred effects of the new definitions:
 
 \begin{verbatim}
-PEEK2 ( a-addr[1] --  X[2] X )
-MAYSWAP ( X[1] X[1] flag --  X[1] X[1] )
+PEEK2 ( a-addr --  X X )
+MAYSWAP ( X X flag --  X X )
 NLOOP ( n[1] --  n[1] )
 ULOOP ( n[1] --  n[1] )
 KEEPIF ( X[1] flag --  X[1] X[1] )

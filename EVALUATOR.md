@@ -142,6 +142,15 @@ Control structures can also be described declaratively with `syntax:` and `effec
 
 Stack effects use the usual Forth-style `( in -- out )` notation with typed symbols. Indexed symbols such as `x[1]` and `x[2]` refer to related abstract values across the effect, while the subtype lattice from `types` is used to decide whether compositions are compatible.
 
+Branch alternatives use a variance-aware meet. Inputs retain the common
+subtype (the stronger requirement needed to make either path valid), whereas
+outputs retain the common supertype (the guarantee valid after either path).
+Different visible depths are aligned through the shorter effect's implicit
+unchanged prefix. Correlations survive only when both alternatives relate the
+same symbolic values. For example, `@ ( a-addr -- x )` and
+`C@ ( c-addr -- char )` merge to `( a-addr -- x )`, not
+`( a-addr -- char )`.
+
 Every analysis clones its input effects before wildcard renumbering and
 substitution. Fresh ranges are kept disjoint between independently evaluated
 fragments, while final normalization gives the compact indices shown in the

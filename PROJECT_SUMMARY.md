@@ -322,10 +322,18 @@ In must-analysis terms, the result is the strongest guarantee that is still vali
 
 In the code, `Spec.glb(...)`:
 
-- checks whether the two effects have compatible net stack shape,
-- aligns longer and shorter effects,
-- unifies corresponding symbols,
+- requires the input-depth difference to equal the output-depth difference,
+- aligns the shorter effect with the longer effect's active suffix while
+  treating extra deep cells as an implicit unchanged prefix,
+- keeps the more specific comparable type at inputs,
+- keeps the more general comparable type at outputs,
+- retains an output identity only when both alternatives establish the same
+  source-identity pair,
 - and normalizes the result.
+
+This variance is essential. For `@ ( a-addr -- x )` versus
+`C@ ( c-addr -- char )`, both paths require at least `a-addr`, but only `x` is
+guaranteed as output, so the meet is `( a-addr -- x )`.
 
 The current repo now parses branch syntax inside colon definitions, and this
 operation is the reusable merge primitive those control structures rely on.
@@ -615,11 +623,20 @@ This is mostly for readability, but it is essential if the tool is meant to supp
 
 ## 5. `glb`, `cprefix`, and `unify`
 
-`glb(...)` is not simple pairwise intersection.
+`glb(...)` is not a covariant pointwise intersection.
 
-The implementation first compares the left/right lengths of the two effects. If one effect is longer, it uses `cprefix(...)` to reconcile the extra prefix while preserving type compatibility. Then `unify(...)` merges corresponding symbols across both sides.
+It first verifies that the input- and output-depth differences are equal.
+`unify(...)` then aligns the active suffixes and models the shorter effect's
+omitted deep cells as an unchanged prefix. Input positions are contravariant:
+the common subtype is retained. Output positions are covariant: the common
+supertype is retained. Output correlations are compared as pairs of source
+identities, so a correlation survives only if both alternatives guarantee it.
+`cprefix(...)` remains the helper used by the idempotence operation; branch
+meeting no longer uses it to force an extra prefix to be preserved by both
+paths.
 
-This is a concrete implementation of the paper idea that branch merging should preserve the strongest guaranteed common structure.
+This implements the strongest representable contract guaranteed by all
+branches without inventing value equalities.
 
 ## 6. `idemp` and `piStar`
 

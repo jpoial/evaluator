@@ -217,10 +217,12 @@ rather than waiting for a bad memory access.
 
 An \texttt{IF} has more than one path, but callers need one effect for the
 whole definition.  The checker therefore combines branch effects only when it
-can construct a common contract.  It aligns their visible inputs and outputs,
-accounts for a preserved stack prefix when depths differ, and unifies
-corresponding types and identities.  The condition's \texttt{flag} consumption
-is then composed with that contract.
+can construct a common contract.  It aligns their active suffixes and treats
+extra deep cells shown by only one effect as an implicit unchanged prefix.
+Inputs keep the more specific comparable type needed to make either path
+valid; outputs keep the more general comparable type guaranteed after either
+path.  A value identity is retained only when both paths establish it.  The
+condition's \texttt{flag} consumption is then composed with that contract.
 
 The easy case is two branches with the same behavior:
 \begin{lstlisting}
@@ -230,10 +232,13 @@ The inferred effect is:
 \begin{lstlisting}
 KEEPIF  ( X[1] flag -- X[1] X[1] )
 \end{lstlisting}
-By contrast, one branch leaving an extra item while the other removes one will
-normally have no common usable boundary and is rejected.  Differences in type
-can still be accepted when one type is a declared subtype of the other; the
-result records the stronger requirement that is valid for both paths.
+By contrast, paths with different net stack changes have no common usable
+boundary and are rejected.  Differences in type can still be accepted when one
+type is a declared subtype of the other.  On inputs the result records the
+stronger requirement; on outputs it records the weaker guarantee that covers
+both paths.  For example, \texttt{@ ( a-addr -- X )} and
+\texttt{C@ ( c-addr -- char )} combine as
+\texttt{( a-addr -- X )}, not \texttt{( a-addr -- char )}.
 
 This operation is sometimes called a greatest lower bound in the effect
 literature.  For day-to-day use, ``common branch contract'' is the important
@@ -331,8 +336,8 @@ DP DP C@ 0= KEEPIF
 \end{lstlisting}
 The generated log includes:
 \begin{lstlisting}
-PEEK2   ( a-addr[1] -- X[2] X )
-MAYSWAP ( X[1] X[1] flag -- X[1] X[1] )
+PEEK2   ( a-addr -- X X )
+MAYSWAP ( X X flag -- X X )
 NLOOP   ( n[1] -- n[1] )
 ULOOP   ( n[1] -- n[1] )
 KEEPIF  ( X[1] flag -- X[1] X[1] )
@@ -340,10 +345,12 @@ KEEPIF  ( X[1] flag -- X[1] X[1] )
 Several details are worth reading as a Forth programmer.  \texttt{PEEK2}
 requires an address because its input eventually reaches \texttt{@}; the type
 requirement travels backward through \texttt{DUP} and \texttt{SWAP}.
-\texttt{MAYSWAP} can promise one output order only under the stronger symbolic
-condition shown by its repeated index.  Both loop examples preserve their
-numeric input according to the one-versus-two rule.  \texttt{KEEPIF} consumes a
-flag and duplicates the remaining cell regardless of the selected branch.
+\texttt{MAYSWAP} cannot promise either output permutation, because the true
+path swaps the cells and the false path preserves them; its common contract
+therefore keeps only two generic output types.  Both loop examples preserve
+their numeric input according to the one-versus-two rule.  \texttt{KEEPIF}
+consumes a flag and duplicates the remaining cell regardless of the selected
+branch.
 
 For the final phrase, the checker reports the per-word refined effects and
 ends with:
@@ -377,8 +384,9 @@ Its guarantees are bounded by the model:
         does not search the hierarchy for an arbitrary third common subtype.
   \item Internal normalization can discard some automatically introduced
         identity correlations, reducing precision in later checks.
-  \item Branch merging produces one conservative syntactic contract, not a set
-        of all possible branch effects.
+  \item Branch merging produces one variance-aware conservative contract, not
+        a set of all possible branch effects; aligned types must still be
+        directly comparable.
   \item The loop rule is the one-versus-two approximation described above.
   \item Return-stack tricks, unrestricted \texttt{EXECUTE}, non-local
         \texttt{THROW}, self-modifying definitions, and other metaprogramming

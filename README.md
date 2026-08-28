@@ -257,6 +257,14 @@ Inside colon definitions, the evaluator supports:
 - `IF ... ELSE ... FI`
 
 `IF` consumes a `flag`, and the branches must have compatible stack effects.
+The branch meet is variance-aware: corresponding inputs retain the more
+specific comparable type required by either path, while corresponding outputs
+retain the more general comparable type guaranteed after either path. When one
+effect exposes `k` additional inputs, it must expose exactly `k` additional
+outputs; those positions are aligned with the shorter effect's implicit,
+unchanged stack prefix. An output identity is retained only when both branches
+establish the same correlation. The checker still rejects incomparable type
+pairs rather than searching for a third common type.
 
 ### Loops
 

@@ -57,8 +57,8 @@ compares one pass with two passes.  The paper presents each algorithm through
 source examples and pseudocode.  The
 examples include unequal branch depths and a loop counterexample.  The paper
 also distinguishes implemented checks from stronger guarantees.  Normalization
-can discard value-flow information.  Moreover, the current branch operator is
-not a sound summary for every program, and the loop test does not compute an
+can discard value-flow information, and a single branch contract necessarily
+forgets path-specific alternatives.  The loop test does not compute an
 inductive invariant.
 
 The type hierarchy, primitive stack effects, parser words, defining words,
@@ -341,16 +341,21 @@ input values.
 A checker can retain path-specific effects or compute a conservative effect
 that discards selected facts.  It can instead require annotations or reject a
 program when no common interface can be constructed.  The current checker uses
-a partial syntactic operation named \texttt{glb} in the source.  Earlier
+a partial variance-aware operation named \texttt{glb} in the source.  Earlier
 order-theoretic work motivated this name.  The algorithm below, rather than
-lattice terminology, defines the implemented operation.
+lattice terminology alone, defines the implemented operation.
 
 \subsection{Equal visible depths}
 
 When both effects have the same number of inputs and outputs, the checker
-aligns corresponding positions.  Each pair must have compatible types.  The
-same global identifier replacement used for straight-line composition is then
-applied.
+aligns corresponding positions, but inputs and outputs have different
+variance.  An aligned input pair keeps the more specific comparable type,
+because either arm must be executable.  An aligned output pair keeps the more
+general comparable type, because code after the branch may rely only on the
+guarantee made by both arms.  For output identities, the checker compares the
+ordered pair of source identities contributed by the two arms; two merged
+outputs share an identity only when both source pairs agree.  Thus branch
+meeting does not invent value equality.
 
 For example, these two store-like effects can be combined:
 
@@ -360,17 +365,23 @@ For example, these two store-like effects can be combined:
 \end{lstlisting}
 
 The common interface requires \texttt{a-addr}, because it is the more specific
-address type accepted by both declarations.  The declared effect
+address type accepted by both declarations.  Output variance goes the other
+way.  For \texttt{@ ( a-addr -- X )} versus
+\texttt{C@ ( c-addr -- char )}, the common effect is
+\texttt{( a-addr -- X )}: both branches accept an \texttt{a-addr}, but only
+the supertype \texttt{X} is guaranteed afterward.  The declared effect
 \stackeffect{IF ( flag -- )} is composed separately and accounts for the selector.
 
 \subsection{Unequal visible depths}
 
 Effects of different displayed depths can still describe compatible behavior
 because each effect omits an unchanged deeper prefix.  Let the first effect
-show \texttt{k} more inputs than the second.  A join is possible only if it
-also shows exactly \texttt{k} more outputs.  Those extra deep cells must be
-preserved by the longer effect.  The remaining input and output positions are
-then compared with the shorter effect.
+show \texttt{k} more inputs than the second.  A meet is possible only if it
+also shows exactly \texttt{k} more outputs.  The shorter effect is interpreted
+as preserving an implicit \texttt{k}-cell deep prefix.  Its active input and
+output suffixes are aligned at offset \texttt{k} with the longer effect; for
+the extra output positions, the longer arm's outputs are compared with the
+corresponding implicit input cells preserved by the shorter arm.
 
 For example:
 
@@ -379,9 +390,9 @@ longer:   ( X[1] n -- X[1] char )
 shorter:  (      n --      char )
 \end{lstlisting}
 
-The longer effect makes one cell of the implicit prefix visible.  It preserves
-that cell, and its remaining \stackeffect{n -- char} behavior agrees with the
-shorter effect.  The common interface is the longer effect.
+The longer effect makes one cell of the implicit prefix visible.  Both arms
+preserve that cell, and their remaining \stackeffect{n -- char} behavior
+agrees, so the common interface is the longer effect.
 
 The following pair is incompatible:
 
@@ -393,13 +404,6 @@ The following pair is incompatible:
 The input-depth difference is one, whereas the output-depth difference is two.
 Consequently, \texttt{IF DUP THEN}, without a matching \texttt{ELSE}, is
 rejected because only one runtime path leaves the additional item.
-
-The intended algorithm compares the shorter effect with the remaining slices
-of the longer effect after the \texttt{k}-cell prefix.  The current native
-helper starts this final comparison at vector offset zero instead of offset
-\texttt{k}.  It can therefore reject a valid unequal-depth join when the
-prefix and the remaining suffix have different types.  This is an
-implementation defect, not part of the intended rule.
 
 \subsection{The \texttt{MAYSWAP} example}
 
@@ -416,19 +420,19 @@ single-effect summary that makes no unsupported identity claim is:
 ( X1 X2 flag -- X3 X4 )
 \end{lstlisting}
 
-A more precise analysis would retain two alternatives: the outputs are either
-\texttt{X2 X1} or \texttt{X1 X2}.  The current syntactic join instead forces
-the two inputs into one identity and reports:
+A more precise path-sensitive analysis would retain two alternatives: the
+outputs are either \texttt{X2 X1} or \texttt{X1 X2}.  The implemented meet
+instead discards the branch-dependent permutation and reports the conservative
+single contract:
 
 \begin{lstlisting}
-( X[1] X[1] flag -- X[1] X[1] )
+( X X flag -- X X )
 \end{lstlisting}
 
-That is not the general effect of \texttt{MAYSWAP}.  It demonstrates why
-unifying branch variables is not automatically a sound summary of both
-runtime paths.  A soundness result requires a semantics for primitive effects and explicit
-rules for input and output constraints.  It also requires either conservative
-information loss or a representation of alternative effects.
+No unsupported identity is claimed.  This illustrates the output-correlation
+rule: an identity survives only when both arms establish the same source pair.
+The single-effect domain necessarily loses the path-specific permutation; a
+multiple-effect representation would preserve it.
 
 \section{Loop Invariants}
 \label{sec:loops}
@@ -631,17 +635,17 @@ DP DP C@ 0= KEEPIF
 The exact native log contains:
 
 \begin{lstlisting}
-PEEK2   ( a-addr[1] -- X[2] X )
-MAYSWAP ( X[1] X[1] flag -- X[1] X[1] )
+PEEK2   ( a-addr -- X X )
+MAYSWAP ( X X flag -- X X )
 NLOOP   ( n[1] -- n[1] )
 ULOOP   ( n[1] -- n[1] )
 KEEPIF  ( X[1] flag -- X[1] X[1] )
 \end{lstlisting}
 
-The \texttt{MAYSWAP} line is retained to make the artifact output
-reproducible, but Section~\ref{sec:branches} explains why it is too
-restrictive.  Its general single-effect interface should not claim that all
-four \texttt{X} positions hold one value.
+The \texttt{MAYSWAP} line illustrates conservative information loss: the
+single summary retains stack shape and types but does not choose one of the two
+path-specific permutations.  Section~\ref{sec:branches} gives the
+variance-aware rule that produces this contract.
 
 The top-level trace ends with:
 
@@ -741,17 +745,13 @@ Corpus class & Programs & Expected & Result \\
 Forth-2012 positive & 7 & accept & 7 accepted \\
 Custom-profile positive & 5 & accept & 5 accepted \\
 Article positive & 1 & accept & 1 accepted \\
-Negative & 16 & reject & 14 rejected, 2 missed \\
+Negative & 16 & reject & 16 rejected \\
 \hline
 \end{tabular}
 \end{center}
 
-The missed negative tests are \path{linear_clash.fs} and
-\path{top_level_clash.fs}, both involving the top-level phrase
-\texttt{DP 1+}.  They document a gap in top-level linear checking.
-
 The Forth-2012 environment contains 50 lines of type declarations and 278
-lines of vocabulary and control specifications.  The native checker is 4,424
+lines of vocabulary and control specifications.  The native checker is 4,483
 lines of Gforth.  These counts document the artifact's scale but do not establish soundness or
 performance.  A regression corpus cannot reveal an error shared by the
 checker, its profile, and the expected result.
@@ -814,8 +814,9 @@ This comparison locates the trade-off.  WebAssembly obtains stronger branch
 and loop guarantees from fixed control syntax and explicit block interfaces.
 The present Forth checker infers interfaces from source while loading parser
 and control behavior as data.  This strategy supports retargeting and
-source-level Forth analysis.  Its limitations include lossy normalization, the
-syntactic branch join, and the one-versus-two loop rule.
+source-level Forth analysis.  Its limitations include lossy normalization, a
+single variance-aware branch contract rather than path alternatives, and the
+one-versus-two loop rule.
 
 \paragraph{Higher-order concatenative code.}
 A generic stack-prefix parameter stands for any unchanged sequence below a
@@ -844,9 +845,9 @@ The current implementation has the following known limits:
         yet have several alternative primitive effects.
   \item Normalization can remove identity relationships that later checks
         need.
-  \item Branch joining can impose unsupported identity constraints, as
-        \texttt{MAYSWAP} shows.  The unequal-depth implementation also uses the
-        wrong comparison offset in some cases.
+  \item Branch joining keeps one variance-aware common contract and therefore
+        loses path-specific facts such as the two possible \texttt{MAYSWAP}
+        permutations.
   \item Loop checking compares one pass with two and does not compute an
         inductive header state.
   \item Compile-time control-flow items are parsed structurally but are not
@@ -856,12 +857,10 @@ The current implementation has the following known limits:
         metaprogramming require additional models.
   \item Recursive dictionary construction and general forward references are
         outside the deterministic parsed-body characterization.
-  \item Two top-level negative regression cases are currently missed.
 \end{itemize}
 
 The immediate engineering priorities are to preserve identity classes
-internally, adopt standard-style output, fix unequal-depth alignment, and
-repair top-level clash reporting.  Subsequent extensions can add multiple
+internally and adopt standard-style output.  Subsequent extensions can add multiple
 primitive effects, typed compile-time control items, explicit stack-prefix and
 quotation types, branch alternatives, and fixed-point loop analysis.  A
 semantic soundness result also requires an operational model for trusted
@@ -877,10 +876,11 @@ straight-line source and provide reproducible inference
 for non-recursive definitions.
 
 Branches and loops require more than stack-depth equality.  The current branch
-operator and one-versus-two loop test are experimental
-mechanisms with documented limitations.  They do not replace path-sensitive
-control-flow analysis or inductive invariants.  The \texttt{MAYSWAP} and
-\texttt{P} examples demonstrate these limitations.
+operator computes a variance-aware common contract, while the one-versus-two
+loop test remains an experimental approximation.  Neither replaces
+path-sensitive control-flow analysis or inductive invariants.  The
+\texttt{MAYSWAP} and \texttt{P} examples demonstrate the information lost by
+those compact summaries.
 
 The artifact provides executable stack-effect documentation and a platform for
 experiments with different Forth profiles.  Stronger guarantees require the

@@ -112,8 +112,9 @@ shortening improves readability but may lose some identity information.
 Compaction therefore trades precision for readability: it preserves type information but
 may drop some explicit identity constraints.
 
-Branching uses a partial meet on effects, so it keeps only the information guaranteed by
-every branch. The loop operator uses the same order, but compares one execution of a body
+Branching uses a partial variance-aware meet on contracts: inputs retain the common
+subtype, outputs retain the common supertype, and only correlations guaranteed by every
+branch survive. The loop operator uses the same order, but compares one execution of a body
 with two executions instead of running a global fixpoint engine.
 
 The core theorem matches the implementation. Once a source body has been parsed and each
@@ -135,7 +136,7 @@ Concretely, the paper makes four contributions.
 \item It presents a symbolic effect calculus for stack shuffles. Stack symbols carry subtype information and identity constraints, so the calculus can reason about both compositionally.
 \item It handles branching and looping in the same effect domain. Branches merge by a lower-bound operator, and loops use a lightweight local stabilization test.
 \item It proves an exact compositional theorem for parsed bodies. Once each undecomposed token occurrence has an assigned effect, the checker accepts exactly when the induced segment equations are clash-free, and on success returns their unique solution.
-\item It evaluates the calculus as a retargetable checker. Types, vocabulary, parser behavior, and control structures all come from external specifications, and user-defined words are inferred during analysis. The artifact is exercised on 29 checked-in tests, several custom profiles, and a 4{,}309-line application.
+\item It evaluates the calculus as a retargetable checker. Types, vocabulary, parser behavior, and control structures all come from external specifications, and user-defined words are inferred during analysis. The artifact is exercised on 29 checked-in tests, several custom profiles, and a 4{,}483-line application.
 \end{enumerate}
 
 The rest of the paper follows the structure of the checker itself. Sections~2--5 define
@@ -301,27 +302,31 @@ For an abstract effect $\pi=(L -- R)$, define its concretization by
 Here $\gamma(\pi)$ denotes the concrete input/output relation described by $\pi$.
 Thus $\gamma(\pi)$ is the relation on concrete input/output stacks described by $\pi$. Repeated indices induce equality constraints because the same valuation $\eta$ is used on both sides. Unnamed symbols contribute only type constraints, so renaming fresh indices leaves $\gamma$ unchanged.
 
-Define
+Relation inclusion still provides a useful information order for linear effects:
 \[
-\pi_1 \preceq \pi_2
+\pi_1 \preceq_r \pi_2
 \quad\text{iff}\quad
 \gamma(\pi_1) \subseteq \gamma(\pi_2).
 \]
-Lower elements in this order are more informative: they rule out more concrete behaviors
-and therefore give stronger guarantees. This is the abstract-interpretation viewpoint
-specialized to symbolic stack transformations
-\cite{cousot1977abstract,poial2006typing}.
+Lower elements rule out more concrete behaviors. Branching, however, combines
+\emph{contracts}, not unrestricted relations. Its order has opposite variance in the two
+components: a lower common contract may require a smaller set of inputs, on which every
+alternative is safe, while allowing a larger set of outputs, covering every alternative's
+result. At aligned type positions this means subtype on inputs and supertype on outputs.
+Guaranteed equality information is ordered like an output promise and is retained only
+when every branch establishes it. This mixed contract order is the order used by the
+implemented operation named $\glb$.
 
 \paragraph{Notation summary.}
-We write $\gamma(\pi)$ for the concrete meaning of an effect, $\pi_1 \preceq \pi_2$ for
-the information order, and $\pi_1 \glb \pi_2$ for the common guaranteed information of
-two effects. Sequential composition is written $\pi_1 \compose \pi_2$.
+We write $\gamma(\pi)$ for the concrete relational meaning of an effect,
+$\pi_1 \preceq_r \pi_2$ for relation inclusion, and $\pi_1 \glb \pi_2$ for the
+variance-aware common branch contract. Sequential composition is written
+$\pi_1 \compose \pi_2$.
 
-Under this reading, sequential composition propagates guaranteed information through a
-linear segment. Branch merging keeps only the information guaranteed by every
-alternative, not the union of behaviors that may arise on some path. Because the checker
-compacts successful summaries before storing them, the reported effect may be a
-conservative weakening of the corresponding raw effect in this order.
+Sequential composition propagates information through a linear segment. Branch merging
+intersects admissible input constraints, joins guaranteed output types, and intersects
+symbolic equality guarantees. Because the checker compacts successful summaries before
+storing them, the reported effect may forget additional implicit correlations.
 
 \section{Sequential Composition}
 Juxtaposition is the basic program former in Forth, so sequential composition is the
@@ -433,28 +438,30 @@ Viewed this way, $\odot$ is the typed version of the product used in earlier alg
 Sequential composition alone is not enough for control flow. A conditional must summarize several alternatives with one effect that is safe no matter which branch executes.
 
 For branching, the checker uses a partial greatest-lower-bound operation on whole
-effects. In lattice terminology, this is a partial meet on compatible effects. We also
-call it must-style: it keeps only the information that every branch guarantees.
+effects. In lattice terminology, this is a partial meet on compatible effect contracts.
+It is must-style: it keeps only information that every branch guarantees, with the
+variance appropriate to preconditions and postconditions.
 
-In contrast to join-based analyses, which accumulate possible behaviors, this operator
-retains only information common to all branches. Intuitively, the analysis merges branch
-summaries pointwise after accounting for stack cells that are preserved unchanged across
-both input and output. This is necessary because different branches may manipulate
-different depths of the stack while still agreeing on a common surrounding context.
+Aligned inputs retain the more specific comparable type, ensuring that either branch can
+execute. Aligned outputs retain the more general comparable type, ensuring that code
+after the branch relies only on a result type guaranteed by both paths. Output identities
+are merged by ordered pairs of source identities: a correlation survives exactly when
+both branches establish the same pair. Thus the operation can forget a path-dependent
+permutation without inventing an equality constraint.
 
 More concretely, suppose one effect has $k$ more inputs than another. Then it must also
-have $k$ more outputs. The implementation first extracts a preserved prefix of length $k$
-from the larger effect. Each corresponding input/output pair in that prefix must be
-comparable. It then merges the remaining active slices pointwise. If any comparison
-fails, the branch summaries are incompatible. On raw effects, this construction yields a
-common lower-bound-style summary whenever it succeeds. The implementation then applies
+have $k$ more outputs. The shorter effect is interpreted as preserving an implicit
+$k$-cell deep prefix, and its active suffix is aligned at offset $k$ with the longer
+effect. If the depth differences disagree or an aligned type pair is incomparable, the
+branch summaries are incompatible. On raw effects, this construction yields a common
+lower-bound-style summary whenever it succeeds. The implementation then applies
 $\compact$ before storing or reporting the result, so the reported branch summary may be
-weaker than the raw meet when an implicit pairwise correlation is suppressed.
+weaker when an implicit correlation is suppressed.
 
-Accordingly, the checker uses a meet rather than a join: it searches for information
-common to all paths of a conditional, not the union of behaviors that may arise on some
-path \cite{poial2006typing}. This is the branching counterpart of the relational reading
-from Section~\ref{sec:stack-effects}.
+Accordingly, the source-level operation is a meet in the mixed contract order: input
+requirements are intersected, output type sets are joined, and equality guarantees are
+intersected \cite{poial2006typing}. It is not a path-sensitive union of whole effects; it
+returns one contract that safely abstracts all alternatives.
 
 This operator is used by the \texttt{either} constructor in declarative control semantics. The example
 \begin{lstlisting}
@@ -474,7 +481,10 @@ and
 \[
 a\text{-}addr \glb c\text{-}addr = a\text{-}addr.
 \]
-The merged effect therefore preserves the more specific address requirement.
+The merged effect therefore preserves the more specific address requirement. Dually,
+merging \texttt{@ ( a-addr -- x )} with \texttt{C@ ( c-addr -- char )}
+yields \texttt{( a-addr -- x )}: inputs use the common subtype, whereas outputs
+use the common supertype.
 
 \section{Iteration via One-Step Stabilization}
 Iteration is the point where a full abstract interpreter would usually introduce a
@@ -514,10 +524,10 @@ The bundled program
 \end{lstlisting}
 is inferred as
 \begin{lstlisting}
-MYLOOP ( flag[1] flag[1] -- flag[1] flag )
+MYLOOP ( flag flag -- flag flag )
 \end{lstlisting}
-The artifact currently reports this compacted effect for the information common to one
-and two passes of the repeated body.
+The artifact reports this compacted type interface for the information common to one
+and two passes; branch-dependent value identities are not claimed.
 
 \section{Declarative Specifications}
 \label{sec:decl-specs}
@@ -723,10 +733,10 @@ The local theorem above is enough to explain how the checker grows its dictionar
 
 The implementation therefore supports the standard Forth workflow in which the specification dictionary grows during analysis \cite{forth2012standard}. Inferred definitions are written to a log file; for the article profile in \texttt{testdata/positive/article/}, the current artifact records:
 \begin{lstlisting}
-MYLOOP   ( flag[1] flag[1] -- flag[1] flag )
+MYLOOP   ( flag flag -- flag flag )
 MYCHOICE ( x a-addr flag -- )
-MYTEST   ( a-addr[2] x[1] flag -- a-addr[2] x[1] a-addr[2] )
-MYFI     ( x[1] x[1] flag -- x[1] x[1] )
+MYTEST   ( x[1] a-addr flag -- x[1] x x )
+MYFI     ( x[1] x flag -- x[1] x )
 MYAGAIN  ( a-addr -- x )
 MYSEQ    ( a-addr[2] x[1] -- x[1] a-addr[2] x )
 MYSEQ2   ( a-addr[1] a-addr[1] -- )
@@ -809,24 +819,19 @@ Category & Programs & Java outcome & Gforth outcome \\
 Forth 2012 positives & 7 & 7 accepted & 7 accepted \\
 Custom-profile positives & 5 & 5 accepted & 5 accepted \\
 Article profile & 1 & 1 accepted & 1 accepted \\
-Negative tests & 16 & 14 rejected & 14 rejected \\
+Negative tests & 16 & 16 rejected & 16 rejected \\
 \hline
-Total & 29 & 27 as expected & 27 as expected \\
+Total & 29 & 29 as expected & 29 as expected \\
 \hline
 \end{tabular}
 \end{table}
 
 \paragraph{Results.}
-Both implementations accept all 13 positive tests and reject 14 of the 16 negative
-tests. The two remaining misses are \texttt{linear\_clash.fs} and
-\texttt{top\_level\_clash.fs}, both linear numeric/address clashes involving
-\texttt{DP 1+}. These cases expose gaps in top-level linear reasoning rather than in the
-declarative control machinery.
+Both implementations accept all 13 positive tests and reject all 16 negative tests.
 The two runtimes produce byte-for-byte identical standard output on all 13 positive
-tests; their diagnostic wording still differs on rejected inputs. These results indicate
-that the checker behaves as expected on both positive and negative examples, while the
-remaining failures highlight limitations in top-level linear reasoning rather than in the
-core calculus.
+tests; their diagnostic wording can differ on rejected inputs. These results indicate
+that the checker behaves as expected on the current positive and negative corpus, while
+remaining a regression result rather than a proof of soundness.
 
 \paragraph{Diagnostics.}
 The negative tests cover malformed control nesting (\texttt{missing\_fi},
@@ -845,8 +850,8 @@ The main scale indicators are straightforward. The bundled
 Forth 2012 environment consists of a 50-line type file and a 278-line specification file,
 for 328 lines of declarative typing and control information in total. Under that
 environment, the checker analyzes the single-file implementation
-\texttt{gforth-evaluator.fs}, which has 4{,}309 lines. The artifact also contains an
-independent Java implementation totaling 7{,}555 lines across its checked-in
+\texttt{gforth-evaluator.fs}, which has 4{,}483 lines. The artifact also contains an
+independent Java implementation totaling 7{,}542 lines across its checked-in
 \texttt{.java} sources. These figures are enough to show that the checker is being applied
 to a nontrivial specification environment and a multi-thousand-line program rather than
 only to toy fragments.

@@ -34,7 +34,7 @@
 \maketitle
 
 \begin{abstract}
-This paper describes a static type checker for a Forth(-like) language whose semantics is expressed as typed stack effects. The checker is implemented as a single Gforth program, but its core ideas are language independent: a finite type lattice is loaded from an external file, word specifications are given declaratively, and user-defined words are inferred by composing abstract stack transformations instead of executing the program. The central technical device is a partial algebra of stack effects. Sequential composition unifies adjacent stack symbols by taking the greatest lower bound of comparable types; branching computes a greatest lower bound of whole effects; and iteration is accepted only when repeated execution stabilizes to an idempotent effect. The result is a compact checker that supports ordinary words, literals, parser words, defining words, and control structures such as \texttt{IF ... ELSE ... FI} and \texttt{BEGIN ... WHILE ... REPEAT}. We present the mathematical model, the operations implemented by the checker, and worked examples taken from the bundled specification and program files.
+This paper describes a static type checker for a Forth(-like) language whose semantics is expressed as typed stack effects. The checker is implemented as a single Gforth program, but its core ideas are language independent: a finite type lattice is loaded from an external file, word specifications are given declaratively, and user-defined words are inferred by composing abstract stack transformations instead of executing the program. The central technical device is a partial algebra of stack effects. Sequential composition unifies adjacent stack symbols by taking the greatest lower bound of comparable types; branching computes a variance-aware greatest lower bound of contracts, using subtype at inputs and supertype at outputs; and iteration is accepted only when repeated execution stabilizes to an idempotent effect. The result is a compact checker that supports ordinary words, literals, parser words, defining words, and control structures such as \texttt{IF ... ELSE ... FI} and \texttt{BEGIN ... WHILE ... REPEAT}. We present the mathematical model, the operations implemented by the checker, and worked examples taken from the bundled specification and program files.
 \end{abstract}
 
 \section{Introduction}
@@ -170,9 +170,9 @@ This proposition explains why the implementation may evaluate a sequence left to
 \section{Branching and Greatest Lower Bounds of Effects}
 Sequential composition is not enough for control flow. A branch requires a single summary effect that safely represents multiple alternatives.
 
-The checker therefore implements a greatest-lower-bound operation on whole effects. Intuitively, it merges branch summaries pointwise after accounting for stack cells that are preserved unchanged across both input and output. This is necessary because different branches may manipulate different depths of the stack while still agreeing on a common surrounding context.
+The checker therefore implements a greatest-lower-bound operation on whole effects, with the variance induced by effect contracts. Aligned inputs retain the more specific comparable type, so either branch can execute; aligned outputs retain the more general comparable type, so the result promises only what both branches guarantee. Output identities are compared as pairs of source identities and survive only when both alternatives establish the same correlation.
 
-More concretely, if one effect has $k$ more inputs than another, it must also have $k$ more outputs. The implementation then extracts a preserved prefix of length $k$ from the larger effect by requiring each corresponding input/output pair in that prefix to be comparable. After that prefix has been merged, the remaining active slices are unified pointwise. If any comparison fails, the branch summaries are incompatible.
+More concretely, if one effect has $k$ more inputs than another, it must also have $k$ more outputs. The shorter effect is interpreted as preserving an implicit $k$-cell deep prefix, and its active suffix is aligned at offset $k$ with the longer effect. If the depth differences disagree or any aligned type pair is incomparable, the branch summaries are incompatible. The implementation does not search for a third common type.
 
 This operator is used by the \texttt{either} constructor in declarative control semantics. The example
 \begin{lstlisting}
@@ -192,7 +192,7 @@ and
 \[
 a\text{-}addr \glb c\text{-}addr = a\text{-}addr.
 \]
-The merged effect therefore preserves the stronger address requirement.
+The merged effect therefore preserves the stronger address requirement. Dually, merging \texttt{@ ( a-addr -- x )} with \texttt{C@ ( c-addr -- char )} yields \texttt{( a-addr -- x )}: inputs use the common subtype, while outputs use the common supertype.
 
 \section{Iteration and Idempotence}
 Loops require a stable summary of repeated execution. The checker does not attempt a general fixed-point engine of the kind common in abstract interpretation \cite{cousot1977abstract}. Instead it uses a compact algebraic criterion based on idempotence.
@@ -215,9 +215,9 @@ The bundled program
 \end{lstlisting}
 is inferred as
 \begin{lstlisting}
-MYLOOP ( flag[1] flag[1] -- flag[1] flag[1] )
+MYLOOP ( flag flag -- flag flag )
 \end{lstlisting}
-which is precisely an idempotent invariant: repeating the body preserves the same abstract pair of flags.
+which is the compact common interface: repetition preserves two flag-typed cells, while branch-dependent identities are not claimed.
 
 \section{Declarative Specifications}
 \subsection{Ordinary words, literals, and parser words}
@@ -290,12 +290,12 @@ At top level, the checker interprets defining words immediately. A colon definit
 
 The implementation therefore supports the standard Forth workflow in which the specification dictionary grows during analysis \cite{forth2012standard}. Inferred definitions are written to a log file; for the sample program the checker records:
 \begin{lstlisting}
-MYLOOP   ( flag[1] flag[1] -- flag[1] flag[1] )
+MYLOOP   ( flag flag -- flag flag )
 MYCHOICE ( x a-addr flag -- )
-MYTEST   ( a-addr[2] x[1] flag -- a-addr[2] x[1] a-addr[2] )
-MYFI     ( x[1] x[1] flag -- x[1] x[1] )
-MYAGAIN  ( a-addr[1] -- a-addr[1] )
-MYSEQ    ( a-addr[2] x[1] -- x[1] a-addr[2] a-addr[2] )
+MYTEST   ( x[1] a-addr flag -- x[1] x x )
+MYFI     ( x[1] x flag -- x[1] x )
+MYAGAIN  ( a-addr -- x )
+MYSEQ    ( a-addr[2] x[1] -- x[1] a-addr[2] x )
 MYSEQ2   ( a-addr[1] a-addr[1] -- )
 \end{lstlisting}
 
@@ -320,7 +320,7 @@ from annotations, which are printed from the effect clone normalized together
 with the final result.
 
 \section{Conclusion}
-The type checker described in this paper shows that a useful static analysis for a Forth(-like) language can be built from a very small mathematical core. A finite type lattice supplies precision information; indexed stack symbols express correlations; sequential composition forms a partial semigroup of effects; branch summaries are greatest lower bounds of effects; and loop summaries are accepted when repeated execution stabilizes to an idempotent effect. Because the checker loads both the type hierarchy and the word specifications from external files, the same implementation can be retargeted to other vocabularies and dialects with little or no change to the core.
+The type checker described in this paper shows that a useful static analysis for a Forth(-like) language can be built from a very small mathematical core. A finite type lattice supplies precision information; indexed stack symbols express correlations; sequential composition forms a partial semigroup of effects; branch summaries are variance-aware greatest lower bounds of effects; and loop summaries are accepted when repeated execution stabilizes to an idempotent effect. Because the checker loads both the type hierarchy and the word specifications from external files, the same implementation can be retargeted to other vocabularies and dialects with little or no change to the core.
 
 In that sense, the paper's main lesson is methodological: many of the dynamic-looking features of a concatenative language become statically tractable once they are phrased as operations in an effect algebra.
 
