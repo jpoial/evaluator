@@ -1,5 +1,0 @@
-PEEK2 ( a-addr  --  X X ) 
-MAYSWAP ( X X flag  --  X X ) 
-NLOOP ( n[1]  --  n[1] ) 
-ULOOP ( n[1]  --  n[1] ) 
-KEEPIF ( X[1] flag  --  X[1] X[1] ) 
