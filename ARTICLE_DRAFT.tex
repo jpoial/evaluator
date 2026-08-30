@@ -19,13 +19,12 @@
 \newcommand{\meet}{\mathbin{\sqcap}}
 \newcommand{\seq}{\mathbin{\cdot}}
 \newcommand{\sem}[1]{[\![#1]\!]}
-
-\title{Configurable Static Type Checking for Forth:\\
-Nine Worked Examples}
+\title{Configurable Static Type Checking for Forth}
 \author{Jaanus Pöial\\Tallinn University of Technology}
 \date{}
 
 \begin{document}
+\pagenumbering{gobble}
 \maketitle
 
 \begin{abstract}
@@ -267,7 +266,7 @@ would propagate the loop-header state until that state stops changing.
 $\pi_2$ does not perform that process.  It also proves neither termination nor
 properties of concrete values.  It is only a local stack-stability test.
 
-\section{Configuration and Experimental Method}
+\section{Evaluator Inputs}
 \label{sec:control}
 
 The run uses three files: a type profile, a word profile, and the example
@@ -383,7 +382,7 @@ Word & Inferred effect & Principal mechanism \\
 \section{Straight-Line Examples}
 \label{sec:sequence-examples}
 
-\subsection{\texttt{test1}: stack shape without value evaluation}
+\subsection{Test1: stack shape without value evaluation}
 
 \begin{quote}
 \texttt{: test1  3 4 5 - + ;}
@@ -408,7 +407,7 @@ does not perform that calculation.  Its domain contains the type \texttt{n},
 but no integer constants or arithmetic expressions.  It establishes only
 \effect{( -- n )}.
 
-\subsection{\texttt{test2}: a generic shuffle specialized to flags}
+\subsection{Test2: a generic shuffle specialized to flags}
 
 \begin{quote}
 \texttt{: test2  OR FALSE SWAP ;}
@@ -433,7 +432,7 @@ original input.  The reported interface therefore needs no visible indices:
 Although one output is produced by the word named \texttt{FALSE}, the checker
 has no constant-propagation domain and promises only its declared type.
 
-\subsection{\texttt{test3}: backward refinement through \texttt{SWAP} and
+\subsection{Test3: backward refinement through \texttt{SWAP} and
 \texttt{DUP}}
 
 \begin{quote}
@@ -466,7 +465,7 @@ not identify the surviving copy as the same aligned address.
 \section{Branch Examples}
 \label{sec:branch-examples}
 
-\subsection{\texttt{test4}: an explicit effect versus an implicit frame}
+\subsection{Test4: an explicit effect versus an implicit frame}
 
 \begin{quote}
 \texttt{: test4  IF 1 + FI ;}
@@ -494,7 +493,7 @@ After the leading \texttt{IF} consumes its selector, the complete definition is
 This example explains why comparing only the explicitly printed sides would be
 too strict.  Stack effects denote transformations under an implicit frame.
 
-\subsection{\texttt{test5}: a common prefix survives, a branch-dependent
+\subsection{Test5: a common prefix survives, a branch-dependent
 identity does not}
 
 \begin{quote}
@@ -524,7 +523,7 @@ Composing the selector yields
 The result loses two facts.  First, \texttt{n} is widened to \texttt{x} at the
 differing output.  Second, a correlation valid on only one path is discarded.
 
-\subsection{\texttt{test6}: compatible shape with no common permutation}
+\subsection{Test6: compatible shape with no common permutation}
 
 \begin{quote}
 \texttt{: test6  IF ROT ELSE @ FI ;}
@@ -558,7 +557,7 @@ The checker accepts the equal net stack change.  It forgets which input reaches
 which output.  An analysis that stores each path separately could retain both
 permutations.  This checker stores one common contract.
 
-\subsection{\texttt{test9}: input and output variance in isolation}
+\subsection{Test9: input and output variance in isolation}
 
 \begin{quote}
 \texttt{: test9  IF @ ELSE C@ FI ;}
@@ -589,7 +588,7 @@ branch inputs are narrowed, whereas outputs are widened.
 \section{Repetition Examples}
 \label{sec:loop-examples}
 
-\subsection{\texttt{test7}: one-versus-two exposes both flag requirements}
+\subsection{Test7: one-versus-two exposes both flag requirements}
 
 \begin{quote}
 \texttt{: test7  BEGIN SWAP OVER WHILE INVERT REPEAT ;}
@@ -622,7 +621,7 @@ This is a useful rejection test for changing stack shape and incompatible
 second-pass types.  It is not a proof that the reported identity-free summary
 characterizes every number of loop iterations or that the loop terminates.
 
-\subsection{\texttt{test8}: a data-stack-neutral loop pass}
+\subsection{Test8: a data-stack-neutral loop pass}
 
 \begin{quote}
 \texttt{: test8  BEGIN KEY 0= UNTIL ;}
@@ -711,12 +710,6 @@ one common contract.  It cannot retain a separate permutation for each path.
 Aligned types must be directly comparable.  The checker does not search for a
 third common type.
 
-\paragraph{Correlation precision.}
-Normalization and single-contract merging can discard symbolic identities.
-This loss is conservative for the displayed examples but can make later
-analysis less precise.  Internal correlations should ideally be retained and
-compacted only for presentation.
-
 \paragraph{Finite loop approximation.}
 The one-versus-two comparison does not prove a result for every iteration
 count.  A stronger analysis would maintain an abstract stack at the loop
@@ -780,7 +773,7 @@ requires validated primitives, separate path effects, preserved identity
 classes, and full loop analysis.
 
 \appendix
-\section{Exact Example Source and Inferred Log}
+\section{Example Source and Inferred Log}
 
 \begin{samepage}
 The source file used for Table~\ref{tab:results} is:
@@ -813,7 +806,7 @@ Whitespace in the machine log is presentation-only; the symbolic contracts are
 as shown.
 \end{samepage}
 
-\section{Relevant Type-Profile Declarations}
+\section{Type-Profile Declarations}
 \label{app:types}
 
 The excerpt below contains the types, aliases, and subtype edges needed by the
@@ -847,7 +840,7 @@ The loader adds every relation implied by a chain.  For example, it derives
 \texttt{a-addr}$\preceq$\texttt{c-addr}$\preceq$\texttt{x}.
 The type \texttt{flag} remains outside the numeric chain.
 
-\section{Relevant Word and Control Specifications}
+\section{Word and Control Specifications}
 \label{app:specs}
 
 This appendix selects the entries from \texttt{forth2012specs.txt} used to
