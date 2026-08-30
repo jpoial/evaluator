@@ -1,309 +1,1015 @@
-\documentclass[11pt]{article}
+\documentclass[11pt,a4paper]{article}
 
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
-\usepackage{amsmath}
-\usepackage{amssymb}
-\usepackage{hyperref}
+\usepackage[a4paper,margin=24mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\usepackage{url}
+\Urlmuskip=0mu plus 1mu
 
-\title{Static type checker for Forth}
-\author{Jaanus Pöial \\ Tallinn University of Technology}
+\setlength{\parskip}{0.25em}
+\setlength{\parindent}{1em}
+\emergencystretch=3em
+\widowpenalty=10000
+\clubpenalty=10000
+\displaywidowpenalty=10000
+
+\newcommand{\effect}[1]{\mbox{\texttt{#1}}}
+\newcommand{\meet}{\mathbin{\sqcap}}
+\newcommand{\seq}{\mathbin{\cdot}}
+\newcommand{\sem}[1]{[\![#1]\!]}
+
+\title{Configurable Static Type Checking for Forth:\\
+Nine Worked Examples}
+\author{Jaanus Pöial\\Tallinn University of Technology}
+\date{}
 
 \begin{document}
-
 \maketitle
 
 \begin{abstract}
-This article develops a mathematical view of static analysis for Forth-like
-stack languages. The central object is the symbolic stack effect, a typed and
-identity-sensitive abstraction of how a word transforms the data stack. Three
-operations organize the calculus: composition of linear effects, branch merging
-as a variance-aware greatest lower bound in a contract order, and loop summarization by calculating
-idempotent effects. These operations provide a basis for reasoning about
-sequencing, control-flow joins, and repeated execution in Forth programs.
+Forth stack comments document the cells consumed and produced by a word.
+Ordinary comments are not checked.  They also do not record how stack words
+move or copy individual cells.  This paper presents a configurable source-level
+checker.  It represents each phrase by a typed input/output stack contract,
+called a stack effect.  A profile supplies the type hierarchy and primitive
+word effects.  Symbolic indices record the flow introduced by words such as
+\texttt{DUP}, \texttt{SWAP}, and \texttt{OVER}.
+
+The analysis uses three partial operations.  Composition handles word
+sequences.  Branches keep only facts that hold on both paths.  A finite
+one-pass-versus-two-pass comparison handles repetition.  Nine small Forth
+definitions illustrate these operations.  They cover type refinement, cell
+identity, hidden stack prefixes, branch merging, and local loop stability.
+The checker reproduces all nine reported effects without executing concrete
+values.  Its conclusions depend on the supplied primitive specifications.
+The branch summary also forgets path-specific facts.  The loop summary does
+not cover every possible iteration count.
 \end{abstract}
 
-\noindent\textbf{Keywords:} Program analysis; static type checking; symbolic
-stack effects; stack languages; Forth.
+\noindent\textbf{Keywords:} Forth; static type checking; stack effects;
+symbolic execution; subtyping; concatenative languages.
 
 \section{Introduction}
 
-Forth programs contain sequences of stack operations. Traditional stack comments of the form
-\texttt{( before -- after )} help, but they remain informal and often do not
-provide a compositional account of type refinement or value identity through
-stack shuffling.
-
-One response is to treat stack effects as semantic objects rather than mere
-comments. The main questions are how to find the stack effect of a linear sequence of words,
-how to merge alternative branches, and how to compute a stable summary for
-repeated execution.
-
-This article formulates these questions in a stack-effect calculus. A
-non-clashing stack effect is a pair of symbolic stacks, with a separate clash
-element for failure; sequencing corresponds to multiplication; branch convergence
-is a variance-aware greatest lower bound of effect contracts; and loop reasoning is
-approximated by an idempotent effect.
-The calculus developed here follows the line of work
-in~\cite{poial1990,poial1991,poial2002,poial2006} and its executable
-implementation in~\cite{poial2008}.
-
-\section{Mathematical Setting}
-
-\paragraph{Types and symbolic values.}
-
-Let $(T, \leq)$ be a finite partial order of abstract types. The order is read
-as ``is at least as specific as.'' Throughout this article, $<$ denotes the
-strict part of this partial order. For example,
-\[
-\textit{char} < +n < n < x
-\]
-\[
-\textit{a-addr} < \textit{c-addr} < \textit{addr} < u < x
-\]
-\[
-\textit{flag} < x
-\]
-where $x$ is the least exact stack-cell type.
-
-A symbolic stack item is a pair $(t, i) \in T \times \mathbb{N}$, written
-$t[i]$. The index distinguishes symbolic values that share the same type.
-
-Let $\Sigma = T \times \mathbb{N}$. A symbolic stack is a finite sequence in
-$\Sigma^*$, with the top of stack on the right. Thus $a\ b\ c$ means that $c$
-is topmost.
-
-\paragraph{Effects.}
-
-A stack effect is an element of
-$S = (\Sigma^* \times \Sigma^*) \cup \{\emptyset\}$. A non-clashing effect is
-written formally as $e = (L \to R)$, or in Forth style as $( L \; -- \; R )$,
-where $L$ is the required suffix of the input stack and $R$ is the produced
-suffix of the output stack.
-
-The effect should be read relationally. If the current abstract stack has the
-form $S L$, then after the effect it becomes $S R$, provided that the symbols
-on the boundary can be unified consistently.
-
-We distinguish two special elements: $1 = (\, \to \,)$, the identity effect,
-and $\emptyset$, the clash (zero) effect produced by incompatible types or impossible
-unifications.
-
-\paragraph{Matching of boundary symbols.}
-
-If two boundary symbols are matched, the rule used here selects the more
-specific compatible type. Write $t \perp u$ when the two types are
-incompatible. Then
-\[
-\operatorname{match}(t[i], u[j]) =
-\begin{cases}
-t[k] & \text{if } t \leq u, \\
-u[k] & \text{if } u \leq t, \\
-\emptyset & \text{if } t \perp u,
-\end{cases}
-\]
-where $k$ is a fresh index.
-
-Operationally, one substitutes the fresh result for both boundary symbols
-throughout the effect sequence. Intuitively, the two local boundary variables
-become one shared symbolic value.
-
-This operation refines the type while preserving identity through substitution.
-
-\section{The Three Core Operations}
-
-\paragraph{Composition.}
-
-Sequential execution is represented by partial multiplication: if $s(\alpha)$
-denotes the stack effect of a word or phrase $\alpha$, then
-$s(\alpha \beta) = s(\alpha) \cdot s(\beta)$ whenever the output boundary of
-$s(\alpha)$ is compatible with the input boundary of $s(\beta)$.
-
-Operationally, multiplication is computed from the top of stack inward.
-Suppose $e_1 = (L_1 \to R_1\, a)$ and $e_2 = (L_2\, b \to R_2)$, where $a$ is
-the top output symbol of $e_1$ and $b$ is the top input symbol of $e_2$. If
-$\operatorname{match}(a, b) = \emptyset$, then $e_1 \cdot e_2 = \emptyset$.
-Otherwise let
-$z = \operatorname{match}(a, b)$. Substitute $z$ for both $a$ and $b$, remove
-the matched boundary pair, and continue recursively. If one side runs out of
-boundary symbols first, the unmatched prefix is carried through.
-
-Composition can be described as a semigroup (polycyclic monoid): it is associative when
-defined, it has identity $1$, and it admits a clash (zero) element
-$\emptyset$. This specializes to the algebraic setting
-of~\cite{poial1990}. In the typed symbolic case the multiplication becomes
-partial and information-sensitive, but the semigroup intuition remains.
-
-\paragraph{Branch merging.}
-
-For control-flow joins we use an order on contracts rather than plain
-inclusion of their input/output relations.  A lower contract may impose a
-stronger input requirement but must make a weaker output promise.  Thus the
-input and output components have opposite variance.
-
-In this contract order, branch convergence is modeled by the operation named
-greatest lower bound $\operatorname{glb}(e_1, e_2)$.  Aligned inputs keep the
-more specific comparable type, intersecting the inputs on which either branch
-may safely execute.  Aligned outputs keep the more general comparable type,
-covering the results either branch may produce.  Output identities survive
-only when both branches establish the same source-identity pair.
-
-The direction matters. In may-analysis, one usually merges by least upper
-bound, because one wants all behaviors that may happen. Here the goal is the
-strongest representable contract guaranteed on all paths. The implementation
-also aligns an omitted deep prefix as unchanged and rejects unequal net stack
-changes or incomparable aligned types.
-
-For a conditional with branch effects $p$ and $q$, the abstract effect is
-$(\textit{flag} \; -- \; ) \cdot \operatorname{glb}(p, q)$, up to the exact
-guard convention of the language. If $p$ and $q$ are
-incomparable, the merge is undefined and the analysis rejects the
-conditional as lacking a common guaranteed stack behavior.
-
-\paragraph{Loop invariants.}
-
-Loops require a stable summary (invariant) for arbitrary repetition. Let $b$ be
-the effect of one loop body execution. Algebraically, the desired summary
-should satisfy $i = i \cdot i$. A local approximation is
-$\operatorname{glb}(b, b \cdot b)$, which keeps only the guarantee common to
-one and two iterations. It extracts the
-repeated, stable part of an effect.
-~\cite{poial2006}.
-
-\section{Connections to Type Systems}
-
-The calculus also has related approaches in static typing for stack-based
-low-level languages. Bytecode verification for the JVM tracks stack height and
-types across control-flow joins~\cite{leroy2003}. Compositional type systems
-for stack-based low-level languages~\cite{saabas2006} pursue a similar goal
-with more conventional type-theoretic machinery. Type inference for stack-based
-languages~\cite{stoddart1993} is an earlier attempt.
-
-Typical inequalities in the type hierarchy are
-\[
-\textit{char} < +n < n < x
-\]
-\[
-\textit{a-addr} < \textit{c-addr} < \textit{addr} < u < x
-\]
-\[
-\textit{flag} < x
-\]
-These inequalities determine which boundary matches are accepted and which
-type refinements are propagated through compositions and merges.
-
-One feature of the calculus developed here is the combination of stack shape,
-subtype-aware typing, and identity-sensitive symbolic flow in one object. This
-combination allows stack shuffling to be analyzed without abandoning the effect
-notation used in Forth practice.
-
-\section{Implementation}
-
-The calculus is implemented here as a native Gforth program, a single-file
-evaluator that reads a declared type hierarchy, a vocabulary of word
-specifications, and a source program, then computes symbolic stack effects for
-linear code, conditionals, loops, literals, parser words, and new definitions.
-The implementation accepts both legacy built-in control structures and
-declarative syntax/effect descriptions, so the same three core operations,
-composition, $\operatorname{glb}$, and idempotent loop approximation, appear
-directly in the checker. When a composition fails, the checker reports
-line-and-column diagnostics together with the offending line and symbolic stack
-annotations.
-
-The native implementation follows the earlier Java reference in details that
-are semantically significant. Each sequence is evaluated on cloned effects,
-because wildcard renaming and unification mutate the working list; independently
-evaluated fragments receive disjoint wildcard ranges; and the final annotation
-uses the same normalized clone as the final effect. File input is normalized
-from LF, CRLF, or CR to logical LF-separated lines. Parser comments only consume
-source text: an ordinary comment such as \texttt{( -- n )} does not override
-inference, whereas a recognized locals declaration may provide a provisional
-effect shape.
-
-The following demo profile illustrates the checker. Using
-types such as \texttt{X}, \texttt{n}, \texttt{char}, \texttt{flag},
-\texttt{c-addr}, and \texttt{a-addr}, together with specifications for
-\texttt{DUP}, \texttt{SWAP}, \texttt{@}, \texttt{C@}, \texttt{0=}, and the
-basic control words, the checker can analyze the following program text:
-
+A Forth word is a named operation.  Here, a cell is one single-cell stack
+item.  The data stack is the ordered sequence of those items.  A word normally
+receives operands from that stack and returns its results to the same stack.
+The conventional notation
 \begin{verbatim}
-: PEEK2 DUP @ SWAP @ ;
-: MAYSWAP IF SWAP FI ;
-: NLOOP BEGIN DUP 0= WHILE REPEAT ;
-: ULOOP BEGIN DUP 0= UNTIL ;
-: KEEPIF IF DUP ELSE DUP FI ;
-DP DP C@ 0= KEEPIF
++   ( n n -- n )
 \end{verbatim}
+places the top of stack on the right and says that \texttt{+} consumes two
+numbers and produces one.  Such comments are valuable interfaces, but a Forth
+system usually consumes them as source text rather than treating them as
+proof obligations.  A comment can therefore be missing, stale, or semantically
+stronger than the implementation.
 
-The generated log records the inferred effects of the new definitions:
-
+Consider the familiar definition
 \begin{verbatim}
-PEEK2 ( a-addr --  X X )
-MAYSWAP ( X X flag --  X X )
-NLOOP ( n[1] --  n[1] )
-ULOOP ( n[1] --  n[1] )
-KEEPIF ( X[1] flag --  X[1] X[1] )
+: SQUARED  ( n -- n^2 )  DUP * ;
 \end{verbatim}
+The checker can derive \effect{( n -- n )} from the declarations of
+\texttt{DUP} and \texttt{*}.  It can verify the number and identity of the
+cells used by the phrase.  It does not prove the mathematical assertion that
+the result is the square of the input.  This distinction---typed stack
+consistency rather than arbitrary functional correctness---sets the scope of
+the method.
 
-This example shows linear code, conditionals, and loop skeletons handled in one
-symbolic framework.
+\begin{samepage}
+The checker reads three text inputs:
+\begin{enumerate}
+  \item a file that defines types, aliases, and ordering relations;
+  \item a file that defines word effects and source-reading rules;
+  \item a Forth source file whose colon definitions are to be inferred.
+\end{enumerate}
+A \emph{primitive word} is a word whose effect comes directly from the second
+file.  A \emph{colon definition} begins with \texttt{:} and ends with
+\texttt{;}.  The word that it defines receives an inferred effect from the
+source between those delimiters.
+\end{samepage}
+The checker has Java and Gforth implementations.  Both consume the same three
+files.  An analysis dictionary maps each known word to one stack effect.  At
+\texttt{;}, the inferred body effect is added to this dictionary.  The checker
+does not execute the Forth definition.
+
+The design builds on earlier work on stack effects and symbolic type variables
+\cite{poial1994,poial1992,poial2002,poial2006,poial2008}.  This paper gives a
+self-contained account of the operations used by the nine examples.  It
+explains four points:
+\begin{itemize}
+  \item how a later word can constrain an earlier input;
+  \item how two branch effects are combined;
+  \item why an effect displays only the top cells that it touches;
+  \item why the loop check compares one pass with two passes.
+\end{itemize}
+Sections~\ref{sec:model}--\ref{sec:control} define the complete analysis used
+here.  Sections~\ref{sec:sequence-examples}--\ref{sec:loop-examples} derive all
+nine results.  Appendices A--C reproduce the source and every profile entry
+needed for those derivations.  No other project document is required.
+
+\section{Typed Symbolic Stack Effects}
+\label{sec:model}
+
+\subsection{Types and compatibility}
+
+Let $T$ be a finite set of abstract cell types with a precision order
+$\preceq$.  The relation $t\preceq u$ means that $t$ is more specific than
+$u$.  A value of type $t$ may therefore be used where $u$ is required.  This
+order is the profile's subtype relation.  The Forth-2012-like profile used for the examples contains, among
+other edges, the transitive chains
+\[
+ \texttt{a-addr}\preceq\texttt{c-addr}\preceq
+ \texttt{addr}\preceq\texttt{u}\preceq\texttt{n}\preceq\texttt{x},
+\]
+\[
+ \texttt{char}\preceq\texttt{+n}\preceq
+ \texttt{u}\preceq\texttt{n}\preceq\texttt{x},
+ \qquad \texttt{flag}\preceq\texttt{x}.
+\]
+The flag type is deliberately separate from the numeric chain in this profile.
+Another profile may classify flags as numbers.  The hierarchy is therefore a
+policy for one target vocabulary.  It is not a universal claim about Forth
+cells.  Names such as \texttt{x}, \texttt{X}, and \texttt{cell} may be aliases
+for one type.
+
+Two types are \emph{comparable} when one is below the other in $\preceq$.
+Comparable types are compatible.  Matching them retains the more specific
+type:
+\[
+ \operatorname{match}(t,u)=
+ \begin{cases}
+ t,&t\preceq u,\\
+ u,&u\preceq t,\\
+ \text{undefined},&\text{otherwise}.
+ \end{cases}
+\]
+The implementation does not search for a third common subtype when $t$ and
+$u$ are incomparable.  An undefined match is a type clash.
+
+\subsection{Symbols, effects, and the implicit frame}
+
+A symbolic cell is a type with an optional positive identity index, written
+$t[i]$.  Equal indices denote the same abstract origin.  Different indices do
+not claim that the concrete values differ.  Every unindexed occurrence starts
+as an independent symbol.  An unindexed output is therefore a fresh abstract
+result.  Indices exist only in the checker.  They are not addresses or runtime
+tags.
+
+\begin{samepage}
+The declarations of three stack words illustrate the notation:
+\begin{verbatim}
+DUP   ( x[1] -- x[1] x[1] )
+SWAP  ( x[2] x[1] -- x[1] x[2] )
+OVER  ( x[2] x[1] -- x[2] x[1] x[2] )
+\end{verbatim}
+Before each word occurrence is analyzed, its local indices receive fresh
+numbers.  Two primitive calls therefore cannot share an index by accident.
+After analysis, \emph{normalization} renumbers the surviving indices from one
+upward.  Renumbering changes only their printed names, not their relationships.
+\end{samepage}
+
+An effect $e=(L--R)$ contains two finite symbolic stacks, with their tops on
+the right.  A stack \emph{suffix} is the group of top cells displayed by the
+effect.  Deeper cells form an implicit \emph{frame}.  For every frame $F$, the
+contract acts as
+\[
+                  F\,L \longmapsto F\,R.
+\]
+For example, \effect{( a-addr -- x )} for \texttt{@} does not require the
+entire data stack to contain one cell.  It requires only that the top cell be
+an aligned address; any deeper $F$ passes through unchanged.  The identity
+effect is \effect{( -- )}.  Write $\epsilon$ for the empty stack.  A clash is
+a separate failure result and must not be confused with the identity effect.
+The set of symbolic effects is the checker's \emph{abstract domain}.  An
+effect operation is \emph{partial} when some arguments produce no effect.  In
+those cases, this checker reports a clash.
+
+\section{The Three Effect Operations}
+\label{sec:operations}
+
+\subsection{Sequential composition}
+
+Let $p=(L_p--R_p)$ and $q=(L_q--R_q)$.  The expression $p\seq q$ means: apply
+$p$, then apply $q$.  Composition compares the top output of $p$ with the top
+input of $q$.  It then works inward.
+For every compatible pair, the checker:
+\begin{enumerate}
+  \item selects the more specific boundary type;
+  \item creates a fresh shared symbol of that type;
+  \item substitutes it for both old symbols throughout the working effects;
+  \item removes the matched output/input pair and continues.
+\end{enumerate}
+If $p$ runs out of outputs first, $q$ still needs cells from the implicit
+frame.  Those cells become inputs of the composite.  If $q$ runs out of inputs
+first, unused outputs of $p$ remain below the outputs of $q$.  This is exactly
+the effect of applying the two suffix transformations in order.
+
+Substitution through the whole effect is essential.  A boundary constraint
+must reach every copy with the same index.  A later \texttt{@} can therefore
+refine a cell that passed through \texttt{SWAP} and \texttt{DUP}.
+Incompatible types make composition undefined.  A word sequence is reduced by
+repeated composition from left to right.  The empty sequence has the identity
+effect.  This operation extends earlier untyped stack-effect composition
+\cite{poial1994}.
+
+\subsection{Common branch contracts}
+\label{sec:branch-op}
+
+Alternative paths use a second partial operation, written $p\meet q$.  Call it
+the \emph{common contract}.  It contains only facts justified for both paths.
+It does not store a separate effect for each path.  Positions are first aligned
+from the top of each stack.
+
+At aligned inputs, the operation keeps the more specific comparable type.  The
+input to the complete conditional must satisfy both paths.  At aligned outputs,
+it keeps the more general comparable type.  Later code may use only a type
+guaranteed by both paths.  This opposite treatment of inputs and outputs is
+called \emph{variance}.  An output index survives only if both paths preserve
+the same input-to-output relationship.  A branch-dependent permutation is
+therefore forgotten.
+
+Displayed effects may have unequal depths because both omit an unchanged frame.
+Suppose $p$ shows $k$ more input cells than $q$.  A merge is considered only if
+$p$ also shows exactly $k$ more output cells.  The missing $k$-cell prefix of
+$q$ is treated as unchanged, after which active suffixes are aligned.  Formally,
+a necessary shape condition is
+\[
+ |L_p|-|L_q| = |R_p|-|R_q|.
+\]
+A different net stack change or an incomparable aligned type rejects the join.
+
+Write $\sem{P}$ for the inferred effect of a source segment $P$.  For an
+\texttt{IF}, the declared selector effect is composed separately:
+\[
+ \sem{\texttt{IF }P\texttt{ ELSE }Q\texttt{ FI}}
+   = (\texttt{flag}--)\seq
+     (\sem{P}\meet\sem{Q}).
+\]
+When \texttt{ELSE} is absent, $Q$ is the identity effect.
+
+\subsection{Finite repetition}
+\label{sec:repeat-op}
+
+For a repeated phrase with one-pass effect $p$, the prototype computes
+\[
+                  \pi_2(p)=p\meet(p\seq p),
+\]
+provided both the composition and common-contract operations are defined.
+This one-versus-two comparison is finite and terminating.  It detects many
+bodies that grow, shrink, or change the stack incompatibly on a second pass.
+
+The notation has a narrow meaning.  It does not summarize every possible
+iteration count.  One and two passes can agree after information has been
+lost.  A later pass may then remove another correlation.  A full loop analysis
+would propagate the loop-header state until that state stops changing.
+$\pi_2$ does not perform that process.  It also proves neither termination nor
+properties of concrete values.  It is only a local stack-stability test.
+
+\section{Configuration and Experimental Method}
+\label{sec:control}
+
+The run uses three files: a type profile, a word profile, and the example
+source.  Appendices A--C reproduce every line from those files that affects the
+nine definitions.  Table~\ref{tab:primitives} summarizes the primitive
+contracts.  The integer-literal entry classifies tokens such as \texttt{0},
+\texttt{1}, and \texttt{5}.  It does not evaluate their values.
+
+\clearpage
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\hline
+Class & Word & Declared effect \\
+\hline
+Literals & integer, \texttt{FALSE} & \texttt{( -- n )}, \texttt{( -- flag )} \\
+Stack & \texttt{DUP} & \texttt{( x[1] -- x[1] x[1] )} \\
+      & \texttt{SWAP} & \texttt{( x[2] x[1] -- x[1] x[2] )} \\
+      & \texttt{OVER} & \texttt{( x[2] x[1] -- x[2] x[1] x[2] )} \\
+      & \texttt{ROT} & \texttt{( x[3] x[2] x[1] -- x[2] x[1] x[3] )} \\
+Numeric & \texttt{+}, \texttt{-} & \texttt{( n n -- n )} \\
+Logic & \texttt{OR} & \texttt{( flag flag -- flag )} \\
+      & \texttt{INVERT} & \texttt{( flag -- flag )} \\
+Memory & \texttt{@} & \texttt{( a-addr -- x )} \\
+       & \texttt{C@} & \texttt{( c-addr -- char )} \\
+Input & \texttt{KEY} & \texttt{( -- char )} \\
+Control & \texttt{IF}, \texttt{WHILE}, \texttt{UNTIL}
+        & \texttt{( flag -- )} \\
+\hline
+\end{tabular}
+\caption{Primitive effects used by the examples.}
+\label{tab:primitives}
+\end{table}
+
+The presentation shows \texttt{0=} as \effect{( n -- flag )}.  The word
+profile in Appendix C uses the broader effect \effect{( x -- flag )}.  This
+difference does not change a reported result.  In \texttt{test8}, \texttt{KEY}
+produces \texttt{char}.  The relation
+$\texttt{char}\preceq\texttt{n}\preceq\texttt{x}$ makes both declarations
+applicable.
+
+The word profile also describes control syntax.  Angle brackets name captured
+source segments.  Square brackets mark an optional segment.  Effect-recipe
+lines are composed from top to bottom.  A bare control word contributes its
+declared effect.  \texttt{either} applies the common-contract operation
+$\meet$.  \texttt{repeat} applies the finite operation $\pi_2$.
+
+The conditional declaration is:
+\begin{verbatim}
+syntax: IF <then branch> [ELSE <else branch>] FI
+  effect:
+    IF
+    either <then branch> <else branch>
+\end{verbatim}
+\medskip
+\noindent For loops, the relevant recipes are:
+\begin{verbatim}
+syntax: BEGIN <loop prefix> WHILE <loop body> REPEAT
+  effect:
+    repeat <loop prefix> WHILE
+    repeat <loop body>
+
+syntax: BEGIN <loop body> UNTIL
+  effect:
+    repeat <loop body> UNTIL
+\end{verbatim}
+The syntax declarations split source into segments.  The effect recipes then
+combine those segments with the three operations already defined.
+
+The exact definitions were checked by loading the three files.  The resulting
+word effects were read from the definition log.  One reproducible invocation
+is:
+\begin{verbatim}
+./run-evaluator-gforth.sh --prog examples.txt
+\end{verbatim}
+Equivalently, after compiling the Java sources:
+\begin{verbatim}
+javac evaluator/*.java
+java evaluator.Evaluator \
+  --types forth2012types.txt \
+  --specs forth2012specs.txt \
+  --prog examples.txt
+\end{verbatim}
+\clearpage
+All nine definitions are accepted.  Table~\ref{tab:results} reproduces their
+inferred contracts.  The next sections derive each result.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\hline
+Word & Inferred effect & Principal mechanism \\
+\hline
+\texttt{test1} & \texttt{( -- n )} & numeric sequence \\
+\texttt{test2} & \texttt{( flag flag -- flag flag )} & flag propagation \\
+\texttt{test3} & \texttt{( a-addr[2] x[1] -- x[1] a-addr[2] x )}
+                & identity and backward refinement \\
+\texttt{test4} & \texttt{( n flag -- n )} & implicit identity branch \\
+\texttt{test5} & \texttt{( x[1] flag -- x[1] x )} & output widening \\
+\texttt{test6} & \texttt{( x x a-addr flag -- x x x )}
+                & path-dependent permutation loss \\
+\texttt{test7} & \texttt{( flag flag -- flag flag )} & two-part repetition \\
+\texttt{test8} & \texttt{( -- )} & balanced test loop \\
+\texttt{test9} & \texttt{( a-addr flag -- x )} & input/output variance \\
+\hline
+\end{tabular}
+\caption{Exact inferred effects recorded in \texttt{examples.txt.log}.}
+\label{tab:results}
+\end{table}
+
+\section{Straight-Line Examples}
+\label{sec:sequence-examples}
+
+\subsection{\texttt{test1}: stack shape without value evaluation}
+
+\begin{quote}
+\texttt{: test1  3 4 5 - + ;}
+\end{quote}
+Every literal has effect \effect{( -- n )}.  Naming fresh abstract results
+$a$, $b$, and $c$, the stack evolves as
+\[
+ \epsilon
+ \longrightarrow n_a
+ \longrightarrow n_a\;n_b
+ \longrightarrow n_a\;n_b\;n_c
+ \longrightarrow n_a\;n_d
+ \longrightarrow n_e.
+\]
+Subtraction consumes $n_b,n_c$ and produces a fresh $n_d$.  Addition consumes
+$n_a,n_d$ and produces $n_e$.  No input is required.  One number is left:
+\[
+                      \texttt{test1}\;( -- n ).
+\]
+Concrete execution would calculate $4-5=-1$ and then $3+(-1)=2$.  The checker
+does not perform that calculation.  Its domain contains the type \texttt{n},
+but no integer constants or arithmetic expressions.  It establishes only
+\effect{( -- n )}.
+
+\subsection{\texttt{test2}: a generic shuffle specialized to flags}
+
+\begin{quote}
+\texttt{: test2  OR FALSE SWAP ;}
+\end{quote}
+\texttt{OR} first requires two flags and leaves one fresh flag.  \texttt{FALSE}
+adds another flag.  The generic inputs of \texttt{SWAP} then match these two
+results.  Both inputs are refined from \texttt{x} to \texttt{flag}:
+\[
+ \texttt{flag}_a\;\texttt{flag}_b
+ \xrightarrow{\texttt{OR}}
+ \texttt{flag}_c
+ \xrightarrow{\texttt{FALSE}}
+ \texttt{flag}_c\;\texttt{flag}_d
+ \xrightarrow{\texttt{SWAP}}
+ \texttt{flag}_d\;\texttt{flag}_c.
+\]
+The inputs are consumed by \texttt{OR}; neither output is correlated with an
+original input.  The reported interface therefore needs no visible indices:
+\[
+           \texttt{test2}\;(\texttt{flag flag -- flag flag}).
+\]
+Although one output is produced by the word named \texttt{FALSE}, the checker
+has no constant-propagation domain and promises only its declared type.
+
+\subsection{\texttt{test3}: backward refinement through \texttt{SWAP} and
+\texttt{DUP}}
+
+\begin{quote}
+\texttt{: test3  SWAP DUP @ ;}
+\end{quote}
+Let the initial suffix be $A\;B$, with $B$ topmost.  \texttt{SWAP} produces
+$B\;A$ and \texttt{DUP} produces $B\;A\;A$.  The final \texttt{@} requires
+the top copy of $A$ to be an \texttt{a-addr}.  Because both copies carry the
+same symbolic index, the substitution also refines the untouched copy and the
+original input:
+\[
+ A\;B
+ \xrightarrow{\texttt{SWAP}} B\;A
+ \xrightarrow{\texttt{DUP}} B\;A\;A
+ \xrightarrow{\texttt{@}} B\;A\;X_{\mathrm{fresh}}.
+\]
+After normalized numbering, $A$ is \texttt{a-addr[2]} and $B$ is
+\texttt{x[1]}.  Hence
+\[
+\begin{split}
+ \texttt{test3}\;(&\texttt{a-addr[2] x[1]}\\
+                  &\texttt{-- x[1] a-addr[2] x}).
+\end{split}
+\]
+This is the key identity-flow example.  Tracking only stack depth would miss
+the address requirement.  Tracking types without indices would also lose
+information.  Such an analysis could refine only the consumed copy.  It could
+not identify the surviving copy as the same aligned address.
+
+\section{Branch Examples}
+\label{sec:branch-examples}
+
+\subsection{\texttt{test4}: an explicit effect versus an implicit frame}
+
+\begin{quote}
+\texttt{: test4  IF 1 + FI ;}
+\end{quote}
+The true branch \texttt{1 +} pushes an \texttt{n}, then needs one additional
+\texttt{n} below it for \texttt{+}.  Its inferred effect is
+\effect{( n -- n )}.  The absent \texttt{ELSE} branch has the identity effect
+\effect{( -- )}.  These displayed depths differ, but the empty branch preserves
+an arbitrary deeper frame.  Making one frame cell explicit gives the
+alignment
+\[
+\begin{array}{rcl}
+ \text{true}  &:& (\texttt{n -- n}),\\
+ \text{false} &:& (\underline{\texttt{n}} --
+                       \underline{\texttt{n}}).
+\end{array}
+\]
+Both paths preserve a one-cell numeric stack shape.  They do not preserve the
+same value.  The false path returns the original number.  The true path returns
+the result of addition.  No output identity is claimed.
+After the leading \texttt{IF} consumes its selector, the complete definition is
+\[
+                    \texttt{test4}\;(\texttt{n flag -- n}).
+\]
+This example explains why comparing only the explicitly printed sides would be
+too strict.  Stack effects denote transformations under an implicit frame.
+
+\subsection{\texttt{test5}: a common prefix survives, a branch-dependent
+identity does not}
+
+\begin{quote}
+\texttt{: test5  IF DUP ELSE 0 FI ;}
+\end{quote}
+The true branch is
+\effect{( x[1] -- x[1] x[1] )}.  The false branch explicitly has
+\effect{( -- n )}, but it leaves the deeper frame unchanged.  Exposing one
+frame cell aligns the branches as follows:
+\[
+\begin{array}{rcl}
+ \text{true}  &:& (\texttt{x[1] -- x[1] x[1]}),\\
+ \text{false} &:& (\texttt{x[1] -- x[1] n}).
+\end{array}
+\]
+The lower output is the original input on both paths, so its index survives.
+The top output is the same input on the true path but a fresh numeric literal
+on the false path.  Its path-independent type is the more general type
+\texttt{x}.  It cannot retain the input index.  The branch contract is thus
+\[
+                       (\texttt{x[1] -- x[1] x}).
+\]
+Composing the selector yields
+\[
+             \texttt{test5}\;(\texttt{x[1] flag -- x[1] x}).
+\]
+The result loses two facts.  First, \texttt{n} is widened to \texttt{x} at the
+differing output.  Second, a correlation valid on only one path is discarded.
+
+\subsection{\texttt{test6}: compatible shape with no common permutation}
+
+\begin{quote}
+\texttt{: test6  IF ROT ELSE @ FI ;}
+\end{quote}
+Write the pre-branch suffix as $A\;B\;C$, with $C$ topmost.  The true branch
+rotates it:
+\[
+                         A\;B\;C \longmapsto B\;C\;A.
+\]
+The false branch \texttt{@} displays only one input and one output.  Its
+implicit two-cell frame makes the comparable transformation
+\[
+                         A\;B\;C \longmapsto A\;B\;D,
+\]
+where $C$ must be \texttt{a-addr} and $D$ is a fresh \texttt{x}.  At the input,
+\texttt{ROT}'s generic requirement and \texttt{@}'s address requirement meet
+at the more specific \texttt{a-addr}.  The input contract is consequently
+\effect{( x x a-addr -- ... )}.
+
+The output positions have the path pairs $(B,A)$, $(C,B)$, and $(A,D)$.  None
+of these establishes one common source identity.  Their only common output
+type is \texttt{x}, so the branch contract is
+\[
+                  (\texttt{x x a-addr -- x x x}).
+\]
+After selector consumption, the inferred definition is
+\[
+       \texttt{test6}\;(\texttt{x x a-addr flag -- x x x}).
+\]
+The checker accepts the equal net stack change.  It forgets which input reaches
+which output.  An analysis that stores each path separately could retain both
+permutations.  This checker stores one common contract.
+
+\subsection{\texttt{test9}: input and output variance in isolation}
+
+\begin{quote}
+\texttt{: test9  IF @ ELSE C@ FI ;}
+\end{quote}
+The two branch effects are
+\[
+ (\texttt{a-addr -- x})
+ \qquad\text{and}\qquad
+ (\texttt{c-addr -- char}).
+\]
+An input to the whole conditional must satisfy both address requirements.
+Since \texttt{a-addr}$\preceq$\texttt{c-addr}, the common input is the more
+specific \texttt{a-addr}.  An output client, however, needs a guarantee valid
+for either \texttt{x} or \texttt{char}.  Since
+\texttt{char}$\preceq$\texttt{x}, that guarantee is the more general
+\texttt{x}.  Thus
+\[
+ (\texttt{a-addr -- x})\meet(\texttt{c-addr -- char})
+       =(\texttt{a-addr -- x}),
+\]
+and selector composition gives
+\[
+               \texttt{test9}\;(\texttt{a-addr flag -- x}).
+\]
+This small example is the clearest demonstration of contract variance:
+branch inputs are narrowed, whereas outputs are widened.
+
+\section{Repetition Examples}
+\label{sec:loop-examples}
+
+\subsection{\texttt{test7}: one-versus-two exposes both flag requirements}
+
+\begin{quote}
+\texttt{: test7  BEGIN SWAP OVER WHILE INVERT REPEAT ;}
+\end{quote}
+The profile divides this structure into the repeated prefix
+\texttt{SWAP OVER WHILE} and the repeated body \texttt{INVERT}.  Consider one
+prefix pass on $A\;B$:
+\[
+ A\;B
+ \xrightarrow{\texttt{SWAP}} B\;A
+ \xrightarrow{\texttt{OVER}} B\;A\;B
+ \xrightarrow{\texttt{WHILE}} B\;A.
+\]
+\texttt{WHILE} consumes the duplicate of the original top cell, so $B$ must be
+a flag.  A second prefix pass transforms $B\;A$ back to $A\;B$ and tests $A$.
+Consequently the two-pass effect requires both original cells to be flags.
+The common summary preserves two flag-typed positions.  It cannot promise one
+permutation.  One pass swaps the cells, while two passes restore them.  The
+summary is therefore
+\[
+                        (\texttt{flag flag -- flag flag}).
+\]
+The second repeated region, \texttt{INVERT}, has the stable type effect
+\effect{( flag -- flag )}.  Composing it with the prefix summary leaves the
+same two-cell interface, giving
+\[
+          \texttt{test7}\;(\texttt{flag flag -- flag flag}).
+\]
+This is a useful rejection test for changing stack shape and incompatible
+second-pass types.  It is not a proof that the reported identity-free summary
+characterizes every number of loop iterations or that the loop terminates.
+
+\subsection{\texttt{test8}: a data-stack-neutral loop pass}
+
+\begin{quote}
+\texttt{: test8  BEGIN KEY 0= UNTIL ;}
+\end{quote}
+A complete repeated pass has the data-stack trace
+\[
+ \epsilon
+ \xrightarrow{\texttt{KEY}} \texttt{char}
+ \xrightarrow{\texttt{0=}} \texttt{flag}
+ \xrightarrow{\texttt{UNTIL}} \epsilon.
+\]
+The displayed numeric contract for \texttt{0=} accepts \texttt{char} because
+\texttt{char}$\preceq$\texttt{n}.  The broader \texttt{x} contract also
+accepts it.  \texttt{UNTIL} consumes the resulting flag.  One pass has the
+identity data-stack effect.  Two passes have the same effect.  Their common
+contract is
+\[
+                         \texttt{test8}\;(\texttt{--}).
+\]
+This conclusion concerns only the modeled data stack.  \texttt{KEY} still has
+an I/O side effect.  The result does not promise a key that meets the exit
+condition.  It also does not prove termination.
+
+\section{Discussion}
+
+\subsection{What the examples establish}
+
+The nine examples isolate complementary properties of the symbolic domain.
+\texttt{test1} shows that the checker infers shape and cell type without
+constant evaluation.  \texttt{test2} shows subtype specialization of a generic
+stack word.  \texttt{test3} demonstrates bidirectional information flow:
+execution order is left to right, but a late requirement propagates backward
+through shared symbolic identities.
+
+The branch examples show why an effect is more than a pair of stack heights.
+\texttt{test4} depends on the implicit frame.  \texttt{test5} retains only an
+identity common to both paths.  \texttt{test6} loses a branch-dependent
+permutation.  \texttt{test9} narrows its input and widens its output.  The loop
+examples show two uses of the finite rule.  A second pass refines another cell
+in \texttt{test7}.  A balanced pass becomes identity in \texttt{test8}.
+
+All reported outputs are inferred from primitive contracts.  The illustrative
+comments in the presentation are not declarations.  This rule prevents a stale
+comment from changing inference.  Semantic labels such as \texttt{value} or
+``address contents'' are therefore outside the domain.  A richer profile would
+be needed to represent them.
+
+\subsection{Configuration as an analysis parameter}
+
+The same source may receive a different verdict under another valid profile.
+For example, one profile may classify \texttt{char} as numeric.  It accepts
+the displayed \texttt{KEY 0=}.  Another profile may keep \texttt{char} and
+\texttt{n} unrelated.  A numeric-only \texttt{0=} then rejects the phrase.
+The target Forth system determines which policy is appropriate.  The profile
+makes that policy reviewable.
+
+External control declarations provide similar flexibility.  They also enlarge
+the trusted base.  A recipe might omit a selector effect.  It might also put
+\texttt{UNTIL} outside its repeated segment.  Either error can produce a wrong
+summary even when the three operations are correct.  The configuration should
+therefore be reviewed with the checked code.
+
+\section{Validity and Limitations}
+\label{sec:limits}
+
+Acceptance has a precise but bounded interpretation:
+\begin{itemize}
+  \item every checked linear boundary has enough modeled cells of comparable
+        types;
+  \item every checked branch admits one common contract under the implemented
+        alignment and variance rules;
+  \item every checked repetition admits the finite $p\meet(p\seq p)$ summary;
+  \item parser roles, delimiters, and compilation state fit the active profile.
+\end{itemize}
+It does not imply full Forth program correctness.  The principal threats to a
+stronger interpretation are as follows.
+
+\paragraph{Trusted declarations.}
+Primitive and parser specifications are assumptions.  If \texttt{@},
+\texttt{KEY}, or a control word is declared incorrectly, analysis of its
+clients cannot make the result reliable.
+
+\paragraph{Single effects and comparable types.}
+The dictionary stores one effect per primitive.  Branch merging also returns
+one common contract.  It cannot retain a separate permutation for each path.
+Aligned types must be directly comparable.  The checker does not search for a
+third common type.
+
+\paragraph{Correlation precision.}
+Normalization and single-contract merging can discard symbolic identities.
+This loss is conservative for the displayed examples but can make later
+analysis less precise.  Internal correlations should ideally be retained and
+compacted only for presentation.
+
+\paragraph{Finite loop approximation.}
+The one-versus-two comparison does not prove a result for every iteration
+count.  A stronger analysis would maintain an abstract stack at the loop
+header.  It would propagate the body until that stack stopped changing.
+Another design would require a declared loop interface and check every back
+edge against it \cite{cousot1977}.
+
+\paragraph{Forth language coverage.}
+Return-stack manipulation, unrestricted \texttt{EXECUTE}, recursion,
+non-local \texttt{THROW}, native defining words, self-modifying dictionaries,
+and unrestricted metaprogramming require additional abstractions.  The checker
+should complement runtime tests, code review, and target-system knowledge.
+
+The examples are explanatory cases.  They are not a performance benchmark.
+They also do not prove that every accepted program is safe.  Each case makes
+one operation visible.  The exact nine contracts can be compared across the
+Java and Gforth implementations.
+
+\section{Related Work}
+
+Forth has long used stack-effect notation as an interface convention.  The
+Forth standard defines data types and control semantics \cite{forth2012}.  It
+does not make each source comment a static judgment.  Earlier work developed
+algebraic composition and multiple effects for control flow
+\cite{poial1994,poial1992}.  Later work added typed symbolic variables and
+conservative control-flow operations \cite{poial2002,poial2006}.  A Java
+framework made these ideas executable \cite{poial2008}.  The checker described
+here also loads parser and control behavior from a profile.
+
+Stoddart and Knaggs also studied type inference for stack languages
+\cite{stoddart1991}.  Saabas and Uustalu gave compositional type systems for
+stack-based low-level code \cite{saabas2006}.  JVM bytecode verification also
+propagates stack types through control-flow joins \cite{leroy2003}.  Those
+settings have more fixed instruction and control languages.  Forth source can
+contain parser words and dictionary extensions.  The profile handles that
+variability, but it becomes part of the trusted input.
+
+Abstract interpretation offers a stronger treatment of loops
+\cite{cousot1977}.  It propagates abstract states until they stop changing.
+The one-versus-two rule performs only the first bounded comparison.  An
+inferred loop effect must be read with that distinction in mind.  Every
+bibliography entry below includes a public full-text link.  The links were
+checked on 30 August 2026.
 
 \section{Conclusion}
+\leavevmode\par\vspace{-\baselineskip}
+Typed symbolic stack effects turn a familiar Forth notation into executable,
+configurable documentation.  Sequential composition checks touching stack
+boundaries and propagates refined types through shared identities.  Branch
+merging computes one conservative contract, narrowing inputs, widening outputs,
+and preserving only path-independent correlations.  Repetition compares one
+pass with two to obtain a useful but explicitly finite stability summary.
 
-Static analysis for stack languages can be presented as an algebra based on
-three operations: composition for sequencing, greatest lower bound for branch
-convergence, and idempotent closure for loop invariants. Once types and
-symbolic identities are added, this algebra can function as a type checker for
-linear code, conditionals, and loops in Forth-like languages.
+The nine examples make these mechanisms concrete.  Three linear definitions
+show type and identity propagation.  Four conditionals show implicit frames,
+input narrowing, output widening, and information loss.  Two loops show what
+the bounded repetition rule accepts.  The profile reproduces every inferred
+effect.  The result is a practical checker for the configured subset of Forth.
+It is not a proof of functional behavior or termination.  Stronger assurance
+requires validated primitives, separate path effects, preserved identity
+classes, and full loop analysis.
+
+\appendix
+\section{Exact Example Source and Inferred Log}
+
+\begin{samepage}
+The source file used for Table~\ref{tab:results} is:
+\begin{verbatim}
+: test1 3 4 5 - + ;
+: test2 OR FALSE SWAP ;
+: test3 SWAP DUP @ ;
+: test4 IF 1 + FI ;
+: test5 IF DUP ELSE 0 FI ;
+: test6 IF ROT ELSE @ FI ;
+: test7 BEGIN SWAP OVER WHILE INVERT REPEAT ;
+: test8 BEGIN KEY 0= UNTIL ;
+: test9 IF @ ELSE C@ FI ;
+\end{verbatim}
+\end{samepage}
+\begin{samepage}
+The generated definition log is:
+\begin{verbatim}
+test1 ( -- n )
+test2 ( flag flag -- flag flag )
+test3 ( a-addr[2] x[1] -- x[1] a-addr[2] x )
+test4 ( n flag -- n )
+test5 ( x[1] flag -- x[1] x )
+test6 ( x x a-addr flag -- x x x )
+test7 ( flag flag -- flag flag )
+test8 ( -- )
+test9 ( a-addr flag -- x )
+\end{verbatim}
+Whitespace in the machine log is presentation-only; the symbolic contracts are
+as shown.
+\end{samepage}
+
+\section{Relevant Type-Profile Declarations}
+\label{app:types}
+
+The excerpt below contains the types, aliases, and subtype edges needed by the
+nine examples.  It is copied from \path{forth2012types.txt}.  Unused profile
+types, such as execution tokens, file identifiers, and double-cell numbers,
+are omitted.
+\begin{verbatim}
+type x X cell
+type n number signed
+type +n nonnegative
+type u unsigned
+type char c
+type flag boolean
+type addr
+type c-addr ca
+type a-addr aa
+
+rel +n < n
+rel +n < u
+rel u < n
+rel n < x
+rel u < x
+rel char < +n
+rel flag < x
+rel addr < u
+rel c-addr < addr
+rel a-addr < c-addr
+\end{verbatim}
+The loader adds every relation implied by a chain.  For example, it derives
+\texttt{char}$\preceq$\texttt{n}$\preceq$\texttt{x}.  It also derives
+\texttt{a-addr}$\preceq$\texttt{c-addr}$\preceq$\texttt{x}.
+The type \texttt{flag} remains outside the numeric chain.
+
+\section{Relevant Word and Control Specifications}
+\label{app:specs}
+
+This appendix selects the entries from \texttt{forth2012specs.txt} used to
+parse and infer \texttt{examples.txt}.  The text of each declaration is
+unchanged; unrelated vocabulary entries are omitted.
+
+\subsection{Stack words, definition syntax, and literals}
+\begin{verbatim}
+OVER ( x[2] x[1] -- x[2] x[1] x[2] )
+SWAP ( x[2] x[1] -- x[1] x[2] )
+DUP ( x[1] -- x[1] x[1] )
+ROT ( x[3] x[2] x[1] -- x[2] x[1] x[3] )
+
+: parse word define colon ( -- )
+; control end ( -- )
+literal integer ( -- n )
+FALSE ( -- flag )
+\end{verbatim}
+The first four declarations expose symbolic identity.  The source-reading
+markers on \texttt{:} and \texttt{;} start and close a colon definition.  The
+literal class supplies the effect of tokens such as \texttt{0}, \texttt{1},
+and \texttt{5}.
+
+\subsection{Conditional control structure}
+\begin{verbatim}
+IF control if ( flag -- )
+ELSE control else ( -- )
+FI control fi ( -- )
+
+syntax: IF <then branch> [ELSE <else branch>] FI
+  effect:
+    IF
+    either <then branch> <else branch>
+\end{verbatim}
+The control roles delimit the captured source regions.  The effect recipe first
+accounts for selector consumption and then applies the common-contract
+operation to the two branches.
+
+\subsection{Loop control structures}
+\begin{verbatim}
+BEGIN control begin ( -- )
+WHILE control while ( flag -- )
+REPEAT control repeat ( -- )
+
+syntax: BEGIN <loop prefix> WHILE <loop body> REPEAT
+  effect:
+    repeat <loop prefix> WHILE
+    repeat <loop body>
+\end{verbatim}
+\begin{samepage}
+\begin{verbatim}
+UNTIL control until ( flag -- )
+
+syntax: BEGIN <loop body> UNTIL
+  effect:
+    repeat <loop body> UNTIL
+\end{verbatim}
+\end{samepage}
+These recipes identify exactly which control-word effects belong to the
+one-versus-two calculation.  In particular, \texttt{WHILE} is included with
+the loop prefix and \texttt{UNTIL} with the loop body.
+
+\subsection{Numeric, logical, memory, and input words}
+\begin{verbatim}
++ ( n n -- n )
+- ( n n -- n )
+0= ( x -- flag )
+OR ( flag flag -- flag )
+INVERT ( flag -- flag )
+
+@ ( a-addr -- x )
+C@ ( c-addr -- char )
+KEY ( -- char )
+\end{verbatim}
+This profile lets \texttt{0=} accept \texttt{x}.  The presentation uses the
+narrower input type \texttt{n}.  Section~\ref{sec:control} explains why both
+choices give the same result here.
 
 \begin{thebibliography}{99}
+\footnotesize
+\setlength{\itemsep}{0pt}
+\setlength{\parsep}{0pt}
+\raggedright
 
-\bibitem{poial1990}
-Jaanus Poial.
-\newblock ``Algebraic Specifications of Stack Effects for Forth Programs.''
-\newblock In \emph{1990 FORML Conference Proceedings, euroFORML'90 Conference},
-Ampfield, Hampshire, UK, 12--14 October 1990. FIG, 1991, pp. 282--290.
+\bibitem{cousot1977}
+P. Cousot and R. Cousot.
+\newblock Abstract interpretation: A unified lattice model for static analysis
+of programs by construction or approximation of fixpoints.
+\newblock In \emph{Proceedings of POPL}, pp. 238--252, 1977.
+\newblock doi:10.1145/512950.512973.
+\newblock Public full text:
+\url{https://www.di.ens.fr/~cousot/publications.www/CousotCousot-POPL-77-ACM-p238--252-1977.pdf}.
 
-\bibitem{poial1991}
-Jaanus Poial.
-\newblock ``Multiple Stack-effects of Forth Programs.''
-\newblock In \emph{1991 FORML Conference Proceedings, euroFORML'91 Conference},
-Marianske Lazne, Czechoslovakia, 11--13 October 1991. FIG, 1992, pp. 400--406.
-
-\bibitem{poial2002}
-Jaanus Poial.
-\newblock ``Stack Effect Calculus with Typed Wildcards, Polymorphism and Inheritance.''
-\newblock In \emph{EuroForth 2002 Proceedings}, Vienna, Austria,
-6--8 September 2002, p. 38.
-
-\bibitem{poial2006}
-Jaanus Poial.
-\newblock ``Typing Tools for Typeless Stack Languages.''
-\newblock In \emph{Proceedings of EuroForth 2006}, Cambridge, UK,
-15--17 September 2006, pp. 40--46.
-
-\bibitem{poial2008}
-Jaanus Poial.
-\newblock ``Java Framework for Static Analysis of Forth Programs.''
-\newblock In \emph{Proceedings of EuroForth 2008}, Vienna, Austria,
-26--28 September 2008, pp. 20--23.
+\bibitem{forth2012}
+Forth 200x Standardisation Committee.
+\newblock \emph{Forth 2012 Standard}.
+\newblock Draft proposed standard, 10 November 2014.
+\newblock Public full text:
+\url{https://forth-standard.org/standard/intro}.
 
 \bibitem{leroy2003}
-Xavier Leroy.
-\newblock ``Java Bytecode Verification: Algorithms and Formalizations.''
-\newblock \emph{Journal of Automated Reasoning} 30, 2003, pp. 235--269.
-\newblock doi:\href{https://doi.org/10.1023/A:1024449429949}{10.1023/A:1024449429949}.
+X. Leroy.
+\newblock Java bytecode verification: Algorithms and formalizations.
+\newblock \emph{Journal of Automated Reasoning}, 30:235--269, 2003.
+\newblock doi:10.1023/A:1025055424017.
+\newblock Public full text:
+\url{https://xavierleroy.org/publi/bytecode-verification-JAR.pdf}.
+
+\bibitem{poial1994}
+J. Pöial.
+\newblock Algebraic specification of stack effects.
+\newblock \emph{Forth Dimensions}, 16(4):18--20, 1994.
+\newblock Public full text:
+\url{https://www.forth.org/fd/FD-V16N4.pdf}.
+
+\bibitem{poial1992}
+J. Pöial.
+\newblock Multiple stack-effects of Forth programs.
+\newblock In \emph{1991 FORML Conference Proceedings, euroFORML'91},
+pp. 400--406, 1992.
+\newblock Public full text:
+\url{https://www.complang.tuwien.ac.at/anton/euroforth/ef91/poial.pdf}.
+
+\bibitem{poial2002}
+J. Pöial.
+\newblock Stack effect calculus with typed wildcards, polymorphism and
+inheritance.
+\newblock Presentation and proceedings abstract, 18th EuroForth Conference,
+2002.
+\newblock Public full text:
+\url{https://www.complang.tuwien.ac.at/anton/euroforth/ef02/poial02.pdf}.
+
+\bibitem{poial2006}
+J. Pöial.
+\newblock Typing tools for typeless stack languages.
+\newblock In \emph{Proceedings of the 22nd EuroForth Conference},
+pp. 40--46, 2006.
+\newblock Public full text:
+\url{https://www.complang.tuwien.ac.at/anton/euroforth/ef06/poial06.pdf}.
+
+\bibitem{poial2008}
+J. Pöial.
+\newblock Java framework for static analysis of Forth programs.
+\newblock In \emph{Proceedings of the 24th EuroForth Conference},
+pp. 20--23, 2008.
+\newblock Public full text:
+\url{https://www.complang.tuwien.ac.at/anton/euroforth/ef08/papers/poial.pdf}.
 
 \bibitem{saabas2006}
-Ando Saabas and Tarmo Uustalu.
-\newblock ``Compositional Type Systems for Stack-Based Low-Level Languages.''
-\newblock In \emph{Proceedings of the 12th Computing: The Australasian Theory Symposium (CATS 2006)},
-Hobart, Australia, 2006, pp. 27--39.
+A. Saabas and T. Uustalu.
+\newblock Compositional type systems for stack-based low-level languages.
+\newblock In \emph{Proceedings of CATS 2006}, CRPIT 51, pp. 27--39, 2006.
+\newblock Public full text:
+\url{https://web.archive.org/web/20120325100058id_/http://crpit.com/confpapers/CRPITV51Saabas.pdf}.
 
-\bibitem{stoddart1993}
-Bill Stoddart and Peter J. Knaggs.
-\newblock ``Type Inference in Stack Based Languages.''
-\newblock \emph{Formal Aspects of Computing} 5(4), 1993, pp. 289--298.
-\newblock doi:\href{https://doi.org/10.1007/BF01212404}{10.1007/BF01212404}.
+\bibitem{stoddart1991}
+B. Stoddart and P. J. Knaggs.
+\newblock Type inference in stack based languages.
+\newblock In \emph{1991 FORML Conference Proceedings, euroFORML'91},
+pp. 407--421, 1991.
+\newblock Public full text:
+\url{https://www.complang.tuwien.ac.at/anton/euroforth/ef91/stoddart.pdf}.
 
 \end{thebibliography}
 
