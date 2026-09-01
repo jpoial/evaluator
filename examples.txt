@@ -17,3 +17,12 @@
 
 : test9 IF @ ELSE C@ FI ;
 
+: P INVERT HERE ! DP ! DP @ DP C@ SWAP ;
+
+: Q SWAP ! DP @ DP ;
+
+: test10 IF P ELSE Q FI ;
+
+: BODY SWAP DUP @ 0= ;
+: test11 BEGIN BODY UNTIL ;
+
