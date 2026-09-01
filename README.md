@@ -4,24 +4,34 @@ Forth code symbolic executor and type checker.
 
 ## Overview
 
-This repository contains two independent evaluator implementations that consume
+This repository contains three independent evaluator implementations that consume
 the same input files:
 
 - `gforth-evaluator.fs` is the single-file native `gforth` implementation.
+- `python3-evaluator.py` is the dependency-free Python 3 implementation.
 - `evaluator.Evaluator` is the Java implementation.
 
-Both read the same `--types`, `--specs`, and `--prog` text formats, and both
+All three read the same `--types`, `--specs`, and `--prog` text formats, and
 can be driven through the bundled launcher scripts.
 
-The native port follows the Java evaluator's observable success-path
-semantics closely. In particular, it normalizes CRLF and CR input to the same
-logical LF-separated text as Java's line reader, allocates disjoint wildcard
-ranges using the same index rules, evaluates cloned effect lists so that one
-analysis cannot mutate a later one, and emits the same successful annotation
-and Unix log-file layout. The checked-in positive corpus currently produces
-identical standard output in both implementations.
+The native and Python ports follow the Java evaluator's observable success-path
+semantics closely. In particular, they normalize CRLF and CR input to the same
+logical LF-separated text as Java's line reader, allocate disjoint wildcard
+ranges using the same index rules, evaluate cloned effect lists so that one
+analysis cannot mutate a later one, and emit the same successful annotation
+and Unix log-file layout. The checked-in corpus currently produces identical
+standard output and diagnostics in the GForth and Python implementations.
 
 ## Quick Start
+
+### Python 3 directly
+
+No build step or third-party package is required:
+
+```sh
+python3 python3-evaluator.py --types mytypes.txt --specs myspecs.txt --prog myprog.txt
+python3 python3-evaluator.py --types mytypes.txt --specs myspecs.txt DUP SWAP +
+```
 
 ### Java directly
 
@@ -54,13 +64,14 @@ The repository also ships convenience wrappers for the bundled demo profiles:
 | Runtime | Linux | Windows |
 | --- | --- | --- |
 | `gforth` | `./run-evaluator-gforth.sh [profile]` | `run-evaluator-gforth.bat [profile]` |
+| Python 3 | `./run-evaluator-python3.sh [profile]` | `run-evaluator-python3.bat [profile]` |
 | Java | `./run-evaluator-java.sh [profile]` | `run-evaluator-java.bat [profile]` |
 
 The `gforth` launchers require a 64-bit Gforth 0.7.9 or newer and run
 `gforth-evaluator.fs` directly. On Linux they prefer the current user-local
 installation in `~/.local/bin`; `GFORTH_BIN` can override the executable. The
-Java launchers run `evaluator.Evaluator`. Both use the same bundled profile
-defaults.
+Java launchers run `evaluator.Evaluator`. All launchers use the same bundled
+profile defaults.
 
 Each launcher also accepts one existing bare filename as shorthand for
 `--prog that-file`.
