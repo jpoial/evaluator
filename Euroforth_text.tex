@@ -28,29 +28,26 @@
 
 \begin{abstract}
 Forth stack comments document the cells consumed and produced by a word.
-Ordinary comments are not checked.  They also do not record how stack words
+Ordinary comments are not checked and do not record how stack words
 move or copy individual cells.  This paper presents a configurable source-level
-prototype.  It represents each phrase by a typed input/output stack contract,
-called a stack effect.  A profile supplies the type hierarchy and primitive
-word effects.  Symbolic indices record the flow introduced by words such as
+static type checker implemented in gforth.  It describes each word by a typed 
+input/output stack contract, called a stack effect.  A validation profile defines the type 
+hierarchy and primitive word effects (specifications). Symbolic indices record 
+the flow introduced by stack shuffling words such as
 \texttt{DUP}, \texttt{SWAP}, and \texttt{OVER}.
 
-The analysis uses three partial operations.  Composition handles word
-sequences.  Branches keep only facts that hold on both paths.  A finite
-one-pass-versus-two-pass comparison handles repetition.  Twelve small Forth
-test definitions, supported by four helper definitions, illustrate these
-operations.  They cover type refinement, cell identity,
-hidden stack prefixes, branch merging, reusable inferred effects, and local
-loop stability.  A final three-word phrase exposes the boundary of the loop
-approximation: the merged one-versus-two summary need not characterize a third
-pass.  The prototype derives every reported effect without executing concrete
-values.  Its conclusions depend on the supplied primitive
-specifications, branch summaries forget path-specific facts, and loop
-summaries do not cover every possible iteration count.
+The analysis uses three algebraic operations.  Composition handles linear word
+sequences.  Meet operation unifies alternative branches.  A finite
+one-pass-versus-two-pass comparison handles repetition. Forth examples provided in the paper
+illustrate these operations.  They cover type refinement, cell identity,
+branch merging, reusable inferred effects, and local
+loop stability. The prototype derives every reported effect without executing concrete
+values. Its conclusions depend on the user-defined type hirarchy, primitive
+specifications and source text.
 \end{abstract}
 
 \noindent\textbf{Keywords:} Forth; static type checking; stack effects;
-symbolic execution; subtyping; concatenative languages.
+symbolic execution.
 
 \section{Introduction}
 
@@ -59,7 +56,7 @@ item.  The data stack is the ordered sequence of those items.  A word normally
 receives operands from that stack and returns its results to the same stack.
 The conventional notation
 \begin{verbatim}
-+   ( n n -- n )
++   ( n1 n2 -- sum )
 \end{verbatim}
 places the top of stack on the right and says that \texttt{+} consumes two
 numbers and produces one.  Such comments are valuable interfaces, but a Forth
@@ -71,17 +68,15 @@ Consider the familiar definition
 \begin{verbatim}
 : SQUARED  ( n -- n^2 )  DUP * ;
 \end{verbatim}
-The checker can derive \effect{( n -- n )} from the declarations of
+The checker can derive \texttt{( n -- n )} from the declarations of
 \texttt{DUP} and \texttt{*}.  It can verify the number and identity of the
 cells used by the phrase.  It does not prove the mathematical assertion that
-the result is the square of the input.  This distinction---typed stack
-consistency rather than arbitrary functional correctness---sets the scope of
-the method.
+the result is the square of the input.
 
 \begin{samepage}
 The checker reads three text inputs:
 \begin{enumerate}
-  \item a file that defines types, aliases, and ordering relations;
+  \item a file that defines types, aliases, and ordering relations (type hierarchy);
   \item a file that defines word effects and source-reading rules;
   \item a Forth source file whose phrases are checked and whose colon
         definitions are inferred.
@@ -95,12 +90,11 @@ does not add a dictionary entry.
 The prototype consumes the three files and maps each known word to one stack
 effect.  At \texttt{;}, the inferred body effect is added to this dictionary.
 The prototype analyzes symbolic stack cells; it does not execute the Forth
-definition.
+definition. The inferred definitions are stored in a log file.
 
 The design builds on earlier work on stack effects and symbolic type variables
-\cite{poial1994,poial1992,poial2002,poial2006}.  This paper gives a
-self-contained account of the operations used by the twelve test examples.  It
-explains four points:
+\cite{poial1994,poial1992,poial2002,poial2006}.
+The following topics are discussed:
 \begin{itemize}
   \item how a later word can constrain an earlier input;
   \item how two branch effects are combined;
@@ -194,7 +188,7 @@ The set of symbolic effects is the checker's \emph{abstract domain}.  An
 effect operation is \emph{partial} when some arguments produce no effect.  In
 those cases, this checker reports a clash.
 
-\section{The Three Effect Operations}
+\section{Main Effect Operations}
 \label{sec:operations}
 
 \subsection{Sequential composition}
@@ -203,17 +197,16 @@ Write typed symbolic cells by juxtaposition, with the top on the right, and
 let $e$ and $f$ denote possibly empty sequences of such symbols.  The two
 symbolic equations from the presentation capture the basic cases:
 \[
- (a--b)\seq(e\,b--d)=(e\,a--d),
+ (a -- b)\seq(e\,b -- d)=(e\,a -- d),
  \qquad
- (a--f\,c)\seq(c--d)=(a--f\,d).
+ (a -- f\,c)\seq(c -- d)=(a -- f\,d).
 \]
 In the first equation, the second effect consumes $b$ but also needs the deeper
 sequence $e$; that sequence therefore becomes part of the composite input.  In
 the second, the first effect leaves $f$ below $c$; consuming $c$ leaves $f$
-below the new result $d$.  These are the two outcomes when one displayed suffix is
-deeper than the other.
+below the new result $d$.  In case of type mismatch the result is zero (type clash).
 
-More generally, $p=(L_p--R_p)$ followed by $q=(L_q--R_q)$ is written
+More generally, $p=(L_p -- R_p)$ followed by $q=(L_q -- R_q)$ is written
 $p\seq q$.  Boundary cells are matched from the top inward.  Comparable types
 are replaced by their more specific type, and that refinement is substituted
 through every occurrence of the same symbolic index.  Thus a late
@@ -229,11 +222,11 @@ Alternative paths use the common-contract operation $p\meet q$.  It produces
 one must-style interface rather than a set of path effects.  Its two basic
 symbolic equations are
 \[
- (a--b)\meet(e\,a--e\,b)=(e\,a--e\,b),
+ (a -- b)\meet(e\,a -- e\,b)=(e\,a -- e\,b),
 \]
 \[
- (e\,a--e\,b)\meet(e\,c--e\,d)
-   =\bigl(e\,\min(a,c)--e\,\max(b,d)\bigr).
+ (e\,a -- e\,b)\meet(e\,c -- e\,d)
+   =\bigl(e\,\min(a,c) -- e\,\max(b,d)\bigr).
 \]
 The first equation makes the implicit frame explicit: $(a--b)$ also acts as
 $(e\,a--e\,b)$, so that is the common contract.  In the second equation,
@@ -252,7 +245,7 @@ through unchanged:
  |L_p|-|L_q| = |R_p|-|R_q|.
 \]
 A different net stack change or an incomparable aligned type makes the meet
-undefined.
+undefined (zero).
 
 Write $\sem{P}$ for the inferred effect of a source segment $P$.  The selector
 is composed separately for a conditional:
@@ -789,9 +782,7 @@ variability, but it becomes part of the trusted input.
 Abstract interpretation offers a stronger treatment of loops
 \cite{cousot1977}.  It propagates abstract states until they stop changing.
 The one-versus-two rule performs only the first bounded comparison.  An
-inferred loop effect must be read with that distinction in mind.  Every
-bibliography entry below includes a public full-text link.  The links were
-checked on 30 August 2026.
+inferred loop effect must be read with that distinction in mind.
 
 \section{Conclusion}
 \leavevmode\par\vspace{-\baselineskip}
@@ -802,7 +793,7 @@ merging computes one conservative contract, narrowing inputs, widening outputs,
 and preserving only path-independent correlations.  Repetition compares one
 pass with two to obtain a useful but explicitly finite stability summary.
 
-The twelve tests make these mechanisms concrete.  Three initial linear
+The tests provided make these mechanisms concrete.  Three initial linear
 definitions show type and identity propagation.  Five conditionals show
 implicit frames, input narrowing, output widening, information loss, and reuse
 of inferred helper contracts.  Four loops show what the bounded repetition
@@ -886,3 +877,4 @@ pp. 407--421, 1991.
 \end{thebibliography}
 
 \end{document}
+
