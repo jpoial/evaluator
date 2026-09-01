@@ -13,7 +13,7 @@ type c-addr ca
 type a-addr aa
 
 rel n < X
-rel flag < X
+rel flag < n
 rel addr < X
 rel char < n
 rel c-addr < addr
