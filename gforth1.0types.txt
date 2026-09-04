@@ -1,0 +1,101 @@
+\ Gforth 1.0-development type system for the evaluator.
+\
+\ Source snapshot:
+\   https://www.complang.tuwien.ac.at/forth/gforth/Snapshots/0.7.9_20260902/gforth-0.7.9_20260902.tar.xz
+\   Version 0.7.9_20260902; its NEWS describes the development series as
+\   "User-visible changes between 0.7.0 and 1.0".
+\   Upstream repository: https://github.com/forthy42/gforth
+\   Type notation: doc/gforth.txt, section 6.1, "Notation".
+\
+\ The manual uses w/x for a cell, f for a flag, c for a character, r for a
+\ floating-stack item, nt for a name token, and wior/ior for I/O results.
+\ The evaluator has one abstract stack, so physical double-cell values and
+\ floating-stack values are each represented by one abstract item.
+\ `n|u` and `d|ud` are helper join nodes for fixed specifications where the
+\ signedness is contextual.
+\
+\ Format:
+\   type <canonical-name> [alias...]
+\   rel <subtype> < <supertype>
+\   scanner <name> "<delimiter>"
+
+\ Cells and scalar values
+type x X w cell
+type +n nonnegative
+type n signed
+type u unsigned
+type n|u number nu
+type char c character
+type flag f boolean
+type true
+type false
+type xt execution-token
+type nt name-token
+type wid word-list-id
+type addr address
+type c-addr ca character-address
+type a-addr aa aligned-address
+
+\ Cell-pair values
+type xd cell-pair
+type d double-signed
+type +d double-nonnegative
+type ud double-unsigned
+type d|ud double-number du
+
+\ Compilation and execution system tokens
+type colon-sys
+type do-sys
+type case-sys
+type of-sys
+type orig
+type dest
+type loop-sys
+type nest-sys
+
+\ Files and I/O
+type ior wior io-result
+type fam file-access-method
+type fileid fid file-id
+
+\ Floating-point values and addresses
+type r float
+type f-addr fa float-address
+type sf-addr sfa single-float-address
+type df-addr dfa double-float-address
+
+\ Numeric and character relationships
+rel +n < n
+rel +n < u
+rel n < n|u
+rel u < n|u
+rel n|u < x
+rel char < +n
+rel true < flag
+rel false < flag
+rel flag < x
+
+\ Tokens, addresses, and other cell-sized values
+rel xt < x
+rel nt < x
+rel wid < x
+rel a-addr < c-addr
+rel c-addr < addr
+rel addr < u
+rel ior < n
+rel fam < x
+rel fileid < x
+
+\ Cell-pair relationships
+rel +d < d
+rel +d < ud
+rel d < d|ud
+rel ud < d|ud
+rel d|ud < xd
+
+\ Gforth's documented aligned-address subsets
+rel f-addr < a-addr
+rel sf-addr < a-addr
+rel df-addr < a-addr
+
+scanner EOL "\n"

@@ -1,0 +1,506 @@
+\ ANS Forth specification profile (ANSI X3.215-1994 / DPANS94).
+\
+\ Sources:
+\   Official standard: ANSI X3.215-1994, Programming Languages -- Forth.
+\   Public last draft submitted to ANSI: https://www.taygeta.com/forth/dpans.html
+\   Core glossary: https://www.complang.tuwien.ac.at/forth/dpans-html/dpans6.htm
+\   Word-set glossaries: dpans7.htm through dpans17.htm at the same location.
+\ The public DPANS94 text says that the printed X3.215-1994 controls if the two
+\ conflict.  Stack effects below follow that draft's glossary, with evaluator-specific
+\ parser, defining-word, state, and control clauses added before each effect.
+\
+\ Modeling notes:
+\ - This file includes the Core word set, Core Extensions, and all optional
+\   word sets in sections 7--17.  It therefore describes a maximal ANS94
+\   environment, not a claim that every ANS Forth system implements every word.
+\ - The evaluator has one data stack and one fixed effect per word.  This
+\   profile selects the Standard's permitted combined-stack form for floating
+\   words, represents a double-cell value by one abstract item, and gives a
+\   fixed conservative approximation to effects containing i*x/j*x or `...`.
+\ - For overloaded n|u arithmetic, the fixed specs below select the signed
+\   interpretation where needed to preserve useful result types.  Explicit
+\   unsigned and double-unsigned words retain their normative types.
+\ - Return-stack and non-local effects (EXECUTE, EVALUATE, CATCH, THROW,
+\   ABORT, LOAD, INCLUDED, and similar words) cannot be represented exactly;
+\   only their visible fixed data-stack suffix is modeled.
+\ - CASE is modeled declaratively for one OF ... ENDOF clause.  The evaluator's
+\   structure language cannot express an arbitrary number of OF clauses.
+\ - SAVE-INPUT/RESTORE-INPUT and search-order vectors use one representative
+\   x or wid before their count because effects of variable arity are not
+\   supported.  Conditional result shapes such as FIND and >FLOAT select one
+\   representative shape.
+\ - LITERAL cannot be declared because `literal` is reserved as a spec-file
+\   directive.  :NONAME, MARKER, CODE, LOCALS|, and conditional compilation
+\   are listed but exceed the evaluator's current defining/state machinery.
+\
+\ Format:
+\   word [parse mode [delimiter]] [define [mode]] [control role]
+\        [state mode] ( inputs -- outputs )
+\   literal kind ( -- outputs )
+
+\ --------------------------------------------------------------------------
+\ 6.1 Core words
+
+! ( x a-addr -- )
+# ( ud -- ud )
+#> ( xd -- c-addr u )
+#S ( ud -- ud )
+' parse word state interpret ( -- xt )
+"(" parse until ")" ( -- )
+* ( n n -- n )
+*/ ( n n n -- n )
+*/MOD ( n n n -- n n )
++ ( n n -- n )
++! ( n a-addr -- )
++LOOP control +loop ( n -- )
+, ( x -- )
+- ( n n -- n )
+. ( n -- )
+." parse until "\"" state compile ( -- )
+/ ( n n -- n )
+/MOD ( n n -- n n )
+0< ( n -- flag )
+0= ( x -- flag )
+1+ ( n -- n )
+1- ( n -- n )
+2! ( x[2] x[1] a-addr -- )
+2* ( x -- x )
+2/ ( x -- x )
+2@ ( a-addr -- x[2] x[1] )
+2DROP ( x[2] x[1] -- )
+2DUP ( x[2] x[1] -- x[2] x[1] x[2] x[1] )
+2OVER ( x[4] x[3] x[2] x[1] -- x[4] x[3] x[2] x[1] x[4] x[3] )
+2SWAP ( x[4] x[3] x[2] x[1] -- x[2] x[1] x[4] x[3] )
+: parse word define colon ( -- )
+; control end ( -- )
+< ( n n -- flag )
+<# ( -- )
+= ( x x -- flag )
+> ( n n -- flag )
+>BODY ( xt -- a-addr )
+>IN ( -- a-addr )
+>NUMBER ( ud c-addr u -- ud c-addr u )
+>R state compile ( x -- )
+?DUP ( x[1] -- x[1] x[1] )
+@ ( a-addr -- x )
+ABORT ( -- )
+ABORT" parse until "\"" state compile ( flag -- )
+ABS ( n -- u )
+ACCEPT ( c-addr +n -- +n )
+ALIGN ( -- )
+ALIGNED ( addr -- a-addr )
+ALLOT ( n -- )
+AND ( x x -- x )
+BASE ( -- a-addr )
+BEGIN control begin ( -- )
+BL ( -- char )
+C! ( char c-addr -- )
+C, ( char -- )
+C@ ( c-addr -- char )
+CELL+ ( a-addr -- a-addr )
+CELLS ( n -- n )
+CHAR parse word ( -- char )
+CHAR+ ( c-addr -- c-addr )
+CHARS ( n -- n )
+CONSTANT parse word define constant ( x -- )
+COUNT ( c-addr -- c-addr u )
+CR ( -- )
+CREATE parse word define variable ( -- a-addr )
+DECIMAL ( -- )
+DEPTH ( -- +n )
+DO control do ( n n -- )
+DOES> immediate state compile ( -- )
+DROP ( x -- )
+DUP ( x[1] -- x[1] x[1] )
+ELSE control else ( -- )
+EMIT ( x -- )
+ENVIRONMENT? ( c-addr u -- x flag )
+EVALUATE ( c-addr u -- )
+EXECUTE ( xt -- )
+EXIT state compile ( -- )
+FILL ( c-addr u char -- )
+FIND ( c-addr -- x n )
+FM/MOD ( d n -- n n )
+HERE ( -- addr )
+HOLD ( char -- )
+I control index ( -- n|u )
+IF control if ( flag -- )
+IMMEDIATE ( -- )
+INVERT ( x -- x )
+J control index ( -- n|u )
+KEY ( -- char )
+LEAVE state compile ( -- )
+\ The spec-file grammar reserves the head word LITERAL for literal classes,
+\ so the identically named ANS compile-only word cannot be declared here.
+LOOP control loop ( -- )
+LSHIFT ( x u -- x )
+M* ( n n -- d )
+MAX ( n n -- n )
+MIN ( n n -- n )
+MOD ( n n -- n )
+MOVE ( addr addr u -- )
+NEGATE ( n -- n )
+OR ( x x -- x )
+OVER ( x[2] x[1] -- x[2] x[1] x[2] )
+POSTPONE parse word state compile ( -- )
+QUIT ( -- )
+R> state compile ( -- x )
+R@ state compile ( -- x )
+RECURSE state compile ( -- )
+REPEAT control repeat ( -- )
+ROT ( x[3] x[2] x[1] -- x[2] x[1] x[3] )
+RSHIFT ( x u -- x )
+S" parse until "\"" ( -- c-addr u )
+S>D ( n -- d )
+SIGN ( n -- )
+SM/REM ( d n -- n n )
+SOURCE ( -- c-addr u )
+SPACE ( -- )
+SPACES ( n -- )
+STATE ( -- a-addr )
+SWAP ( x[2] x[1] -- x[1] x[2] )
+THEN control then ( -- )
+TYPE ( c-addr u -- )
+U. ( u -- )
+U< ( u u -- flag )
+UM* ( u u -- ud )
+UM/MOD ( ud u -- u u )
+UNLOOP state compile ( -- )
+UNTIL control until ( flag -- )
+VARIABLE parse word define variable ( -- a-addr )
+WHILE control while ( flag -- )
+WORD ( char -- c-addr )
+XOR ( x x -- x )
+[ immediate state compile ( -- )
+['] parse word state compile ( -- xt )
+[CHAR] parse word state compile ( -- char )
+] state compile ( -- )
+
+\ Declarative forms of the ANS control-flow families.
+syntax: IF <then-branch> [ELSE <else-branch>] THEN
+  effect:
+    IF
+    either <then-branch> <else-branch>
+
+syntax: BEGIN <loop-prefix> WHILE <loop-body> REPEAT
+  effect:
+    repeat <loop-prefix> WHILE
+    repeat <loop-body>
+
+syntax: BEGIN <loop-body> AGAIN
+  effect:
+    repeat <loop-body>
+
+syntax: BEGIN <loop-body> UNTIL
+  effect:
+    repeat <loop-body> UNTIL
+
+syntax: DO <loop-body> LOOP
+  effect:
+    DO
+    repeat <loop-body>
+
+syntax: DO <loop-body> +LOOP
+  effect:
+    DO
+    repeat <loop-body> +LOOP
+
+\ --------------------------------------------------------------------------
+\ 6.2 Core extension words
+
+#TIB ( -- a-addr )
+.( parse until ")" ( -- )
+.R ( n n -- )
+0<> ( x -- flag )
+0> ( n -- flag )
+2>R state compile ( x[2] x[1] -- )
+2R> state compile ( -- x[2] x[1] )
+2R@ state compile ( -- x[2] x[1] )
+:NONAME state interpret ( -- xt )
+<> ( x x -- flag )
+?DO control do ( n n -- )
+AGAIN control again ( -- )
+C" parse until "\"" state compile ( -- c-addr )
+CASE control case ( -- )
+COMPILE, state compile ( xt -- )
+CONVERT ( ud c-addr -- ud c-addr )
+ENDCASE control endcase ( -- )
+ENDOF control endof ( -- )
+ERASE ( addr u -- )
+EXPECT ( c-addr +n -- )
+FALSE ( -- false )
+HEX ( -- )
+MARKER parse word ( -- )
+NIP ( x[2] x[1] -- x[1] )
+OF control of ( x[2] x[1] -- )
+PAD ( -- c-addr )
+PARSE ( char -- c-addr u )
+\ PICK and ROLL approximate their variable-depth effects with one x.
+PICK ( x[1] u -- x[1] x[1] )
+QUERY ( -- )
+REFILL ( -- flag )
+RESTORE-INPUT ( x n -- flag )
+ROLL ( x[1] u -- x[1] )
+SAVE-INPUT ( -- x n )
+SOURCE-ID ( -- x )
+SPAN ( -- a-addr )
+TIB ( -- c-addr )
+TO parse word ( x -- )
+TRUE ( -- true )
+TUCK ( x[2] x[1] -- x[1] x[2] x[1] )
+U.R ( u n -- )
+U> ( u u -- flag )
+UNUSED ( -- u )
+VALUE parse word define constant ( x -- )
+WITHIN ( n n n -- flag )
+[COMPILE] parse word state compile ( -- )
+"\\" parse until EOL ( -- )
+
+\ One-clause CASE approximation.  OF consumes both selector and test on both
+\ paths; ENDCASE is therefore a no-op.  This preserves the net stack shape
+\ while avoiding an unrepresentable conditionally retained selector.
+syntax: CASE <test-expression> OF <of-branch> ENDOF <default-branch> ENDCASE
+  effect:
+    CASE
+    <test-expression> OF
+    either <of-branch> <default-branch>
+    ENDCASE
+
+\ --------------------------------------------------------------------------
+\ 7 Block word set and extensions
+
+BLK ( -- a-addr )
+BLOCK ( u -- a-addr )
+BUFFER ( u -- a-addr )
+FLUSH ( -- )
+LOAD ( u -- )
+SAVE-BUFFERS ( -- )
+UPDATE ( -- )
+EMPTY-BUFFERS ( -- )
+LIST ( u -- )
+SCR ( -- a-addr )
+THRU ( u u -- )
+
+\ --------------------------------------------------------------------------
+\ 8 Double-number word set and extensions
+\ A double-cell value is one abstract xd/d/ud item in this evaluator.
+
+2CONSTANT parse word define constant ( xd -- )
+2LITERAL immediate state compile ( xd[1] -- xd[1] )
+2VARIABLE parse word define variable ( -- a-addr )
+D+ ( d d -- d )
+D- ( d d -- d )
+D. ( d -- )
+D.R ( d n -- )
+D0< ( d -- flag )
+D0= ( xd -- flag )
+D2* ( xd -- xd )
+D2/ ( xd -- xd )
+D< ( d d -- flag )
+D= ( xd xd -- flag )
+D>S ( d -- n )
+DABS ( d -- ud )
+DMAX ( d d -- d )
+DMIN ( d d -- d )
+DNEGATE ( d -- d )
+M*/ ( d n +n -- d )
+M+ ( d n -- d )
+2ROT ( x[6] x[5] x[4] x[3] x[2] x[1] -- x[4] x[3] x[2] x[1] x[6] x[5] )
+DU< ( ud ud -- flag )
+
+\ --------------------------------------------------------------------------
+\ 9 Exception word set and extensions
+
+CATCH ( xt -- n )
+THROW ( n -- )
+
+\ --------------------------------------------------------------------------
+\ 10 Facility word set and extensions
+
+AT-XY ( u u -- )
+KEY? ( -- flag )
+PAGE ( -- )
+EKEY ( -- u )
+EKEY>CHAR ( u -- x flag )
+EKEY? ( -- flag )
+EMIT? ( -- flag )
+MS ( u -- )
+TIME&DATE ( -- +n +n +n +n +n +n )
+
+\ --------------------------------------------------------------------------
+\ 11 File-access word set and extensions
+
+BIN ( fam -- fam )
+CLOSE-FILE ( fileid -- ior )
+CREATE-FILE ( c-addr u fam -- fileid ior )
+DELETE-FILE ( c-addr u -- ior )
+FILE-POSITION ( fileid -- ud ior )
+FILE-SIZE ( fileid -- ud ior )
+INCLUDE-FILE ( fileid -- )
+INCLUDED ( c-addr u -- )
+OPEN-FILE ( c-addr u fam -- fileid ior )
+R/O ( -- fam )
+R/W ( -- fam )
+READ-FILE ( c-addr u fileid -- u ior )
+READ-LINE ( c-addr u fileid -- u flag ior )
+REPOSITION-FILE ( ud fileid -- ior )
+RESIZE-FILE ( ud fileid -- ior )
+W/O ( -- fam )
+WRITE-FILE ( c-addr u fileid -- ior )
+WRITE-LINE ( c-addr u fileid -- ior )
+FILE-STATUS ( c-addr u -- x ior )
+FLUSH-FILE ( fileid -- ior )
+RENAME-FILE ( c-addr u c-addr u -- ior )
+
+\ --------------------------------------------------------------------------
+\ 12 Floating-point word set and extensions
+\ The combined data/floating-stack alternatives from the glossary are used.
+
+>FLOAT ( c-addr u -- r flag )
+D>F ( d -- r )
+F! ( r f-addr -- )
+F* ( r r -- r )
+F+ ( r r -- r )
+F- ( r r -- r )
+F/ ( r r -- r )
+F0< ( r -- flag )
+F0= ( r -- flag )
+F< ( r r -- flag )
+F>D ( r -- d )
+F@ ( f-addr -- r )
+FALIGN ( -- )
+FALIGNED ( addr -- f-addr )
+FCONSTANT parse word define constant ( r -- )
+FDEPTH ( -- +n )
+FDROP ( r -- )
+FDUP ( r[1] -- r[1] r[1] )
+FLITERAL immediate state compile ( r[1] -- r[1] )
+FLOAT+ ( f-addr -- f-addr )
+FLOATS ( n -- n )
+FLOOR ( r -- r )
+FMAX ( r r -- r )
+FMIN ( r r -- r )
+FNEGATE ( r -- r )
+FOVER ( r[2] r[1] -- r[2] r[1] r[2] )
+FROT ( r[3] r[2] r[1] -- r[2] r[1] r[3] )
+FROUND ( r -- r )
+FSWAP ( r[2] r[1] -- r[1] r[2] )
+FVARIABLE parse word define variable ( -- f-addr )
+REPRESENT ( r c-addr u -- n flag flag )
+DF! ( r df-addr -- )
+DF@ ( df-addr -- r )
+DFALIGN ( -- )
+DFALIGNED ( addr -- df-addr )
+DFLOAT+ ( df-addr -- df-addr )
+DFLOATS ( n -- n )
+F** ( r r -- r )
+F. ( r -- )
+FABS ( r -- r )
+FACOS ( r -- r )
+FACOSH ( r -- r )
+FALOG ( r -- r )
+FASIN ( r -- r )
+FASINH ( r -- r )
+FATAN ( r -- r )
+FATAN2 ( r r -- r )
+FATANH ( r -- r )
+FCOS ( r -- r )
+FCOSH ( r -- r )
+FE. ( r -- )
+FEXP ( r -- r )
+FEXPM1 ( r -- r )
+FLN ( r -- r )
+FLNP1 ( r -- r )
+FLOG ( r -- r )
+FS. ( r -- )
+FSIN ( r -- r )
+FSINCOS ( r -- r r )
+FSINH ( r -- r )
+FSQRT ( r -- r )
+FTAN ( r -- r )
+FTANH ( r -- r )
+F~ ( r r r -- flag )
+PRECISION ( -- u )
+SET-PRECISION ( u -- )
+SF! ( r sf-addr -- )
+SF@ ( sf-addr -- r )
+SFALIGN ( -- )
+SFALIGNED ( addr -- sf-addr )
+SFLOAT+ ( sf-addr -- sf-addr )
+SFLOATS ( n -- n )
+
+\ --------------------------------------------------------------------------
+\ 13 Locals word set and extensions
+\ LOCALS| consumes its declaration text.  This evaluator does not bind those
+\ names; its richer `{ ... }` support is deliberately not added to ANS94.
+
+(LOCAL) ( c-addr u -- )
+LOCALS| parse until "|" state compile ( -- )
+
+\ --------------------------------------------------------------------------
+\ 14 Memory-allocation word set
+
+ALLOCATE ( u -- a-addr ior )
+FREE ( a-addr -- ior )
+RESIZE ( a-addr u -- a-addr ior )
+
+\ --------------------------------------------------------------------------
+\ 15 Programming-tools word set and extensions
+
+.S ( -- )
+? ( a-addr -- )
+DUMP ( addr u -- )
+SEE parse word ( -- )
+WORDS ( -- )
+;CODE state compile ( -- )
+AHEAD control ahead ( -- )
+ASSEMBLER ( -- )
+BYE ( -- )
+CODE parse word ( -- )
+CS-PICK state compile ( u -- )
+CS-ROLL state compile ( u -- )
+EDITOR ( -- )
+FORGET parse word ( -- )
+[ELSE] immediate state compile ( -- )
+[IF] immediate state compile ( flag -- )
+[THEN] immediate state compile ( -- )
+
+\ AHEAD unconditionally skips the source segment through its matching THEN.
+syntax: AHEAD <skipped-branch> THEN
+  effect:
+    AHEAD
+
+\ --------------------------------------------------------------------------
+\ 16 Search-order word set and extensions
+
+DEFINITIONS ( -- )
+FORTH-WORDLIST ( -- wid )
+GET-CURRENT ( -- wid )
+GET-ORDER ( -- wid n )
+SEARCH-WORDLIST ( c-addr u wid -- x n )
+SET-CURRENT ( wid -- )
+SET-ORDER ( wid n -- )
+WORDLIST ( -- wid )
+ALSO ( -- )
+FORTH ( -- )
+ONLY ( -- )
+ORDER ( -- )
+PREVIOUS ( -- )
+
+\ --------------------------------------------------------------------------
+\ 17 String word set
+
+-TRAILING ( c-addr u -- c-addr u )
+/STRING ( c-addr u n -- c-addr u )
+BLANK ( c-addr u -- )
+CMOVE ( c-addr c-addr u -- )
+CMOVE> ( c-addr c-addr u -- )
+COMPARE ( c-addr u c-addr u -- n )
+SEARCH ( c-addr u c-addr u -- c-addr u flag )
+SLITERAL immediate state compile ( c-addr[1] u[1] -- c-addr[1] u[1] )
+
+\ Literal classes understood by the evaluator.  Decimal tokens are modeled as
+\ signed n because the evaluator does not distinguish signed and unsigned
+\ source-token classes; a trailing period denotes one abstract double value.
+literal integer ( -- n )
+literal double ( -- d )
