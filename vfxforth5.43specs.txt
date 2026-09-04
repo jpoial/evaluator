@@ -1338,9 +1338,10 @@ literal double ( -- d )
 "xterm:" parse word (  --  )
 
 \ [genlocals.html]
+"->" parse word ( x -- )
 "FRADJUST" ( n -- n )
 "LVCOUNT" (  -- addr )
-"{:" (  --  )
+"{:" parse until ":}" ( -- )
 
 \ [gtkbindings.html]
 "+gtimer" (  --  )

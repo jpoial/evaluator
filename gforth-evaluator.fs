@@ -3028,12 +3028,15 @@ variable ev-current-local-seed-index
     token ev-word-text@ s" RECURSE" ev-key=
   then ;
 
+: ev-local-opener? { token -- flag }
+  token ev-word-text@ s" {" ev-key=
+  token ev-word-text@ s" {:" ev-key= or ;
+
 : ev-local-declaration? { token spec -- flag }
   token 0= spec 0= or if
     false
   else
-    token ev-word-text@ s" {" ev-key= spec
-      ev-spec-consumes-until? and
+    token ev-local-opener? spec ev-spec-consumes-until? and
   then ;
 
 : ev-parse-local-names { text -- vec }
@@ -3055,6 +3058,25 @@ variable ev-current-local-seed-index
     then
   repeat
   names ;
+
+: ev-local-input-count { text -- count }
+  s" <locals-inputs>" ev-scopy text ev-sc-new { sc }
+  0 { count }
+  false { done }
+  begin done 0= while
+    0 0 sc ev-sc-next-word { tok }
+    tok 0= if
+      true to done
+    else
+      tok ev-word-text@ s" --" ev-key=
+      tok ev-word-text@ s" |" ev-key= or if
+        true to done
+      else
+        count 1+ to count
+      then
+    then
+  repeat
+  count ;
 
 : ev-local-read-spec { token -- spec|0 }
   token ev-word-text@ ev-local-find-entry { entry }
@@ -3105,16 +3127,20 @@ variable ev-current-local-seed-index
   else
     parsed ev-word-span@ token ev-word-span@ swap ev-span-cover
       { span }
-    parsed ev-word-text@ ev-parse-local-names { names }
+    parsed ev-word-text@ { local-text }
+    local-text ev-parse-local-names { names }
+    local-text ev-local-input-count { input-count }
     ev-current-locals @ { locals }
     locals 0= if
       16 ev-vec-new dup ev-current-locals ! to locals
     then
-    names ev-vec-count@ 4 max ev-vec-new { left }
+    input-count 4 max ev-vec-new { left }
     names ev-vec-count@ 0 ?do
       i names ev-vec@ { name }
       ev-local-next-sym { sym }
-      sym ev-sym-clone left ev-vec-push
+      i input-count < if
+        sym ev-sym-clone left ev-vec-push
+      then
       sym ev-local-read-spec-from-sym { lspec }
       name ev-local-find-entry { entry }
       entry 0= if
@@ -3831,21 +3857,23 @@ variable ev-ese.seqvec
   s" <locals-doc>" ev-scopy text ev-sc-new { sc }
   0 { inputs }
   0 { outputs }
-  true { left-side? }
+  0 { section }  \ 0: inputs, 1: temporaries, 2: outputs
   false { done }
   begin done 0= while
     0 0 sc ev-sc-next-word { tok }
     tok 0= if
       true to done
     else
-      tok ev-word-text@ s" --" ev-key= if
-        false to left-side?
+      tok ev-word-text@ s" |" ev-key= if
+        1 to section
       else
-        tok ev-word-text@ s" |" ev-key= 0= if
-          left-side? if
+        tok ev-word-text@ s" --" ev-key= if
+          2 to section
+        else
+          section 0= if
             inputs 1+ to inputs
           else
-            outputs 1+ to outputs
+            section 2 = if outputs 1+ to outputs then
           then
         then
       then
@@ -3955,6 +3983,14 @@ variable ev-ese.seqvec
   then ;
 
 : ev-skip-forward-definition-body { sc defspec ss -- }
+  ev-current-locals @ { savedlocals }
+  ev-current-local-pos @ { savedlocalpos }
+  ev-current-local-seed @ { savedlocalseed }
+  ev-current-local-seed-index @ { savedlocalseedindex }
+  16 ev-vec-new ev-current-locals !
+  0 ev-current-local-pos !
+  0 ev-current-local-seed !
+  0 ev-current-local-seed-index !
   defspec ev-definition-terminator { terminator }
   0 { nested }
   false { done }
@@ -3963,7 +3999,11 @@ variable ev-ese.seqvec
     tok 0= if
       true to done
     else
-      tok ev-word-text@ ss ev-ss-word@ { spec }
+      tok ev-token-is-local? if
+        0
+      else
+        tok ev-word-text@ ss ev-ss-word@
+      then { spec }
       spec 0<> if
         spec ev-spec-defines-word? if
           spec ev-spec.define-mode + @ ev-define.colon = if
@@ -3978,8 +4018,12 @@ variable ev-ese.seqvec
               true to done
             then
           else
-            spec ev-spec-is-immediate? if
-              spec sc ev-forward-skip-immediate
+            tok spec ev-local-declaration? if
+              tok spec sc ev-consume-local-declaration 2drop
+            else
+              spec ev-spec-is-immediate? if
+                spec sc ev-forward-skip-immediate
+              then
             then
           then
         then
@@ -3993,7 +4037,11 @@ variable ev-ese.seqvec
         then
       then
     then
-  repeat ;
+  repeat
+  savedlocals ev-current-locals !
+  savedlocalpos ev-current-local-pos !
+  savedlocalseed ev-current-local-seed !
+  savedlocalseedindex ev-current-local-seed-index ! ;
 
 : ev-seed-forward-definitions { name text ts ss -- }
   name text ev-sc-new { sc }
