@@ -1,0 +1,117 @@
+\ VFX Forth 5.43 type system for the evaluator.
+\
+\ Sources:
+\   https://vfxforth.com/
+\   https://vfxforth.com/downloads/VfxCommunity/VfxForth_x64_lin.tar.gz
+\   Distribution manual: Doc/VfxLin64.htm/notation.html, "Stack notation".
+\   64-bit sizes: Doc/VfxLin64.htm/going64.html, "Default data sizes".
+\
+\ The distribution identifies itself as VFX Forth 64 for Linux x64, version
+\ 5.43 build 0200. This profile therefore distinguishes its documented byte
+\ (`b`), 16-bit word (`w`), 32-bit lword (`l`), and native 64-bit cell (`x`).
+\ A double-cell or floating value is represented by one abstract evaluator
+\ item even though VFX may use two cells or a separate floating-point stack.
+\
+\ Format:
+\   type <canonical-name> [alias...]
+\   rel <subtype> < <supertype>
+\   scanner <name> "<delimiter>"
+
+\ Native scalar types
+type x X cell xword
+type +n nonnegative
+type n number signed
+type u unsigned
+type n|u nu
+type char c character
+type b byte u8
+type w word u16
+type l lword dword u32
+type 32b bits32
+type flag boolean
+type true
+type false
+
+\ Tokens and addresses
+type xt execution-token
+type wid word-list-id
+type addr address
+type c-addr caddr ca character-address
+type a-addr aaddr aa aligned-address
+type nfa name-field-address
+type sid stream-id
+type handle system-handle
+
+\ Cell-pair values
+type xd cell-pair
+type d double-signed
+type +d double-nonnegative
+type ud double-unsigned
+type d|ud du
+
+\ Compilation and execution system values
+type colon-sys
+type do-sys
+type case-sys
+type of-sys
+type orig
+type dest
+type loop-sys
+type nest-sys
+
+\ Files and I/O
+type ior io-result
+type fam file-access-method
+type fileid fid file-id
+
+\ Floating-point values and aligned addresses
+type r float
+type f-addr fa float-address
+type sf-addr sfa single-float-address
+type df-addr dfa double-float-address
+
+\ Extended character used by VFX GenIO and internationalisation words
+type echar extended-character xchar
+
+\ Numeric hierarchy for the 64-bit VFX target
+rel +n < n
+rel +n < u
+rel n < n|u
+rel u < n|u
+rel n|u < x
+rel char < b
+rel b < w
+rel w < l
+rel l < +n
+rel 32b < x
+rel echar < u
+rel true < flag
+rel false < flag
+rel flag < x
+
+\ Address and token hierarchy
+rel xt < x
+rel wid < x
+rel a-addr < c-addr
+rel c-addr < addr
+rel nfa < addr
+rel addr < u
+rel sid < x
+rel handle < x
+rel ior < n
+rel fam < x
+rel fileid < x
+
+\ Double-cell hierarchy
+rel +d < d
+rel +d < ud
+rel d < d|ud
+rel ud < d|ud
+rel d|ud < xd
+
+\ Floating-point addresses are aligned-address subsets; r remains separate.
+rel f-addr < a-addr
+rel sf-addr < a-addr
+rel df-addr < a-addr
+
+scanner EOL "\n"
