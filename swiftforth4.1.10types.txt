@@ -1,0 +1,130 @@
+\ SwiftForth 4.1.10 type system profile for the evaluator.
+\
+\ Sources:
+\   https://www.forth.com/swiftforth/
+\   https://www.forth.com/swiftforth/revs/
+\   https://dl.forth.com/downloads/SwiftForth-linux-eval.tgz
+\   Distribution manual: SwiftForth/doc/SwiftForth-refman.pdf, section 2.5,
+\     "Data Types and Notation".
+\   Distribution source: SwiftForth/src/kernel/released.f identifies release
+\     4.1.10 dated 05-Aug-2026; src/arch/x64 supplies the 64-bit target model.
+\
+\ SwiftForth follows standard Forth data-type notation. The extra nodes below
+\ represent common SwiftForth source and host-interface names. A double-cell
+\ value, floating value, and variable-size stack group are each represented by
+\ one abstract evaluator item. Separate return, floating-point, locals, and
+\ exception stacks are collapsed or omitted by the specification profile.
+\
+\ Format:
+\   type <canonical-name> [alias...]
+\   rel <subtype> < <supertype>
+\   scanner <name> "<delimiter>"
+
+\ Native scalar types
+type x X cell
+type +n nonnegative
+type n signed number
+type u unsigned
+type n|u nu
+type char c character
+type echar extended-character xchar
+type flag boolean bool
+type true
+type false
+
+\ Tokens, dictionary entities, and addresses
+type xt execution-token
+type wid word-list-id
+type addr address
+type c-addr caddr ca character-address
+type a-addr aaddr aa aligned-address
+type z-addr zaddr zero-terminated-address
+type nt nfa name-token name-field-address
+
+\ Cell-pair values
+type xd cell-pair
+type d double-signed
+type +d double-nonnegative
+type ud double-unsigned
+type d|ud du double-number
+
+\ Compiler and control-flow tokens
+type colon-sys
+type do-sys
+type case-sys
+type of-sys
+type orig
+type dest
+type loop-sys
+type nest-sys
+type switch-sys
+type class-sys
+
+\ Files, host interfaces, tasks, and object system handles
+type ior io-result
+type fam file-access-method
+type fileid fid file-id
+type tag package-tag
+type handle system-handle
+type hclass class-handle
+type member member-id
+type task task-control-block
+type thread thread-handle
+type mutex mutex-address
+type sem semaphore-handle
+type reg machine-register
+type opcode machine-opcode
+
+\ Floating-point values and addresses
+type r float
+type f-addr fa float-address
+type sf-addr sfa single-float-address
+type df-addr dfa double-float-address
+
+\ Standard numeric hierarchy on the x64 cell target
+rel +n < n
+rel +n < u
+rel n < n|u
+rel u < n|u
+rel n|u < x
+rel char < +n
+rel echar < u
+rel true < flag
+rel false < flag
+rel flag < x
+
+\ Address and token hierarchy
+rel xt < x
+rel wid < x
+rel a-addr < c-addr
+rel z-addr < c-addr
+rel c-addr < addr
+rel nt < addr
+rel addr < u
+rel tag < xt
+rel handle < x
+rel hclass < xt
+rel member < xt
+rel task < a-addr
+rel thread < handle
+rel mutex < a-addr
+rel sem < handle
+rel reg < x
+rel opcode < x
+
+\ Double-cell hierarchy
+rel +d < d
+rel +d < ud
+rel d < d|ud
+rel ud < d|ud
+rel d|ud < xd
+
+\ File and floating-point relationships
+rel ior < n
+rel fam < x
+rel fileid < x
+rel f-addr < a-addr
+rel sf-addr < a-addr
+rel df-addr < a-addr
+
+scanner EOL "\n"

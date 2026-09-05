@@ -658,16 +658,18 @@ public class ProgText extends LinkedList<String> {
    } // end of localWordSpec()
 
    /**
-    * Tells whether the current immediate word is the Gforth locals opener.
-    * The forth2012 demo profile models `{` as a compile-only parser word.
+    * Tells whether the current immediate word is a supported locals opener.
+    * Profiles may model Gforth `{ ... }` or SwiftForth/VFX
+    * `{: ... :}` declarations as compile-only parser words.
     * @param token source token
     * @param spec resolved specification
-    * @return true for `{ ... }`
+    * @return true for a supported locals declaration
     */
    boolean isLocalDeclarationWord (SourceWord token, Spec spec) {
       if ((token == null) || (spec == null)) return false;
-      return "{".equals (token.text) && spec.consumesUntil() &&
-         "}".equals (spec.parseString);
+      String opener = canonicalWord (token.text);
+      return ("{".equals (opener) || "{:".equals (opener)) &&
+         spec.consumesUntil();
    } // end of isLocalDeclarationWord()
 
    /**
@@ -698,12 +700,12 @@ public class ProgText extends LinkedList<String> {
    CompileContext declareLocalWords (SourceWord token, Spec spec,
       TextScanner scanner, CompileContext compile, TypeSystem ts) {
       SourceWord body = consumeLocalDeclarationText (token, spec, scanner);
-      LinkedList<String> names = parseLocalNames (body == null ? "" :
-         body.text);
+      String localText = body == null ? "" : body.text;
+      LinkedList<String> names = parseLocalNames (localText);
       if (names.size() == 0) return compile;
       appendCompiledWord (compile, token.text, SourceSpan.covering (
          token.span, scanner.lastConsumedSpan()), localBindSpec (
-         names.size(), ts));
+         localInputCount (localText), ts));
       Iterator<String> it = names.iterator();
       while (it.hasNext()) {
          String name = (String)it.next();
@@ -782,6 +784,21 @@ public class ProgText extends LinkedList<String> {
       }
       return result;
    } // end of parseLocalNames()
+
+   /** Returns the number of initialized locals before `|` or `--`. */
+   int localInputCount (String text) {
+      if (text == null) return 0;
+      String normalized = text.replace ('\r', ' ').replace ('\n', ' ').trim();
+      if (normalized.length() == 0) return 0;
+      String[] tokens = normalized.split ("\\s+");
+      int count = 0;
+      for (int i = 0; i < tokens.length; i++) {
+         String token = tokens [i] == null ? "" : tokens [i].trim();
+         if ("|".equals (token) || "--".equals (token)) break;
+         if (token.length() > 0) count++;
+      }
+      return count;
+   } // end of localInputCount()
 
    /**
     * Builds the stack effect of binding N incoming stack items to locals.
@@ -873,16 +890,20 @@ public class ProgText extends LinkedList<String> {
       String normalized = text.replace ('\r', ' ').replace ('\n', ' ').trim();
       if (normalized.length() == 0) return result;
       String[] tokens = normalized.split ("\\s+");
-      boolean leftSide = true;
+      int section = 0; // inputs, temporaries, outputs
       for (int i = 0; i < tokens.length; i++) {
          String token = tokens [i] == null ? "" : tokens [i].trim();
          if (token.length() == 0) continue;
-         if ("--".equals (token)) {
-            leftSide = false;
+         if ("|".equals (token)) {
+            section = 1;
             continue;
          }
-         if ("|".equals (token)) continue;
-         result [leftSide ? 0 : 1]++;
+         if ("--".equals (token)) {
+            section = 2;
+            continue;
+         }
+         if (section == 0) result [0]++;
+         else if (section == 2) result [1]++;
       }
       return result;
    } // end of documentedEffectCounts()
@@ -1017,9 +1038,13 @@ public class ProgText extends LinkedList<String> {
          terminator = definitionTerminator (definerSpec);
       }
       int nestedDefinitions = 0;
+      LinkedHashMap<String, Boolean> forwardLocals =
+         new LinkedHashMap<String, Boolean>();
       SourceWord token;
       while ((token = scanner.nextProgramWord()) != null) {
-         Spec spec = (Spec)ss.get (token.text);
+         String tokenKey = canonicalWord (token.text);
+         Spec spec = forwardLocals.containsKey (tokenKey) ? null :
+            (Spec)ss.get (token.text);
          if ((spec != null) && spec.definesWord()) {
             if (Spec.DEFINE_COLON.equals (spec.defineMode))
                nestedDefinitions++;
@@ -1039,7 +1064,15 @@ public class ProgText extends LinkedList<String> {
             }
             return;
          }
-         if ((spec != null) && spec.isImmediate())
+         if (isLocalDeclarationWord (token, spec)) {
+            SourceWord body = consumeLocalDeclarationText (token, spec,
+               scanner);
+            Iterator<String> names = parseLocalNames (body == null ? "" :
+               body.text).iterator();
+            while (names.hasNext())
+               forwardLocals.put (names.next(), Boolean.TRUE);
+         }
+         else if ((spec != null) && spec.isImmediate())
             skipForwardPayload (token, spec, scanner, ss);
       }
    } // end of skipForwardDefinitionBody()

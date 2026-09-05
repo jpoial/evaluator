@@ -1147,7 +1147,8 @@ class ProgramParser(SourceContext):
             raise
 
     def local_declaration(self, tok: Word, spec: Optional[Spec]) -> bool:
-        return spec is not None and canon(tok.text) == "{" and spec.consumes_until()
+        return (spec is not None and canon(tok.text) in {"{", "{:"}
+                and spec.consumes_until())
 
     def local_names(self, text: str) -> list[str]:
         sc = Scanner("<locals>", text)
@@ -1156,6 +1157,14 @@ class ProgramParser(SourceContext):
             if canon(tok.text) == "--": break
             if canon(tok.text) != "|": names.append(canon(tok.text))
         return names
+
+    def local_input_count(self, text: str) -> int:
+        sc = Scanner("<locals-inputs>", text)
+        count = 0
+        while (tok := sc.next_word()) is not None:
+            if canon(tok.text) in {"--", "|"}: break
+            count += 1
+        return count
 
     def next_local_symbol(self) -> Symbol:
         if self.local_seed is not None and self.local_seed_index < len(self.local_seed.left):
@@ -1171,10 +1180,12 @@ class ProgramParser(SourceContext):
         if parsed is None:
             raise self.error("Missing closing delimiter for parser word", span=tok.span)
         names = self.local_names(parsed.text)
+        input_count = self.local_input_count(parsed.text)
         left: list[Symbol] = []
-        for name in names:
+        for index, name in enumerate(names):
             sym = self.next_local_symbol()
-            left.append(sym.clone())
+            if index < input_count:
+                left.append(sym.clone())
             self.locals[name] = Spec([], [sym.clone()])
         bind = Spec(left, [])
         bind.find_max()
@@ -1303,14 +1314,14 @@ class ProgramParser(SourceContext):
         assert spec is not None
         body = preview.parse_until(spec.parse_string)
         if body is None: return None
-        left = True; inputs = outputs = 0
+        section = 0; inputs = outputs = 0
         doc = Scanner("<locals-doc>", body.text)
         while (item := doc.next_word()) is not None:
             key = canon(item.text)
-            if key == "--": left = False
-            elif key != "|":
-                if left: inputs += 1
-                else: outputs += 1
+            if key == "|": section = 1
+            elif key == "--": section = 2
+            elif section == 0: inputs += 1
+            elif section == 2: outputs += 1
         return generic_spec(inputs, outputs)
 
     def definition_terminator(self, spec: Spec) -> Optional[str]:
@@ -1319,18 +1330,35 @@ class ProgramParser(SourceContext):
         return None
 
     def skip_definition_body(self, sc: Scanner, defspec: Spec) -> None:
-        terminator = self.definition_terminator(defspec)
-        nested = 0
-        while (tok := sc.next_program_word()) is not None:
-            spec = self.ss.find(tok.text)
-            if spec and spec.defines_word():
-                if spec.define_mode == DEFINE_COLON: nested += 1
-                sc.next_program_word()
-            elif (spec and spec.is_control() and canon(spec.control_mode) == "END") or (terminator and canon(tok.text) == terminator):
-                if nested: nested -= 1
-                else: return
-            elif spec and spec.is_immediate():
-                self.skip_immediate(spec, sc)
+        saved_locals = self.locals
+        saved_pos = self.local_pos
+        saved_seed = self.local_seed
+        saved_seed_index = self.local_seed_index
+        self.locals = {}
+        self.local_pos = 0
+        self.local_seed = None
+        self.local_seed_index = 0
+        try:
+            terminator = self.definition_terminator(defspec)
+            nested = 0
+            while (tok := sc.next_program_word()) is not None:
+                spec = None if canon(tok.text) in self.locals else self.ss.find(tok.text)
+                if spec and spec.defines_word():
+                    if spec.define_mode == DEFINE_COLON: nested += 1
+                    sc.next_program_word()
+                elif ((spec and spec.is_control() and canon(spec.control_mode) == "END")
+                      or (terminator and canon(tok.text) == terminator)):
+                    if nested: nested -= 1
+                    else: return
+                elif spec and self.local_declaration(tok, spec):
+                    self.consume_locals(tok, spec, sc)
+                elif spec and spec.is_immediate():
+                    self.skip_immediate(spec, sc)
+        finally:
+            self.locals = saved_locals
+            self.local_pos = saved_pos
+            self.local_seed = saved_seed
+            self.local_seed_index = saved_seed_index
 
     @staticmethod
     def skip_immediate(spec: Spec, sc: Scanner) -> None:
