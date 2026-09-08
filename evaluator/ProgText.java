@@ -462,7 +462,7 @@ public class ProgText extends LinkedList<String> {
       TextScanner scanner, TypeSystem ts, SpecSet ss, String sourceName) {
       if (spec.definesWord()) {
          if (Spec.DEFINE_COLON.equals (spec.defineMode))
-            return startDefinition (token, spec, scanner, ss);
+            return startDefinition (token, spec, scanner, ts, ss);
          if (Spec.DEFINE_CONSTANT.equals (spec.defineMode)) {
             defineConstant (scanner, token, spec, ts, ss);
             return null;
@@ -571,16 +571,25 @@ public class ProgText extends LinkedList<String> {
     * @param token defining word token
     * @param spec defining-word specification
     * @param scanner source scanner
+    * @param ts current type system
     * @param ss current specification set
-    * @return new compile context
+    * @return new compile context, or null for a documented definition
     */
    CompileContext startDefinition (SourceWord token, Spec spec,
-      TextScanner scanner, SpecSet ss) {
+      TextScanner scanner, TypeSystem ts, SpecSet ss) {
       if ((spec.leftSide.size() != 0) || (spec.rightSide.size() != 0))
          throw programError ("define.colon-shape",
             token.text + " must have defining shape ( -- )", "",
             token.span);
       SourceWord nameToken = nextDefinedName (scanner, token, token.text, ss);
+      Spec documented = documentedDefinitionPlaceholder (scanner, ts, ss);
+      if (documented != null) {
+         documented.withOrigin (nameToken.span, nameToken.text);
+         ss.put (nameToken.text, documented);
+         skipForwardDefinitionBody (scanner, spec, ss);
+         addLogEntry (nameToken.text.trim() + " " + documented.toString());
+         return null;
+      }
       String legacyTerminator = null;
       if (Spec.PARSE_DEFINITION.equals (spec.parseMode))
          legacyTerminator = definitionTerminator (spec);
@@ -1780,11 +1789,8 @@ public class ProgText extends LinkedList<String> {
     * @return control spec or null
     */
    Spec controlWordSpecByRole (String role, SpecSet ss) {
-      Iterator<Spec> it = ss.values().iterator();
-      while (it.hasNext()) {
-         Spec spec = (Spec)it.next();
-         if ((spec != null) && spec.hasControlMode (role)) return spec;
-      }
+      Spec spec = (Spec)ss.get (controlWordName (role, ss));
+      if ((spec != null) && spec.hasControlMode (role)) return spec;
       return null;
    } // end of controlWordSpecByRole()
 

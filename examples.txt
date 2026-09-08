@@ -5,23 +5,23 @@
 
 : test3 SWAP DUP @ ;
 
-: test4 IF 1 + FI ;
+: test4 IF 1 + THEN ;
 
-: test5 IF DUP ELSE 0 FI ;
+: test5 IF DUP ELSE 0 THEN ;
 
-: test6  IF ROT ELSE @ FI ;
+: test6  IF ROT ELSE @ THEN ;
 
 : test7 BEGIN SWAP OVER WHILE INVERT REPEAT ;
 
 : test8 BEGIN KEY 0= UNTIL ;
 
-: test9 IF @ ELSE C@ FI ;
+: test9 IF @ ELSE C@ THEN ;
 
-: P INVERT HERE ! DP ! DP @ DP C@ SWAP ;
+: P INVERT HERE ! HERE ! HERE @ HERE C@ SWAP ;
 
-: Q SWAP ! DP @ DP ;
+: Q SWAP ! HERE @ HERE ;
 
-: test10 IF P ELSE Q FI ;
+: test10 IF P ELSE Q THEN ;
 
 : BODY SWAP DUP @ 0= ;
 

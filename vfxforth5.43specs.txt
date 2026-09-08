@@ -46,9 +46,10 @@
 \   profile selects the Standard's permitted combined-stack form for floating
 \   words, represents a double-cell value by one abstract item, and gives a
 \   fixed conservative approximation to effects containing i*x/j*x or `...`.
-\ - For overloaded n|u arithmetic, the fixed specs below select the signed
-\   interpretation where needed to preserve useful result types.  Explicit
-\   unsigned and double-unsigned words retain their normative types.
+\ - Common arithmetic used with both signed values and addresses uses the n|u
+\   join. Other fixed specs select the signed interpretation where needed to
+\   preserve useful result types. Explicit unsigned and double-unsigned words
+\   retain their normative types.
 \ - Return-stack and non-local effects (EXECUTE, EVALUATE, CATCH, THROW,
 \   ABORT, LOAD, INCLUDED, and similar words) cannot be represented exactly;
 \   only their visible fixed data-stack suffix is modeled.
@@ -73,13 +74,13 @@
 ! ( x a-addr -- )
 # ( ud -- ud )
 #> ( xd -- c-addr u )
-#S ( ud -- ud )
+#S ( d|ud -- d|ud )
 ' parse word state interpret ( -- xt )
 "(" parse until ")" ( -- )
 * ( n n -- n )
 */ ( n n n -- n )
 */MOD ( n n n -- n n )
-+ ( n n -- n )
++ ( n|u n|u -- n|u )
 +! ( n a-addr -- )
 +LOOP control +loop ( n -- )
 , ( x -- )
@@ -90,8 +91,8 @@
 /MOD ( n n -- n n )
 0< ( n -- flag )
 0= ( x -- flag )
-1+ ( n -- n )
-1- ( n -- n )
+1+ ( n|u -- n|u )
+1- ( n|u -- n|u )
 2! ( x[2] x[1] a-addr -- )
 2* ( x -- x )
 2/ ( x -- x )
@@ -241,7 +242,7 @@ syntax: DO <loop-body> +LOOP
 .( parse until ")" ( -- )
 .R ( n n -- )
 0<> ( x -- flag )
-0> ( n -- flag )
+0> ( n|u -- flag )
 2>R state compile ( x[2] x[1] -- )
 2R> state compile ( -- x[2] x[1] )
 2R@ state compile ( -- x[2] x[1] )
@@ -469,9 +470,9 @@ LOCALS| parse until "|" state compile ( -- )
 \ --------------------------------------------------------------------------
 \ 14 Memory-allocation word set
 
-ALLOCATE ( u -- a-addr ior )
+ALLOCATE ( n|u -- a-addr ior )
 FREE ( a-addr -- ior )
-RESIZE ( a-addr u -- a-addr ior )
+RESIZE ( a-addr n|u -- a-addr ior )
 
 \ --------------------------------------------------------------------------
 \ 15 Programming-tools word set and extensions
@@ -1907,7 +1908,7 @@ literal double ( -- d )
 "Z\"" parse until "\"" (  -- c-addr )
 "z$+" ( n n --  )
 "zAppend" ( c-addr n n --  )
-"zcount" ( addr[1] -- addr[1] n )
+"zcount" ( addr[1] -- addr[1] u )
 "zmove" ( n n --  )
 "zNull" (  -- addr )
 "zplace" ( c-addr n addr --  )

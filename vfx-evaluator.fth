@@ -1,25 +1,33 @@
 \ vfx-evaluator.fth
-\ Single-file VFX Forth 5.43 port of the evaluator prototype.
+\ Single-file VFX Forth 5.43 port of the evaluator
+\ prototype.
+\ Public API entry points are documented at their
+\ definitions: ev-ts-load, ev-ss-load, ev-parse-program,
+\ ev-spec-list-evaluate, ev-annotate., ev-run-native, and
+\ ev-main.
 \
 \ Porting notes:
-\ - Gforth permits repeated inline `{ ... }` local bindings. VFX permits one
-\   locals declaration per definition, so temporary bindings are merged into
-\   each definition's initial `{: inputs | temporaries -- outputs :}` frame.
-\ - The evaluator algorithms and external types/specs/program formats are
+\ - Gforth permits repeated inline `{ ... }` bindings.
+\   VFX permits one locals declaration per definition.
+\   Temporary bindings are merged into the initial frame:
+\   `{: inputs | temporaries -- outputs :}`.
+\ - Evaluator algorithms and external file formats are
 \   otherwise kept aligned with gforth-evaluator.fs.
 
 decimal
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ VFX compatibility helpers
 
-\ RDROP and 0>= are common extensions but are not in the default VFX image.
+\ RDROP and 0>= are common extensions but are not in the
+\ default VFX image.
 : ev-rdrop ( R: x -- )
   r> r> drop >r ;
 : ev-0>= ( n -- flag )
   0< 0= ;
 
-\ Gforth ARG returns an address/length pair; VFX exposes C-style ARGV[.
+\ Gforth ARG returns an address/length pair; VFX exposes
+\ C-style ARGV[.
 : ev-arg ( n -- c-addr u )
   argv[ zcount ;
 
@@ -35,7 +43,7 @@ variable ev-log-fileid
   ev-current-diagnostic !
   ev-error# throw ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Basic storage helpers
 
 : ev-xalloc ( u -- addr )
@@ -47,8 +55,13 @@ variable ev-log-fileid
 : ev-max ( a b -- max )
   2dup < if nip else drop then ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Persistent strings
+
+\ Keep input and output identities independent when
+\ retyping a generic cell.
+: ev-as-x ( x -- x )
+  >r r> ;
 
 : ev-slen@ ( s -- u )
   dup 0= if
@@ -59,7 +72,7 @@ variable ev-log-fileid
 
 : ev-s@ ( s -- c-addr u )
   dup 0= if
-    drop 0 0
+    drop 0 ev-as-x 0 abs
   else
     dup @ swap cell+ swap
   then ;
@@ -80,13 +93,13 @@ variable ev-log-fileid
   s ;
 
 : ev-sempty ( -- s )
-  0 0 ev-scopy ;
+  0 ev-as-x 0 abs ev-scopy ;
 
 : ev-sspace ( -- s )
   bl ev-sfrom-char ;
 
 : ev-s. ( s -- )
-  ev-s@ type ;
+  ev-as-x ev-s@ type ;
 
 : ev-scat2 {: s1 s2 | a1 u1 a2 u2 u3 s3 out -- s3 :}
   s1 ev-s@ -> u1 -> a1
@@ -127,7 +140,8 @@ variable ev-log-fileid
     c
   then ;
 
-: ev-trim-range {: | front-done back-done -- :} ( c-addr u -- c-addr' u' )
+: ev-trim-range {: | front-done back-done -- :} ( c-addr u
+  -- c-addr' u' )
   false -> front-done
   begin dup 0> front-done 0= and while
     over c@ ev-char-space? if
@@ -158,7 +172,7 @@ variable ev-log-fileid
 : ev-canon-sptr ( s -- s' )
   ev-s@ ev-canon-word ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Pointer vectors (single-cell items)
 
 0 cells constant ev-v.count
@@ -215,10 +229,11 @@ variable ev-log-fileid
   ev-vec-data@ swap cells + ! ;
 
 : ev-vec-remove-last ( vec -- )
-  dup ev-vec-count@ 0> if -1 swap ev-v.count + +! else drop then
+  dup ev-vec-count@ 0> if -1 swap ev-v.count + +! else drop
+  then
     ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Spans, source words, diagnostics
 
 0 cells constant ev-span.source
@@ -228,7 +243,8 @@ variable ev-log-fileid
 4 cells constant ev-span.ecol
 5 cells constant /ev-span
 
-: ev-span-new {: source sline scol eline ecol | span -- span :}
+: ev-span-new {: source sline scol eline ecol | span -- span
+  :}
   /ev-span ev-xalloc -> span
   source span ev-span.source + !
   sline span ev-span.sline + !
@@ -324,7 +340,8 @@ variable ev-current-source-lines
     then
   then ;
 
-: ev-marker-line {: span | line$ addr u indent width len marker out -- s :}
+: ev-marker-line {: span | line$ addr u indent width len
+  marker out -- s :}
   span ev-source-line@ -> line$
   line$ 0= if
     ev-sempty
@@ -342,7 +359,8 @@ variable ev-current-source-lines
     marker cell+ -> out
     indent 0 ?do
       i u < if
-        addr i + c@ dup 9 = if out i + c! else drop bl out i +
+        addr i + c@ dup 9 = if out i + c! else drop bl out i
+      +
           c! then
       else
         bl out i + c!
@@ -454,7 +472,7 @@ variable ev-current-source-lines
     0 ev-current-diagnostic !
   then ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Scanner support
 
 0 cells constant ev-sc.name
@@ -469,7 +487,8 @@ variable ev-current-source-lines
 9 cells constant ev-sc.lastcol
 10 cells constant /ev-sc
 
-: ev-normalize-file-text {: raw | addr u text out src dst ch -- text :}
+: ev-normalize-file-text {: raw | addr u text out src dst ch
+  -- text :}
   \ Normalize line terminators to LF and remove the final
   \ newline.
   raw ev-s@ -> u -> addr
@@ -507,7 +526,8 @@ variable ev-current-source-lines
   fd close-file drop
   raw ev-normalize-file-text ;
 
-: ev-split-lines {: text$ | lines addr u start idx ch -- lines :}
+: ev-split-lines {: text$ | lines addr u start idx ch --
+  lines :}
   16 ev-vec-new -> lines
   text$ ev-s@ -> u -> addr
   0 -> start
@@ -623,7 +643,8 @@ variable ev-current-source-lines
 : ev-substr>sptr {: base start len -- s :}
   base start + len ev-scopy ;
 
-: ev-sc-finish-quoted {: | buf outlen closed sc sline scol -- :} ( buf outlen closed sc sline scol --
+: ev-sc-finish-quoted {: | buf outlen closed sc sline scol
+  -- :} ( buf outlen closed sc sline scol --
   word|0 )
    -> scol -> sline -> sc -> closed -> outlen -> buf
   closed if
@@ -636,9 +657,12 @@ variable ev-current-source-lines
     0
   then ;
 
-: ev-sc-finish-until {: | buf outlen matched has-text sc sline scol eline ecol -- :} ( buf outlen matched has-text sc sline scol
+: ev-sc-finish-until {: | buf outlen matched has-text sc
+  sline scol eline ecol -- :} ( buf outlen matched has-text
+  sc sline scol
   eline ecol -- word|0 )
-   -> ecol -> eline -> scol -> sline -> sc -> has-text -> matched -> outlen -> buf
+   -> ecol -> eline -> scol -> sline -> sc -> has-text
+   -> matched -> outlen -> buf
   matched if
     outlen buf !
     buf
@@ -651,7 +675,8 @@ variable ev-current-source-lines
     0
   then ;
 
-: ev-sc-read-word {: stop-addr stop-u sc | start-off sline scol eline ecol count done ch -- word|0 :}
+: ev-sc-read-word {: stop-addr stop-u sc | start-off sline
+  scol eline ecol count done ch -- word|0 :}
   sc ev-sc-at-end? if
     0
   else
@@ -686,7 +711,8 @@ variable ev-current-source-lines
     then
   then ;
 
-: ev-sc-read-program-word {: stop-addr stop-u sc | start-off sline scol eline ecol count done ch -- word|0 :}
+: ev-sc-read-program-word {: stop-addr stop-u sc | start-off
+  sline scol eline ecol count done ch -- word|0 :}
   sc ev-sc-at-end? if
     0
   else
@@ -720,14 +746,16 @@ variable ev-current-source-lines
     then
   then ;
 
-: ev-sc-read-quoted {: sc | sline scol buf outlen done closed ch esc -- word|0 :}
+: ev-sc-read-quoted {: sc | sline scol buf outlen done
+  closed ch esc -- word|0 :}
   sc ev-sc-at-end? if
     0
   else
     sc ev-sc.line + @ -> sline
     sc ev-sc.col + @ -> scol
     sc ev-sc-advance
-    sc ev-sc.len + @ sc ev-sc.off + @ - cell + ev-xalloc -> buf
+    sc ev-sc.len + @ sc ev-sc.off + @ - cell + ev-xalloc
+    -> buf
     0 -> outlen
     false -> done
     false -> closed
@@ -796,7 +824,8 @@ variable ev-current-source-lines
   sc ev-sc-skip-ignorable
   stop-addr stop-u sc ev-sc-read-word ;
 
-: ev-sc-next-program-word {: stop-addr stop-u sc -- word|0 :}
+: ev-sc-next-program-word {: stop-addr stop-u sc -- word|0
+  :}
   sc ev-sc-skip-whitespace
   stop-addr stop-u sc ev-sc-read-program-word ;
 
@@ -840,14 +869,16 @@ variable ev-current-source-lines
     sc ev-sc.addr + @ off + u c-addr u compare 0=
   then ;
 
-: ev-sc-parse-until {: delim$ sc | d-addr d-u sline scol buf outlen eline ecol has-text done matched ch -- word|0 :}
+: ev-sc-parse-until {: delim$ sc | d-addr d-u sline scol buf
+  outlen eline ecol has-text done matched ch -- word|0 :}
   delim$ ev-s@ -> d-u -> d-addr
   d-u 0= if
     ev-sempty sc ev-sc-position-span false ev-word-new
   else
     sc ev-sc.line + @ -> sline
     sc ev-sc.col + @ -> scol
-    sc ev-sc.len + @ sc ev-sc.off + @ - cell + ev-xalloc -> buf
+    sc ev-sc.len + @ sc ev-sc.off + @ - cell + ev-xalloc
+    -> buf
     0 -> outlen
     sline -> eline
     scol -> ecol
@@ -875,7 +906,7 @@ variable ev-current-source-lines
       ev-sc-finish-until
   then ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Type system
 
 0 cells constant ev-alias.name
@@ -919,9 +950,12 @@ variable ev-current-source-lines
 6 cells constant ev-ts.scanners
 7 cells constant /ev-ts
 
-: ev-ts-new {: | source lines types aliases rel-size rel-matrix scanners ts -- :} ( source lines types aliases rel-size rel-matrix
+: ev-ts-new {: | source lines types aliases rel-size
+  rel-matrix scanners ts -- :} ( source lines types aliases
+  rel-size rel-matrix
   scanners -- ts )
-   -> scanners -> rel-matrix -> rel-size -> aliases -> types -> lines -> source
+   -> scanners -> rel-matrix -> rel-size -> aliases -> types
+   -> lines -> source
   /ev-ts ev-xalloc -> ts
   source ts ev-ts.source + !
   lines ts ev-ts.lines + !
@@ -983,7 +1017,8 @@ variable ev-current-source-lines
   sub ts ev-ts-alias-index -> i1
   super ts ev-ts-alias-index -> i2
   i1 -1 = if
-    s" Unknown type " ev-scopy sub ev-scat2 0 span ev-error-msg
+    s" Unknown type " ev-scopy sub ev-scat2 0 span
+    ev-error-msg
   then
   i2 -1 = if
     s" Unknown type " ev-scopy super ev-scat2 0 span
@@ -991,7 +1026,8 @@ variable ev-current-source-lines
   then
   i1 i2 <> if 1 i1 i2 ts ev-ts-rel! then ;
 
-: ev-ts-add-scanner {: name delim span scanners | key entry --  :}
+: ev-ts-add-scanner {: name delim span scanners | key entry
+  -- :}
   name ev-canon-sptr -> key
   key ev-slen@ 0= if
     s" Empty scanner name" ev-scopy 0 span ev-error-msg
@@ -1008,7 +1044,8 @@ variable ev-current-source-lines
   loop
   key delim ev-scanner-new scanners ev-vec-push ;
 
-: ev-ts-scanner-delim {: name ts | key scanners entry -- s|0 :}
+: ev-ts-scanner-delim {: name ts | key scanners entry -- s|0
+  :}
   name ev-canon-sptr -> key
   ts ev-ts.scanners + @ -> scanners
   scanners ev-vec-count@ 0 ?do
@@ -1031,17 +1068,21 @@ variable ev-current-source-lines
       else
         i j ts ev-ts-rel@ 1 = if
           j i ts ev-ts-rel@ 0= if 2 j i ts ev-ts-rel! then
-          j i ts ev-ts-rel@ 1 = if 3 i j ts ev-ts-rel! 3 j i ts
+          j i ts ev-ts-rel@ 1 = if 3 i j ts ev-ts-rel! 3 j i
+      ts
             ev-ts-rel! then
           j i ts ev-ts-rel@ 3 = if 3 i j ts ev-ts-rel! then
         else
           i j ts ev-ts-rel@ 2 = if
             j i ts ev-ts-rel@ 0= if 1 j i ts ev-ts-rel! then
-            j i ts ev-ts-rel@ 2 = if 3 i j ts ev-ts-rel! 3 j i
+            j i ts ev-ts-rel@ 2 = if 3 i j ts ev-ts-rel! 3 j
+      i
               ts ev-ts-rel! then
-            j i ts ev-ts-rel@ 3 = if 3 i j ts ev-ts-rel! then
+            j i ts ev-ts-rel@ 3 = if 3 i j ts ev-ts-rel!
+      then
           else
-            i j ts ev-ts-rel@ 3 = if 3 j i ts ev-ts-rel! then
+            i j ts ev-ts-rel@ 3 = if 3 j i ts ev-ts-rel!
+      then
           then
         then
       then
@@ -1073,7 +1114,8 @@ variable ev-current-source-lines
     then
   then ;
 
-: ev-ts-parse-line {: line types aliases rels scanners | head directive index tok --  :}
+: ev-ts-parse-line {: line types aliases rels scanners |
+  head directive index tok -- :}
   line ev-line-first -> head
   head ev-word-text@ ev-canon-sptr -> directive
   directive ev-s@ s" TYPE" compare 0= if
@@ -1118,12 +1160,14 @@ variable ev-current-source-lines
     scanners ev-ts-add-scanner
     exit
   then
-  s" Unknown directive " ev-scopy head ev-word-text@ ev-scat2
+  s" Unknown directive " ev-scopy head ev-word-text@
+  ev-scat2
   0 head ev-word-span@ ev-error-msg ;
 
 \ Loads and normalizes a type-system file into its runtime
 \ representation.
-: ev-ts-load {: file$ | sc types aliases rels scanners done line n matrix ts rel -- ts :}
+: ev-ts-load {: file$ | sc types aliases rels scanners done
+  line n matrix ts rel -- ts :}
   file$ ev-sc-from-file -> sc
   sc ev-sc.lines + @ ev-current-source-lines !
   16 ev-vec-new -> types
@@ -1150,13 +1194,14 @@ variable ev-current-source-lines
     ev-ts-new -> ts
   rels ev-vec-count@ 0 ?do
     i rels ev-vec@ -> rel
-    rel ev-rel.sub + @ rel ev-rel.super + @ rel ev-rel.span + @
+    rel ev-rel.sub + @ rel ev-rel.super + @ rel ev-rel.span
+    + @
       ts ev-ts-add-relation
   loop
   ts ev-ts-normalize
   ts ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Type symbols and stack effects
 
 0 constant ev-parse.none
@@ -1234,10 +1279,12 @@ variable ev-current-source-lines
   spec ev-spec.left + @ ev-sym-vec-clone
   spec ev-spec.right + @ ev-sym-vec-clone
   ev-spec-new -> copy
-  spec ev-spec.parse-string + @ copy ev-spec.parse-string + !
+  spec ev-spec.parse-string + @ copy ev-spec.parse-string +
+  !
   spec ev-spec.parse-mode + @ copy ev-spec.parse-mode + !
   spec ev-spec.define-mode + @ copy ev-spec.define-mode + !
-  spec ev-spec.control-mode + @ copy ev-spec.control-mode + !
+  spec ev-spec.control-mode + @ copy ev-spec.control-mode +
+  !
   spec ev-spec.immediate + @ copy ev-spec.immediate + !
   spec ev-spec.state-mode + @ copy ev-spec.state-mode + !
   spec ev-spec.source + @ copy ev-spec.source + !
@@ -1287,7 +1334,8 @@ variable ev-current-source-lines
   else
     u 0 ?do
       done 0= if
-        c-addr i + c@ dup [char] 0 >= over [char] 9 <= and 0= if
+        c-addr i + c@ dup [char] 0 >= over [char] 9 <= and
+      0= if
           drop 0 to result
           false to ok
           true to done
@@ -1305,7 +1353,8 @@ variable ev-current-source-lines
 
 : ev-ts-check-type {: type span ts --  :}
   type ts ev-ts-contains? 0= if
-    s" Unknown type " ev-scopy type ev-scat2 0 span ev-error-msg
+    s" Unknown type " ev-scopy type ev-scat2 0 span
+    ev-error-msg
   then ;
 
 : ev-spec-max-pos {: spec | m left right -- n :}
@@ -1321,7 +1370,8 @@ variable ev-current-source-lines
   m spec ev-spec.max-pos + !
   m ;
 
-: ev-parse-type-symbol {: text span ts | addr u type-addr type-u pos explicit bracket close num ok type -- sym :}
+: ev-parse-type-symbol {: text span ts | addr u type-addr
+  type-u pos explicit bracket close num ok type -- sym :}
   text ev-s@ -> u -> addr
   addr -> type-addr
   u -> type-u
@@ -1340,12 +1390,15 @@ variable ev-current-source-lines
         then
       loop
       close -1 = if
-        s" Malformed type symbol " ev-scopy text ev-scat2 0 span
+        s" Malformed type symbol " ev-scopy text ev-scat2 0
+      span
           ev-error-msg
       then
-      addr bracket 1+ + close bracket 1+ - ev-parse-uint -> ok -> num
+      addr bracket 1+ + close bracket 1+ - ev-parse-uint
+      -> ok -> num
       ok 0= if
-        s" Malformed wildcard index in " ev-scopy text ev-scat2
+        s" Malformed wildcard index in " ev-scopy text
+      ev-scat2
           0 span ev-error-msg
       then
       num to pos
@@ -1357,7 +1410,8 @@ variable ev-current-source-lines
   type span ts ev-ts-check-type
   type pos explicit ev-sym-new ;
 
-: ev-tokenize-type-side {: text | result sc done tok -- vec :}
+: ev-tokenize-type-side {: text | result sc done tok -- vec
+  :}
   8 ev-vec-new -> result
   s" <type-side>" ev-scopy text ev-sc-new -> sc
   false -> done
@@ -1395,7 +1449,8 @@ variable ev-current-source-lines
     false -> done
     u 1- 0 ?do
       done 0= if
-        addr i + c@ [char] - = addr i 1+ + c@ [char] - = and if
+        addr i + c@ [char] - = addr i 1+ + c@ [char] - = and
+      if
           i to result
           true to done
         then
@@ -1404,10 +1459,12 @@ variable ev-current-source-lines
     result
   then ;
 
-: ev-parse-spec-body {: body ts span | arrow addr u left right spec -- spec :}
+: ev-parse-spec-body {: body ts span | arrow addr u left
+  right spec -- spec :}
   body ev-find-arrow -> arrow
   arrow 0< if
-    s" Missing -- in stack effect" ev-scopy 0 span ev-error-msg
+    s" Missing -- in stack effect" ev-scopy 0 span
+    ev-error-msg
   then
   body ev-s@ -> u -> addr
   addr arrow ev-scopy ts span ev-parse-type-list -> left
@@ -1417,7 +1474,8 @@ variable ev-current-source-lines
   spec ev-spec-max-pos drop
   spec ;
 
-: ev-spec-substitute-vec {: old new vec | count sym -- count :}
+: ev-spec-substitute-vec {: old new vec | count sym -- count
+  :}
   0 -> count
   vec ev-vec-count@ 0 ?do
     i vec ev-vec@ -> sym
@@ -1445,14 +1503,12 @@ variable ev-current-source-lines
       else drop then
   loop ;
 
-: ev-spec-increment-wild {: amount spec | max left right sym --  :}
+: ev-spec-increment-wild {: amount spec | max left right sym
+  -- :}
   amount spec ev-spec.left + @ ev-spec-increment-wild-vec
   amount spec ev-spec.right + @ ev-spec-increment-wild-vec
-  \ maxPos observes the already shifted explicit indices
-  \ before amount is
-  \ added again. This keeps independently evaluated effects
-  \ in disjoint
-  \ wildcard ranges.
+  \ maxPos sees explicit indices before amount is added
+  \ again. This keeps effects in disjoint wildcard ranges.
   spec ev-spec-max-pos amount + -> max
   max spec ev-spec.max-pos + !
   spec ev-spec.left + @ -> left
@@ -1490,16 +1546,22 @@ variable ev-current-source-lines
   loop
   out ;
 
-: ev-spec-from-sides {: left right template | spec -- spec :}
+: ev-spec-from-sides {: left right template | spec -- spec
+  :}
   left right ev-spec-new -> spec
-  template ev-spec.parse-string + @ spec ev-spec.parse-string +
+  template ev-spec.parse-string + @ spec
+  ev-spec.parse-string +
     !
-  template ev-spec.parse-mode + @ spec ev-spec.parse-mode + !
-  template ev-spec.define-mode + @ spec ev-spec.define-mode + !
-  template ev-spec.control-mode + @ spec ev-spec.control-mode +
+  template ev-spec.parse-mode + @ spec ev-spec.parse-mode +
+  !
+  template ev-spec.define-mode + @ spec ev-spec.define-mode
+  + !
+  template ev-spec.control-mode + @ spec
+  ev-spec.control-mode +
     !
   template ev-spec.immediate + @ spec ev-spec.immediate + !
-  template ev-spec.state-mode + @ spec ev-spec.state-mode + !
+  template ev-spec.state-mode + @ spec ev-spec.state-mode +
+  !
   template ev-spec.source + @ spec ev-spec.source + !
   template ev-spec.origin + @ spec ev-spec.origin + !
   spec ev-spec-max-pos drop
@@ -1518,7 +1580,8 @@ variable ev-eval-result
   0 ev-sl-conf-actual !
   0 ev-sl-conf-expected ! ;
 
-: ev-sl-record-conflict {: prefix incoming actual expected --  :}
+: ev-sl-record-conflict {: prefix incoming actual expected
+  -- :}
   prefix ev-spec-clone ev-sl-conf-prefix !
   incoming ev-spec-clone ev-sl-conf-incoming !
   actual ev-sym-clone ev-sl-conf-actual !
@@ -1540,7 +1603,8 @@ variable ev-eval-result
   0 entry ev-norm.explicit + !
   entry ;
 
-: ev-find-norm {: sym table | result done entry -- entry|0 :}
+: ev-find-norm {: sym table | result done entry -- entry|0
+  :}
   0 -> result
   false -> done
   table ev-vec-count@ 0 ?do
@@ -1563,7 +1627,7 @@ variable ev-eval-result
   then ;
 
 : ev-needs-index? ( entry -- flag )
-  \ A final singleton carries no visible correlation, even if
+  \ A final singleton has no visible correlation, even if
   \ it occurs repeatedly in the internal per-word trace.
   dup ev-norm.result-count + @ 1 >
   over ev-norm.explicit + @ 0<>
@@ -1572,7 +1636,8 @@ variable ev-eval-result
 : ev-add-norm-pass1 {: sym table | entry --  :}
   sym table ev-norm-touch -> entry
   1 entry ev-norm.count + +!
-  sym ev-sym.explicit + @ if 1 entry ev-norm.explicit + ! then ;
+  sym ev-sym.explicit + @ if 1 entry ev-norm.explicit + !
+  then ;
 
 : ev-add-result-norm-pass1 {: sym table | entry --  :}
   sym table ev-add-norm-pass1
@@ -1597,7 +1662,8 @@ variable ev-eval-result
     i vec ev-vec@ table ev-add-result-norm-pass1
   loop ;
 
-: ev-scan-norm-pass2-left {: vec table next | idx -- next' :}
+: ev-scan-norm-pass2-left {: vec table next | idx -- next'
+  :}
   vec ev-vec-count@ 1- -> idx
   begin
     idx ev-0>=
@@ -1648,7 +1714,8 @@ variable ev-eval-result
 
 \ Renumbers wildcard indices into a compact, readable form
 \ after evaluation.
-: ev-spec-list-normalize {: list result | max table sp next entry assigned fresh-type fresh-explicit fresh -- norm :}
+: ev-spec-list-normalize {: list result | max table sp next
+  entry assigned fresh-type fresh-explicit fresh -- norm :}
   result ev-spec-max-pos -> max
   list ev-vec-count@ 0 ?do
     i list ev-vec@ ev-spec-max-pos max ev-max to max
@@ -1659,8 +1726,10 @@ variable ev-eval-result
   loop
   max result ev-spec-increment-wild
   16 ev-vec-new -> table
-  result ev-spec.left + @ table ev-scan-result-norm-pass1-vec
-  result ev-spec.right + @ table ev-scan-result-norm-pass1-vec
+  result ev-spec.left + @ table
+  ev-scan-result-norm-pass1-vec
+  result ev-spec.right + @ table
+  ev-scan-result-norm-pass1-vec
   list ev-vec-count@ 0 ?do
     i list ev-vec@ -> sp
     sp ev-spec.left + @ table ev-scan-norm-pass1-vec
@@ -1669,7 +1738,8 @@ variable ev-eval-result
   0 -> next
   result ev-spec.left + @ table next ev-scan-norm-pass2-left
     to next
-  result ev-spec.right + @ table next ev-scan-norm-pass2-right
+  result ev-spec.right + @ table next
+  ev-scan-norm-pass2-right
     to next
   list ev-vec-count@ 0 ?do
     i list ev-vec@ -> sp
@@ -1685,7 +1755,8 @@ variable ev-eval-result
     entry ev-norm.key + @ ev-sym.type + @ -> fresh-type
     entry ev-norm.explicit + @ 0<> -> fresh-explicit
     fresh-type assigned fresh-explicit ev-sym-new -> fresh
-    entry ev-norm.key + @ fresh result ev-spec-substitute drop
+    entry ev-norm.key + @ fresh result ev-spec-substitute
+    drop
     entry ev-norm.key + @ fresh list ev-spec-list-substitute
   loop
   result ;
@@ -1702,12 +1773,15 @@ variable ev-eval-result
     m1 ev-sym.type + @
   then -> type
   ev-sl-cmax @ 1+ dup ev-sl-cmax ! -> pos
-  m1 ev-sym.explicit + @ m2 ev-sym.explicit + @ or -> explicit
+  m1 ev-sym.explicit + @ m2 ev-sym.explicit + @ or
+  -> explicit
   type pos explicit ev-sym-new ;
 
 \ Composes two stack effects, unifying the touching boundary
 \ one symbol at a time.
-: ev-spec-multiply {: list s1 s2 ts | leftspec rightspec result done rleft rright newleft newright m1 m2 rel fresh r1rs r2ls -- spec|0 :}
+: ev-spec-multiply {: list s1 s2 ts | leftspec rightspec
+  result done rleft rright newleft newright m1 m2 rel fresh
+  r1rs r2ls -- spec|0 :}
   s1 -> leftspec
   s2 -> rightspec
   0 -> result
@@ -1722,8 +1796,10 @@ variable ev-eval-result
       leftspec ev-spec-copy-left -> rleft
       rightspec ev-spec-copy-right -> rright
       leftspec ev-spec-right-count 0= if
-        rightspec ev-spec.left + @ rleft ev-vec-prepend-clones -> newleft
-        newleft rright rightspec ev-spec-from-sides to result
+        rightspec ev-spec.left + @ rleft
+      ev-vec-prepend-clones -> newleft
+        newleft rright rightspec ev-spec-from-sides
+      to result
         true to done
       else
         rightspec ev-spec-left-count 0= if
@@ -1743,8 +1819,10 @@ variable ev-eval-result
             true to done
           else
             m1 m2 rel ev-winner-sym -> fresh
-            leftspec ev-spec.right + @ ev-sym-vec-clone -> r1rs
-            rightspec ev-spec.left + @ ev-sym-vec-clone -> r2ls
+            leftspec ev-spec.right + @ ev-sym-vec-clone
+      -> r1rs
+            rightspec ev-spec.left + @ ev-sym-vec-clone
+      -> r2ls
             m1 fresh r1rs ev-spec-substitute-vec drop
             m2 fresh r1rs ev-spec-substitute-vec drop
             m1 fresh r2ls ev-spec-substitute-vec drop
@@ -1757,7 +1835,8 @@ variable ev-eval-result
             m2 fresh list ev-spec-list-substitute
             r1rs ev-vec-remove-last
             r2ls ev-vec-remove-last
-            rleft r1rs leftspec ev-spec-from-sides to leftspec
+            rleft r1rs leftspec ev-spec-from-sides
+      to leftspec
             r2ls rright rightspec ev-spec-from-sides
               to rightspec
           then
@@ -1767,8 +1846,8 @@ variable ev-eval-result
   repeat
   result ;
 
-\ Composes a list of effects, returning its normalized effect
-\ or zero on conflict.
+\ Composes effects and returns the normalized result, or
+\ zero on conflict.
 : ev-spec-list-evaluate {: list ts | ok -- spec|0 :}
   0 ev-sl-cmax !
   ev-sl-clear-conflict
@@ -1780,7 +1859,8 @@ variable ev-eval-result
   true -> ok
   list ev-vec-count@ 0 ?do
     ok if
-      list ev-eval-result @ i list ev-vec@ ts ev-spec-multiply
+      list ev-eval-result @ i list ev-vec@ ts
+      ev-spec-multiply
         dup 0= if
         drop false to ok
       else
@@ -1794,19 +1874,23 @@ variable ev-eval-result
     0
   then ;
 
-: ev-new-merged-sym {: m1 m2 rel max output? | type newmax explicit -- sym max' :}
-  \ Inputs retain the subtype; branch outputs retain the supertype.
+: ev-new-merged-sym {: m1 m2 rel max output? | type newmax
+  explicit -- sym max' :}
+  \ Inputs retain the subtype; branch outputs retain the
+  \ supertype.
   output? if rel 1 = else rel 2 = then if
     m2 ev-sym.type + @
   else
     m1 ev-sym.type + @
   then -> type
   max 1+ -> newmax
-  m1 ev-sym.explicit + @ m2 ev-sym.explicit + @ or -> explicit
+  m1 ev-sym.explicit + @ m2 ev-sym.explicit + @ or
+  -> explicit
   type newmax explicit ev-sym-new
   newmax ;
 
-: ev-spec-cprefix {: spec len ts | result rmax ok m1 m2 rel fresh newmax -- spec|0 :}
+: ev-spec-cprefix {: spec len ts | result rmax ok m1 m2 rel
+  fresh newmax -- spec|0 :}
   spec ev-spec-clone -> result
   len 0> if
     result ev-spec-left-count len < if
@@ -1827,7 +1911,8 @@ variable ev-eval-result
             rel 0= if
               false to ok
             else
-              m1 m2 rel rmax false ev-new-merged-sym -> newmax -> fresh
+              m1 m2 rel rmax false ev-new-merged-sym
+      -> newmax -> fresh
               newmax to rmax
               m1 fresh result ev-spec-substitute drop
               m2 fresh result ev-spec-substitute drop
@@ -1845,7 +1930,9 @@ variable ev-eval-result
     result ev-spec-normalize-self
   then ;
 
-: ev-spec-unify-inputs {: | count offset result tc tcmax ts rleft tleft currentmax ok m1 m2 rel fresh newmax -- :} ( count offset result tc tcmax ts --
+: ev-spec-unify-inputs {: | count offset result tc tcmax ts
+  rleft tleft currentmax ok m1 m2 rel fresh newmax -- :} (
+  count offset result tc tcmax ts --
   tcmax' ok )
    -> ts -> tcmax -> tc -> result -> offset -> count
   result ev-spec.left + @ -> rleft
@@ -1856,11 +1943,13 @@ variable ev-eval-result
     ok if
       i offset + rleft ev-vec@ -> m1
       i tleft ev-vec@ -> m2
-      m1 ev-sym.type + @ m2 ev-sym.type + @ ts ev-ts-relation -> rel
+      m1 ev-sym.type + @ m2 ev-sym.type + @ ts
+      ev-ts-relation -> rel
       rel 0= if
         false to ok
       else
-        m1 m2 rel currentmax false ev-new-merged-sym -> newmax -> fresh
+        m1 m2 rel currentmax false ev-new-merged-sym
+      -> newmax -> fresh
         newmax to currentmax
         m1 fresh result ev-spec-substitute drop
         m2 fresh result ev-spec-substitute drop
@@ -1871,7 +1960,8 @@ variable ev-eval-result
   loop
   currentmax ok ;
 
-: ev-find-output-pair {: m1 m2 first second merged -- sym|0 :}
+: ev-find-output-pair {: m1 m2 first second merged -- sym|0
+  :}
   first ev-vec-count@ 0 ?do
     m1 i first ev-vec@ ev-sym=
     m2 i second ev-vec@ ev-sym= and if
@@ -1880,7 +1970,10 @@ variable ev-eval-result
   loop
   0 ;
 
-: ev-spec-unify-outputs {: | count offset result tc tcmax ts rleft rright tright first second merged currentmax ok m1 m2 rel fresh newsym newmax -- :} ( count offset result tc tcmax ts --
+: ev-spec-unify-outputs {: | count offset result tc tcmax ts
+  rleft rright tright first second merged currentmax ok m1
+  m2 rel fresh newsym newmax -- :} ( count offset result tc
+  tcmax ts --
   tcmax' ok )
    -> ts -> tcmax -> tc -> result -> offset -> count
   result ev-spec.left + @ -> rleft
@@ -1899,7 +1992,8 @@ variable ev-eval-result
       else
         i offset - tright ev-vec@
       then -> m2
-      m1 ev-sym.type + @ m2 ev-sym.type + @ ts ev-ts-relation -> rel
+      m1 ev-sym.type + @ m2 ev-sym.type + @ ts
+      ev-ts-relation -> rel
       rel 0= if
         false to ok
       else
@@ -1907,9 +2001,11 @@ variable ev-eval-result
         m1 m2 ev-sym= if
           m1 to fresh
         else
-          m1 m2 first second merged ev-find-output-pair to fresh
+          m1 m2 first second merged ev-find-output-pair
+      to fresh
           fresh 0= if
-            m1 m2 rel currentmax true ev-new-merged-sym -> newmax -> newsym
+            m1 m2 rel currentmax true ev-new-merged-sym
+      -> newmax -> newsym
             newsym to fresh
             newmax to currentmax
           then
@@ -1923,7 +2019,9 @@ variable ev-eval-result
   loop
   currentmax ok ;
 
-: ev-spec-unify {: s1 s2 ts | p1 p2 q1 q2 left-offset right-offset result tcmax0 tc tcmax1 tcmax2 ok1 tcmax3 ok2 -- spec|0 :}
+: ev-spec-unify {: s1 s2 ts | p1 p2 q1 q2 left-offset
+  right-offset result tcmax0 tc tcmax1 tcmax2 ok1 tcmax3 ok2
+  -- spec|0 :}
   s2 0= if
     0
   else
@@ -1945,7 +2043,8 @@ variable ev-eval-result
         s2 ev-spec-clone -> tc
         tcmax0 tc ev-spec-increment-wild
         tc ev-spec-max-pos tcmax0 ev-max -> tcmax1
-        q1 left-offset result tc tcmax1 ts ev-spec-unify-inputs -> ok1 -> tcmax2
+        q1 left-offset result tc tcmax1 ts
+      ev-spec-unify-inputs -> ok1 -> tcmax2
         ok1 if
           p2 right-offset result tc tcmax2 ts
             ev-spec-unify-outputs -> ok2 -> tcmax3
@@ -1994,7 +2093,7 @@ variable ev-spistar.tmp
     spec swap ts ev-spec-glb
   then ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Spec dictionaries and declarative control structures
 
 0 cells constant ev-entry.key
@@ -2044,7 +2143,8 @@ variable ev-spistar.tmp
   begin
     idx count <
   while
-    ev-expr.seq result idx parts ev-vec@ ev-expr-new to result
+    ev-expr.seq result idx parts ev-vec@ ev-expr-new
+    to result
     idx 1+ to idx
   repeat
   result ;
@@ -2064,9 +2164,12 @@ variable ev-spistar.tmp
 6 cells constant ev-struct.meaning
 7 cells constant /ev-struct
 
-: ev-struct-new {: | name open boundaries optional close segments meaning st -- :} ( name open boundaries optional close segments
+: ev-struct-new {: | name open boundaries optional close
+  segments meaning st -- :} ( name open boundaries optional
+  close segments
   meaning -- st )
-   -> meaning -> segments -> close -> optional -> boundaries -> open -> name
+   -> meaning -> segments -> close -> optional -> boundaries
+   -> open -> name
   /ev-struct ev-xalloc -> st
   name st ev-struct.name + !
   open st ev-struct.open + !
@@ -2103,7 +2206,8 @@ variable ev-spistar.tmp
     a ev-struct.close + @ b ev-struct.close + @ ev-s= 0= if
       false
     else
-      a ev-struct-boundary-count b ev-struct-boundary-count <>
+      a ev-struct-boundary-count b ev-struct-boundary-count
+      <>
         if
         false
       else
@@ -2114,7 +2218,8 @@ variable ev-spistar.tmp
               ev-s= 0= if
               false to same
             then
-            i a ev-struct-optional? i b ev-struct-optional? <>
+            i a ev-struct-optional? i b ev-struct-optional?
+      <>
               if
               false to same
             then
@@ -2172,7 +2277,8 @@ variable ev-spistar.tmp
 : ev-ss-add-entry {: surface value vec span | key --  :}
   surface ev-canon-sptr -> key
   key vec ev-ss-find-entry if
-    s" Duplicate specification for " ev-scopy surface ev-scat2
+    s" Duplicate specification for " ev-scopy surface
+    ev-scat2
     0 span ev-error-msg
   then
   key surface value ev-entry-new vec ev-vec-push ;
@@ -2208,16 +2314,19 @@ variable ev-spistar.tmp
     st vec ev-vec-push
   then ;
 
-: ev-ss-open-structures {: role ss | out structs st -- vec :}
+: ev-ss-open-structures {: role ss | out structs st -- vec
+  :}
   4 ev-vec-new -> out
   ss ev-ss.structures + @ -> structs
   structs ev-vec-count@ 0 ?do
     i structs ev-vec@ -> st
-    role st ev-struct.open + @ ev-s= if st out ev-vec-push then
+    role st ev-struct.open + @ ev-s= if st out ev-vec-push
+    then
   loop
   out ;
 
-: ev-ss-role-entry {: role ss | vec result done entry spec mode -- entry|0 :}
+: ev-ss-role-entry {: role ss | vec result done entry spec
+  mode -- entry|0 :}
   ss ev-ss.words + @ -> vec
   0 -> result
   false -> done
@@ -2242,7 +2351,8 @@ variable ev-spistar.tmp
 : ev-key= {: s c-addr u -- flag :}
   s ev-canon-sptr ev-s@ c-addr u compare 0= ;
 
-: ev-word-directive-text= {: word c-addr u | addr wu -- flag :}
+: ev-word-directive-text= {: word c-addr u | addr wu -- flag
+  :}
   word ev-word-text@ ev-s@ -> wu -> addr
   wu 0> if
     addr wu 1- + c@ [char] : = if
@@ -2334,7 +2444,8 @@ variable ev-spistar.tmp
             ev-sc-position-span ev-error-msg
         then
         ev-word-text@ -> body
-        s" <" ev-scopy body ev-scat2 s" >" ev-scopy ev-scat2 vec
+        s" <" ev-scopy body ev-scat2 s" >" ev-scopy ev-scat2
+      vec
           ev-vec-push
       else
         s" []<" sc ev-sc-read-word -> word
@@ -2366,7 +2477,8 @@ variable ev-spistar.tmp
     segname ev-segment-expr
   then ;
 
-: ev-parse-effect-line {: line$ | trimmed toks head result parts -- expr :}
+: ev-parse-effect-line {: line$ | trimmed toks head result
+  parts -- expr :}
   line$ ev-s@ ev-trim-range ev-scopy -> trimmed
   trimmed ev-slen@ 0= if
     ev-empty-expr
@@ -2390,7 +2502,8 @@ variable ev-spistar.tmp
       else
         head s" REPEAT" ev-key= if
           toks ev-vec-count@ 2 < if
-            s" REPEAT requires a repeated effect" ev-scopy 0 0
+            s" REPEAT requires a repeated effect" ev-scopy 0
+      0
               ev-error-msg
           then
           4 ev-vec-new -> parts
@@ -2416,7 +2529,8 @@ variable ev-spistar.tmp
   loop
   out ;
 
-: ev-parse-control-meaning {: text | lines parts expr -- expr :}
+: ev-parse-control-meaning {: text | lines parts expr --
+  expr :}
   text ev-split-lines -> lines
   8 ev-vec-new -> parts
   lines ev-vec-count@ 0 ?do
@@ -2426,7 +2540,8 @@ variable ev-spistar.tmp
   loop
   parts ev-seq-collapse ;
 
-: ev-parse-control-syntax {: text | toks bounds opt segs idx open optional? role segname close -- st :}
+: ev-parse-control-syntax {: text | toks bounds opt segs idx
+  open optional? role segname close -- st :}
   text ev-ctl-tokenize -> toks
   toks ev-vec-count@ 3 < if
     s" Malformed SYNTAX clause" ev-scopy 0 0 ev-error-msg
@@ -2492,62 +2607,81 @@ variable ev-spistar.tmp
     ev-vec-new -> p1
   s" ELSE" ev-scopy b1 ev-vec-push
   1 o1 ev-vec-push
-  s" THEN_BRANCH" ev-scopy ev-canon-segment-name s1 ev-vec-push
-  s" ELSE_BRANCH" ev-scopy ev-canon-segment-name s1 ev-vec-push
+  s" THEN_BRANCH" ev-scopy ev-canon-segment-name s1
+  ev-vec-push
+  s" ELSE_BRANCH" ev-scopy ev-canon-segment-name s1
+  ev-vec-push
   s" IF" ev-scopy ev-control-expr p1 ev-vec-push
-  s" THEN_BRANCH" ev-scopy ev-canon-segment-name ev-segment-expr
-  s" ELSE_BRANCH" ev-scopy ev-canon-segment-name ev-segment-expr
+  s" THEN_BRANCH" ev-scopy ev-canon-segment-name
+  ev-segment-expr
+  s" ELSE_BRANCH" ev-scopy ev-canon-segment-name
+  ev-segment-expr
     ev-glb-expr
   p1 ev-vec-push
   p1 ev-seq-expr -> m1
-  s" IF" ev-scopy s" IF" ev-scopy b1 o1 s" FI" ev-scopy s1 m1
+  s" IF" ev-scopy s" IF" ev-scopy b1 o1 s" FI" ev-scopy s1
+  m1
   ev-struct-new ss ev-ss-add-structure ;
 
-: ev-ss-install-builtin-while {: ss | b2 o2 s2 p2 p2prefix m2 --  :}
+: ev-ss-install-builtin-while {: ss | b2 o2 s2 p2 p2prefix
+  m2 -- :}
   1 ev-vec-new -> b2 1 ev-vec-new -> o2 2 ev-vec-new -> s2
   2 ev-vec-new -> p2 2 ev-vec-new -> p2prefix
   s" WHILE" ev-scopy b2 ev-vec-push
   0 o2 ev-vec-push
-  s" LOOP_PREFIX" ev-scopy ev-canon-segment-name s2 ev-vec-push
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name s2 ev-vec-push
-  s" LOOP_PREFIX" ev-scopy ev-canon-segment-name ev-segment-expr
+  s" LOOP_PREFIX" ev-scopy ev-canon-segment-name s2
+  ev-vec-push
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name s2
+  ev-vec-push
+  s" LOOP_PREFIX" ev-scopy ev-canon-segment-name
+  ev-segment-expr
     p2prefix ev-vec-push
   s" WHILE" ev-scopy ev-control-expr p2prefix ev-vec-push
   p2prefix ev-seq-expr ev-star-expr p2 ev-vec-push
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name ev-segment-expr
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name
+  ev-segment-expr
     ev-star-expr p2 ev-vec-push
   p2 ev-seq-expr -> m2
-  s" BUILTIN_WHILE" ev-scopy s" BEGIN" ev-scopy b2 o2 s" REPEAT"
+  s" BUILTIN_WHILE" ev-scopy s" BEGIN" ev-scopy b2 o2
+  s" REPEAT"
     ev-scopy s2 m2
   ev-struct-new ss ev-ss-add-structure ;
 
 : ev-ss-install-builtin-again {: ss | b3 o3 s3 m3 --  :}
   0 ev-vec-new -> b3 0 ev-vec-new -> o3 1 ev-vec-new -> s3
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name s3 ev-vec-push
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name ev-segment-expr
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name s3
+  ev-vec-push
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name
+  ev-segment-expr
     ev-star-expr -> m3
-  s" BUILTIN_AGAIN" ev-scopy s" BEGIN" ev-scopy b3 o3 s" AGAIN"
+  s" BUILTIN_AGAIN" ev-scopy s" BEGIN" ev-scopy b3 o3
+  s" AGAIN"
     ev-scopy s3 m3
   ev-struct-new ss ev-ss-add-structure ;
 
 : ev-ss-install-builtin-until {: ss | b4 o4 s4 p4 m4 --  :}
   0 ev-vec-new -> b4 0 ev-vec-new -> o4 1 ev-vec-new -> s4 2
     ev-vec-new -> p4
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name s4 ev-vec-push
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name ev-segment-expr
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name s4
+  ev-vec-push
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name
+  ev-segment-expr
     p4 ev-vec-push
   s" UNTIL" ev-scopy ev-control-expr p4 ev-vec-push
   p4 ev-seq-expr ev-star-expr -> m4
-  s" BUILTIN_UNTIL" ev-scopy s" BEGIN" ev-scopy b4 o4 s" UNTIL"
+  s" BUILTIN_UNTIL" ev-scopy s" BEGIN" ev-scopy b4 o4
+  s" UNTIL"
     ev-scopy s4 m4
   ev-struct-new ss ev-ss-add-structure ;
 
 : ev-ss-install-builtin-do {: ss | b5 o5 s5 p5 m5 --  :}
   0 ev-vec-new -> b5 0 ev-vec-new -> o5 1 ev-vec-new -> s5 2
     ev-vec-new -> p5
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name s5 ev-vec-push
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name s5
+  ev-vec-push
   s" DO" ev-scopy ev-control-expr p5 ev-vec-push
-  s" LOOP_BODY" ev-scopy ev-canon-segment-name ev-segment-expr
+  s" LOOP_BODY" ev-scopy ev-canon-segment-name
+  ev-segment-expr
     ev-star-expr p5 ev-vec-push
   p5 ev-seq-expr -> m5
   s" BUILTIN_DO" ev-scopy s" DO" ev-scopy b5 o5 s" LOOP"
@@ -2561,7 +2695,7 @@ variable ev-spistar.tmp
   ss ev-ss-install-builtin-until
   ss ev-ss-install-builtin-do ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Native spec-set loader
 
 : ev-parse-mode-from {: tok -- mode :}
@@ -2634,14 +2768,16 @@ variable ev-spistar.tmp
     delim 0<> if
       delim
     else
-      s" Unknown scanner delimiter " ev-scopy tok ev-word-text@
+      s" Unknown scanner delimiter " ev-scopy tok
+      ev-word-text@
         ev-scat2
       0 tok ev-word-span@ ev-error-msg
       0
     then
   then ;
 
-: ev-line-find-close {: start line | result done -- idx|-1 :}
+: ev-line-find-close {: start line | result done -- idx|-1
+  :}
   -1 -> result
   false -> done
   line ev-vec-count@ start ?do
@@ -2655,10 +2791,12 @@ variable ev-spistar.tmp
   result ;
 
 : ev-infer-define-mode {: spec span -- mode :}
-  spec ev-spec-left-count 1 = spec ev-spec-right-count 0= and if
+  spec ev-spec-left-count 1 = spec ev-spec-right-count 0=
+  and if
     ev-define.constant
   else
-    spec ev-spec-left-count 0= spec ev-spec-right-count 1 = and
+    spec ev-spec-left-count 0= spec ev-spec-right-count 1 =
+    and
       if
       ev-define.variable
     else
@@ -2672,15 +2810,18 @@ variable ev-spistar.tmp
 : ev-validate-define-shape {: mode spec span --  :}
   mode 0= if exit then
   mode ev-define.colon = if
-    spec ev-spec-left-count 0<> spec ev-spec-right-count 0<> or
+    spec ev-spec-left-count 0<> spec ev-spec-right-count 0<>
+    or
       if
-      s" DEFINE COLON must have stack effect ( -- )" ev-scopy 0
+      s" DEFINE COLON must have stack effect ( -- )"
+      ev-scopy 0
         span ev-error-msg
     then
     exit
   then
   mode ev-define.constant = if
-    spec ev-spec-left-count 1 <> spec ev-spec-right-count 0<> or
+    spec ev-spec-left-count 1 <> spec ev-spec-right-count
+    0<> or
       if
       s" DEFINE CONSTANT must have stack effect ( x -- )"
         ev-scopy 0 span ev-error-msg
@@ -2688,7 +2829,8 @@ variable ev-spistar.tmp
     exit
   then
   mode ev-define.variable = if
-    spec ev-spec-left-count 0<> spec ev-spec-right-count 1 <> or
+    spec ev-spec-left-count 0<> spec ev-spec-right-count 1
+    <> or
       if
       s" DEFINE VARIABLE must have stack effect ( -- y )"
         ev-scopy 0 span ev-error-msg
@@ -2697,7 +2839,10 @@ variable ev-spistar.tmp
 
 \ Parses one ordinary word specification line, including
 \ parser/define/control metadata.
-: ev-parse-word-spec-line {: line ts ss | word openi closei body bodyspec parsemode parsestring definemode defineseen controlmode statemode immediate idx tok modetok parsedmode outspec --  :}
+: ev-parse-word-spec-line {: line ts ss | word openi closei
+  body bodyspec parsemode parsestring definemode defineseen
+  controlmode statemode immediate idx tok modetok parsedmode
+  outspec -- :}
   0 line ev-vec@ -> word
   -1 -> openi
   line ev-vec-count@ 1 ?do
@@ -2707,12 +2852,14 @@ variable ev-spistar.tmp
     then
   loop
   openi 0< if
-    s" Missing ( in specification" ev-scopy 0 word ev-word-span@
+    s" Missing ( in specification" ev-scopy 0 word
+    ev-word-span@
       ev-error-msg
   then
   openi line ev-line-find-close -> closei
   closei 0< if
-    s" Missing ) in specification" ev-scopy 0 word ev-word-span@
+    s" Missing ) in specification" ev-scopy 0 word
+    ev-word-span@
       ev-error-msg
   then
   openi 1+ closei line ev-line-range>sptr -> body
@@ -2744,7 +2891,8 @@ variable ev-spistar.tmp
       then to parsemode
       idx 1+ to idx
       parsemode ev-parse-mode-needs-arg? if
-        idx openi >= if s" Missing parser delimiter" ev-scopy 0
+        idx openi >= if s" Missing parser delimiter"
+      ev-scopy 0
           tok ev-word-span@ ev-error-msg then
         idx line ev-vec@ ts ev-resolve-parse-string
           to parsestring
@@ -2764,7 +2912,8 @@ variable ev-spistar.tmp
       then
     else tok s" control" ev-word-text= if
       idx 1+ to idx
-      idx openi >= if s" Missing control mode" ev-scopy 0 tok
+      idx openi >= if s" Missing control mode" ev-scopy 0
+      tok
         ev-word-span@ ev-error-msg then
       idx line ev-vec@ ev-word-text@ ev-canon-sptr
         to controlmode
@@ -2780,7 +2929,8 @@ variable ev-spistar.tmp
       idx 1+ to idx
     else tok s" context" ev-word-text= if
       idx 1+ to idx
-      idx openi >= if s" Missing context mode" ev-scopy 0 tok
+      idx openi >= if s" Missing context mode" ev-scopy 0
+      tok
         ev-word-span@ ev-error-msg then
       idx line ev-vec@ ev-state-mode-from dup 0= if
         s" Unknown context mode" ev-scopy 0 idx line ev-vec@
@@ -2792,10 +2942,12 @@ variable ev-spistar.tmp
       idx 1+ to idx
     else tok s" scan" ev-word-text= if
       idx 1+ to idx
-      idx openi >= if s" Missing scanner delimiter" ev-scopy 0
+      idx openi >= if s" Missing scanner delimiter" ev-scopy
+      0
         tok ev-word-span@ ev-error-msg then
       ev-parse.until to parsemode
-      idx line ev-vec@ ts ev-resolve-parse-string to parsestring
+      idx line ev-vec@ ts ev-resolve-parse-string
+      to parsestring
       idx 1+ to idx
     else
       parsemode ev-parse.none <> if
@@ -2813,17 +2965,20 @@ variable ev-spistar.tmp
   then
   definemode bodyspec word ev-word-span@
     ev-validate-define-shape
-  bodyspec parsemode parsestring ev-spec-with-parse -> outspec
+  bodyspec parsemode parsestring ev-spec-with-parse
+  -> outspec
   outspec definemode ev-spec-with-define to outspec
   outspec controlmode ev-spec-with-control to outspec
   outspec immediate ev-spec-with-immediate to outspec
   outspec statemode ev-spec-with-state to outspec
-  outspec word ev-word-span@ 0 ev-spec-with-origin to outspec
+  outspec word ev-word-span@ 0 ev-spec-with-origin
+  to outspec
   word ev-word-text@ outspec word ev-word-span@ ss
     ev-ss-add-word
   ;
 
-: ev-parse-literal-line {: line ts ss | kind openi closei spec --  :}
+: ev-parse-literal-line {: line ts ss | kind openi closei
+  spec -- :}
   line ev-vec-count@ 4 < if
     s" Malformed literal specification" ev-scopy 0 0 line
       ev-vec@ ev-word-span@ ev-error-msg
@@ -2851,9 +3006,11 @@ variable ev-spistar.tmp
   kind ev-word-text@ spec kind ev-word-span@ ss
     ev-ss-add-literal ;
 
-\ Collects one indented syntax/effect block and turns it into
-\ a declarative structure entry.
-: ev-parse-syntax-block {: sc head line ss | basecol syntaxlines effectlines pending have-effect done nextline first st -- pending|0 :}
+\ Turns one indented syntax/effect block into a declarative
+\ structure entry.
+: ev-parse-syntax-block {: sc head line ss | basecol
+  syntaxlines effectlines pending have-effect done nextline
+  first st -- pending|0 :}
   head ev-word-span@ ev-span.scol + @ -> basecol
   8 ev-vec-new -> syntaxlines
   8 ev-vec-new -> effectlines
@@ -2891,7 +3048,8 @@ variable ev-spistar.tmp
                 ev-line-range>sptr syntaxlines ev-vec-push
             then
           else
-            0 nextline ev-vec-count@ nextline ev-line-range>sptr
+            0 nextline ev-vec-count@ nextline
+      ev-line-range>sptr
               effectlines ev-vec-push
           then
         then
@@ -2935,7 +3093,7 @@ variable ev-spistar.tmp
   ss ev-ss-install-builtins
   ss ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Native program parser and evaluator
 
 0 cells constant ev-prog.name
@@ -3015,7 +3173,8 @@ variable ev-current-local-pos
 variable ev-current-local-seed
 variable ev-current-local-seed-index
 
-: ev-local-find-entry {: name | locals key entry -- entry|0 :}
+: ev-local-find-entry {: name | locals key entry -- entry|0
+  :}
   ev-current-locals @ -> locals
   locals 0= if 0 exit then
   name ev-canon-sptr -> key
@@ -3084,7 +3243,8 @@ variable ev-current-local-seed-index
   left right ev-spec-new dup ev-spec-max-pos drop ;
 
 : ev-local-fresh-sym {: | pos sym -- :} ( -- sym )
-  ev-current-local-pos @ 1+ dup ev-current-local-pos ! -> pos
+  ev-current-local-pos @ 1+ dup ev-current-local-pos !
+  -> pos
   /ev-sym ev-xalloc -> sym
   s" x" ev-scopy sym ev-sym.type + !
   pos sym ev-sym.pos + !
@@ -3106,17 +3266,21 @@ variable ev-current-local-seed-index
     then
   then ;
 
-: ev-consume-local-declaration {: | token spec sc parsed span names locals left name sym lspec entry -- :} ( token spec sc -- span bindspec
+: ev-consume-local-declaration {: | token spec sc parsed
+  span names locals left name sym lspec entry -- :} ( token
+  spec sc -- span bindspec
   )
    -> sc -> spec -> token
   sc ev-sc-skip-whitespace
-  spec ev-spec.parse-string + @ sc ev-sc-parse-until -> parsed
+  spec ev-spec.parse-string + @ sc ev-sc-parse-until
+  -> parsed
   parsed 0= if
     s" Missing closing delimiter for parser word" ev-scopy 0
       token ev-word-span@ ev-error-msg
     0 0
   else
-    parsed ev-word-span@ token ev-word-span@ swap ev-span-cover
+    parsed ev-word-span@ token ev-word-span@ swap
+    ev-span-cover
       -> span
     parsed ev-word-text@ ev-parse-local-names -> names
     ev-current-locals @ -> locals
@@ -3141,7 +3305,8 @@ variable ev-current-local-seed-index
   then ;
 
 : ev-next-prog-word {: sc -- word|0 :}
-  0 0 sc ev-sc-next-program-word dup ev-current-program-token !
+  0 0 sc ev-sc-next-program-word dup
+  ev-current-program-token !
     ;
 
 : ev-int-literal? {: text | addr u idx ok -- flag :}
@@ -3163,7 +3328,8 @@ variable ev-current-local-seed-index
     then
     u idx ?do
       ok if
-        addr i + c@ dup [char] 0 >= swap [char] 9 <= and 0= if
+        addr i + c@ dup [char] 0 >= swap [char] 9 <= and 0=
+      if
           false to ok
         then
       then
@@ -3193,7 +3359,8 @@ variable ev-current-local-seed-index
     0
   then ;
 
-: ev-control-runtime-spec {: role ts ss span | entry -- spec :}
+: ev-control-runtime-spec {: role ts ss span | entry -- spec
+  :}
   role ss ev-ss-role-entry -> entry
   entry 0<> if
     entry ev-entry.value + @ ev-runtime-clone
@@ -3211,7 +3378,8 @@ variable ev-current-local-seed-index
 
 \ Resolves a program token to the runtime effect it
 \ contributes at the current nesting depth.
-: ev-resolve-runtime-spec {: token do-depth ts ss | spec dspec ispec -- spec :}
+: ev-resolve-runtime-spec {: token do-depth ts ss | spec
+  dspec ispec -- spec :}
   token ev-token-is-local? if
     token ev-local-read-spec exit
   then
@@ -3221,12 +3389,15 @@ variable ev-current-local-seed-index
   token ev-word-text@ ss ev-ss-word@ -> spec
   spec 0<> if
     spec ev-spec-is-control? if
-      spec ev-spec.control-mode + @ s" INDEX" ev-key= do-depth
+      spec ev-spec.control-mode + @ s" INDEX" ev-key=
+      do-depth
         0> and if
-        spec ev-spec.control-mode + @ ts ss token ev-word-span@
+        spec ev-spec.control-mode + @ ts ss token
+      ev-word-span@
           ev-control-runtime-spec exit
       then
-      s" Unexpected control word" ev-scopy 0 token ev-word-span@
+      s" Unexpected control word" ev-scopy 0 token
+      ev-word-span@
         ev-error-msg
       0 exit
     then
@@ -3235,23 +3406,27 @@ variable ev-current-local-seed-index
   token ev-word-text@ ev-double-literal? if
     s" DOUBLE" ev-scopy ss ev-ss-literal@ -> dspec
     dspec 0<> if dspec ev-runtime-clone exit then
-    s" No literal specification for double literal" ev-scopy 0
+    s" No literal specification for double literal" ev-scopy
+    0
       token ev-word-span@ ev-error-msg
     0 exit
   then
   token ev-word-text@ ev-int-literal? if
     s" INTEGER" ev-scopy ss ev-ss-literal@ -> ispec
     ispec 0<> if ispec ev-runtime-clone exit then
-    s" No literal specification for integer literal" ev-scopy 0
+    s" No literal specification for integer literal"
+    ev-scopy 0
       token ev-word-span@ ev-error-msg
     0 exit
   then
-  s" No specification found for " ev-scopy token ev-word-text@
+  s" No specification found for " ev-scopy token
+  ev-word-text@
     ev-scat2
   0 token ev-word-span@ ev-error-msg
   0 ;
 
-: ev-consume-parser-input {: token spec sc | nextword parsed -- span :}
+: ev-consume-parser-input {: token spec sc | nextword parsed
+  -- span :}
   spec ev-spec-consumes-word? if
     sc ev-next-prog-word -> nextword
     nextword 0= if
@@ -3265,12 +3440,14 @@ variable ev-current-local-seed-index
   else
     spec ev-spec-consumes-until? if
       sc ev-sc-skip-whitespace
-      spec ev-spec.parse-string + @ sc ev-sc-parse-until -> parsed
+      spec ev-spec.parse-string + @ sc ev-sc-parse-until
+      -> parsed
       parsed 0<> if
         parsed ev-word-span@ token ev-word-span@ swap
           ev-span-cover
       else
-        s" Missing closing delimiter for parser word" ev-scopy 0
+        s" Missing closing delimiter for parser word"
+      ev-scopy 0
           token ev-word-span@ ev-error-msg
         0
       then
@@ -3308,7 +3485,8 @@ variable ev-ipi.spec
 variable ev-ipi.sc
 
 : ev-ignore-parser-input-worker ( -- )
-  ev-ipi.tok @ ev-ipi.spec @ ev-ipi.sc @ ev-consume-parser-input
+  ev-ipi.tok @ ev-ipi.spec @ ev-ipi.sc @
+  ev-consume-parser-input
     drop ;
 
 : ev-ignore-parser-input-error {: tok spec sc | saved --  :}
@@ -3331,10 +3509,12 @@ variable ev-ipi.sc
     then
   then ;
 
-: ev-recover-definition {: sc tok spec ss | nested done skipped skippedspec --  :}
+: ev-recover-definition {: sc tok spec ss | nested done
+  skipped skippedspec -- :}
   tok 0= if exit then
   spec ev-definition-end-spec? if exit then
-  tok ss ev-definition-starter-token? if 1 else 0 then -> nested
+  tok ss ev-definition-starter-token? if 1 else 0 then
+  -> nested
   tok spec sc ev-skip-recovery-payload
   false -> done
   begin done 0= while
@@ -3360,12 +3540,14 @@ variable ev-ipi.sc
     then
   repeat ;
 
-: ev-recover-top-level {: sc tok spec ss | badtok badspec --  :}
+: ev-recover-top-level {: sc tok spec ss | badtok badspec --
+  :}
   spec 0= if exit then
   spec ev-spec-defines-word? if
     spec ev-spec.define-mode + @ ev-define.colon = if
       ev-current-program-token @ -> badtok
-      badtok if badtok ev-word-text@ ss ev-ss-word@ else 0 then
+      badtok if badtok ev-word-text@ ss ev-ss-word@ else 0
+      then
         -> badspec
       sc badtok badspec ss ev-recover-definition
     then
@@ -3386,8 +3568,8 @@ variable ev-ipi.sc
     tok ev-word-span@
   then ;
 
-\ Evaluates a linear sequence of runtime effects and raises a
-\ contextual clash if composition fails.
+\ Evaluates runtime effects and raises a contextual clash
+\ if composition fails.
 : ev-spec-list-clone {: seq | copy -- copy :}
   seq ev-vec-count@ 4 ev-max ev-vec-new -> copy
   seq ev-vec-count@ 0 ?do
@@ -3416,10 +3598,12 @@ variable ev-sac.context
 variable ev-sac.ts
 
 : ev-seq-add-checked-worker ( -- )
-  ev-sac.seq @ ev-sac.context @ ev-sac.ts @ ev-seq-evaluate drop
+  ev-sac.seq @ ev-sac.context @ ev-sac.ts @ ev-seq-evaluate
+  drop
     ;
 
-: ev-seq-add-checked {: word span spec seq context ts | code --  :}
+: ev-seq-add-checked {: word span spec seq context ts | code
+  -- :}
   word span spec seq ev-seq-add
   seq ev-sac.seq !
   context ev-sac.context !
@@ -3457,7 +3641,8 @@ variable ev-pds.seqvec
 variable ev-pds.pending-spec
 variable ev-pds.have-pending-spec
 
-: ev-filter-boundary-candidates {: role stage candidates | out st -- out :}
+: ev-filter-boundary-candidates {: role stage candidates |
+  out st -- out :}
   4 ev-vec-new -> out
   candidates ev-vec-count@ 0 ?do
     i candidates ev-vec@ -> st
@@ -3468,11 +3653,13 @@ variable ev-pds.have-pending-spec
   loop
   out ;
 
-: ev-filter-close-candidates {: role stage candidates | out st -- out :}
+: ev-filter-close-candidates {: role stage candidates | out
+  st -- out :}
   4 ev-vec-new -> out
   candidates ev-vec-count@ 0 ?do
     i candidates ev-vec@ -> st
-    role stage st ev-control-close-match? if st out ev-vec-push
+    role stage st ev-control-close-match? if st out
+    ev-vec-push
       then
   loop
   out ;
@@ -3483,14 +3670,17 @@ variable ev-pds.have-pending-spec
     out s" ..." ev-scopy ev-scat2
     i st ev-struct-boundary@ ev-scat2 to out
   loop
-  out s" ..." ev-scopy ev-scat2 st ev-struct.close + @ ev-scat2
+  out s" ..." ev-scopy ev-scat2 st ev-struct.close + @
+  ev-scat2
     ;
 
 variable ev-ese.seqvec
 
 \ Evaluates the control-effect algebra for one parsed
 \ structure instance.
-: ev-eval-structure-expr {: expr st segspecs ts ss span | kind result handled idx left right joined inner repeated -- spec :}
+: ev-eval-structure-expr {: expr st segspecs ts ss span |
+  kind result handled idx left right joined inner repeated
+  -- spec :}
   expr ev-expr.kind + @ -> kind
   0 -> result
   false -> handled
@@ -3501,7 +3691,8 @@ variable ev-ese.seqvec
   handled 0= kind ev-expr.segment = and if
     expr ev-expr.a + @ st ev-struct-segment-index -> idx
     idx 0< if
-      s" Unknown structure segment" ev-scopy 0 span ev-error-msg
+      s" Unknown structure segment" ev-scopy 0 span
+      ev-error-msg
     then
     idx segspecs ev-vec-count@ < if
       idx segspecs ev-vec@ ev-spec-clone to result
@@ -3526,18 +3717,22 @@ variable ev-ese.seqvec
     true to handled
   then
   handled 0= kind ev-expr.glb = and if
-    expr ev-expr.a + @ st segspecs ts ss span recurse -> left
-    expr ev-expr.b + @ st segspecs ts ss span recurse -> right
+    expr ev-expr.a + @ st segspecs ts ss span recurse
+    -> left
+    expr ev-expr.b + @ st segspecs ts ss span recurse
+    -> right
     left right ts ev-spec-glb -> joined
     joined 0= if
-      s" Non-comparable control alternatives" ev-scopy 0 span
+      s" Non-comparable control alternatives" ev-scopy 0
+      span
         ev-error-msg
     then
     joined to result
     true to handled
   then
   handled 0= if
-    expr ev-expr.a + @ st segspecs ts ss span recurse -> inner
+    expr ev-expr.a + @ st segspecs ts ss span recurse
+    -> inner
     inner ts ev-spec-pistar -> repeated
     repeated 0= if
       s" Non-idempotent repeated effect" ev-scopy 0 span
@@ -3548,7 +3743,10 @@ variable ev-ese.seqvec
   result ;
 
 : ev-parse-definition-structure
-  {: opener spec defname sc ts ss do-depth | open-role candidates segments current stage inner-depth done result tok tspec role by-boundary by-close st segspecs span lspec -- spec :}
+  {: opener spec defname sc ts ss do-depth | open-role
+  candidates segments current stage inner-depth done result
+  tok tspec role by-boundary by-close st segspecs span lspec
+  -- spec :}
   spec ev-spec.control-mode + @ -> open-role
   open-role ss ev-ss-open-structures -> candidates
   candidates ev-vec-count@ 0= if
@@ -3558,7 +3756,8 @@ variable ev-ese.seqvec
   8 ev-vec-new -> segments
   16 ev-vec-new -> current
   0 -> stage
-  open-role s" DO" ev-key= if do-depth 1+ else do-depth then -> inner-depth
+  open-role s" DO" ev-key= if do-depth 1+ else do-depth then
+  -> inner-depth
   false -> done
   0 -> result
   begin done 0= while
@@ -3574,24 +3773,30 @@ variable ev-ese.seqvec
       tspec if
         tspec ev-spec-is-control? if
           tspec ev-spec.control-mode + @ -> role
-          role stage candidates ev-filter-boundary-candidates -> by-boundary
-          role stage candidates ev-filter-close-candidates -> by-close
-          by-close ev-vec-count@ 0> by-boundary ev-vec-count@ 0=
+          role stage candidates
+      ev-filter-boundary-candidates -> by-boundary
+          role stage candidates ev-filter-close-candidates
+      -> by-close
+          by-close ev-vec-count@ 0> by-boundary
+      ev-vec-count@ 0=
             and if
             current segments ev-vec-push
             0 by-close ev-vec@ -> st
-            segments ev-vec-count@ 4 ev-max ev-vec-new -> segspecs
+            segments ev-vec-count@ 4 ev-max ev-vec-new
+      -> segspecs
             segments ev-vec-count@ 0 ?do
               i segments ev-vec@ defname ts ev-seq-evaluate
                 segspecs ev-vec-push
             loop
-            opener ev-word-span@ tok ev-word-span@ ev-span-cover
+            opener ev-word-span@ tok ev-word-span@
+      ev-span-cover
               -> span
             st ev-struct.meaning + @ st segspecs ts ss span
               ev-eval-structure-expr to result
             true to done
           else
-            by-boundary ev-vec-count@ 0> by-close ev-vec-count@
+            by-boundary ev-vec-count@ 0> by-close
+      ev-vec-count@
               0= and if
               current segments ev-vec-push
               16 ev-vec-new to current
@@ -3600,8 +3805,10 @@ variable ev-ese.seqvec
             else
               false ev-pds.have-pending-spec !
               0 ev-pds.pending-spec !
-              role ss ev-ss-open-structures ev-vec-count@ 0> if
-                tok tspec defname sc ts ss inner-depth recurse
+              role ss ev-ss-open-structures ev-vec-count@ 0>
+      if
+                tok tspec defname sc ts ss inner-depth
+      recurse
                 ev-pds.pending-spec !
                 true ev-pds.have-pending-spec !
               then
@@ -3632,8 +3839,10 @@ variable ev-ese.seqvec
               0 tok ev-word-span@ ev-error-msg
             then
             tok tspec ev-local-declaration? if
-              tok tspec sc ev-consume-local-declaration -> lspec -> span
-              tok ev-word-text@ span lspec current defname ts
+              tok tspec sc ev-consume-local-declaration
+      -> lspec -> span
+              tok ev-word-text@ span lspec current defname
+      ts
                 ev-seq-add-checked
             else
               tok tspec sc ev-consume-parser-input
@@ -3650,7 +3859,8 @@ variable ev-ese.seqvec
         then
       else
         tok inner-depth ts ss ev-resolve-runtime-spec
-        tok ev-word-text@ tok ev-word-span@ rot current defname
+        tok ev-word-text@ tok ev-word-span@ rot current
+      defname
           ts
           ev-seq-add-checked
       then
@@ -3667,7 +3877,8 @@ variable ev-ese.seqvec
 \ Parses a colon-definition body until its closing role,
 \ recursively handling nested structures.
 : ev-parse-definition-seq
-  {: defname sc ts ss do-depth close-role | done closed tok spec span lspec -- spec :}
+  {: defname sc ts ss do-depth close-role | done closed tok
+  spec span lspec -- spec :}
   16 ev-vec-new ev-pds.seqvec !
   false -> done
   false -> closed
@@ -3695,7 +3906,8 @@ variable ev-ese.seqvec
                 ev-pds.seqvec @ defname ts
                 ev-seq-add-checked
             else
-              spec ev-spec.control-mode + @ s" INDEX" ev-key=
+              spec ev-spec.control-mode + @ s" INDEX"
+      ev-key=
                 do-depth 0> and if
                 spec ev-spec.control-mode + @ ts ss tok
                   ev-word-span@ ev-control-runtime-spec
@@ -3717,7 +3929,8 @@ variable ev-ese.seqvec
               0 tok ev-word-span@ ev-error-msg
             then
             tok spec ev-local-declaration? if
-              tok spec sc ev-consume-local-declaration -> lspec -> span
+              tok spec sc ev-consume-local-declaration
+      -> lspec -> span
               tok ev-word-text@ span lspec ev-pds.seqvec @
                 defname ts
                 ev-seq-add-checked
@@ -3736,7 +3949,8 @@ variable ev-ese.seqvec
         then
       else
         tok do-depth ts ss ev-resolve-runtime-spec
-        tok ev-word-text@ tok ev-word-span@ rot ev-pds.seqvec @
+        tok ev-word-text@ tok ev-word-span@ rot
+      ev-pds.seqvec @
           defname ts
           ev-seq-add-checked
       then
@@ -3759,8 +3973,8 @@ variable ev-ese.seqvec
   ev-parse-definition-seq
   ev-pds.result ! ;
 
-\ Treats actual definition opener/terminator surface words as
-\ reserved names.
+\ Treats definition opener and terminator words as reserved
+\ names.
 : ev-definition-boundary-name? {: name ss | spec -- flag :}
   name ss ev-ss-word@ -> spec
   spec 0= if
@@ -3778,8 +3992,9 @@ variable ev-ese.seqvec
   then
   ;
 
-\ Reads the next user-defined word name after a defining word.
-: ev-next-defined-name {: sc defining-token ss | name -- name :}
+\ Reads the next user-defined name after a defining word.
+: ev-next-defined-name {: sc defining-token ss | name --
+  name :}
   sc ev-next-prog-word dup 0= if
     s" Missing word name after " ev-scopy defining-token
       ev-word-text@ ev-scat2
@@ -3791,12 +4006,13 @@ variable ev-ese.seqvec
     0 name ev-word-span@ ev-error-msg
   then
   name ev-word-text@ ss ev-definition-boundary-name? if
-    s" Illegal word name " ev-scopy name ev-word-text@ ev-scat2
+    s" Illegal word name " ev-scopy name ev-word-text@
+    ev-scat2
     0 name ev-word-span@ ev-error-msg
   then
   name ;
 
-\ Pushes a non-explicit symbol of the requested type into a
+\ Pushes an implicit symbol of the requested type into a
 \ vector.
 : ev-vec-push-implicit-sym {: type vec | sym --  :}
   /ev-sym ev-xalloc -> sym
@@ -3805,33 +4021,38 @@ variable ev-ese.seqvec
   false sym ev-sym.explicit + !
   sym vec ev-vec-push ;
 
-\ Builds a one-input runtime effect for a concrete type name.
+\ Builds a one-input runtime effect for a concrete type
+\ name.
 : ev-type-input-spec {: type | left right -- spec :}
   4 ev-vec-new -> left
   4 ev-vec-new -> right
   type left ev-vec-push-implicit-sym
   left right ev-spec-new dup ev-spec-max-pos drop ;
 
-\ Builds a zero-input runtime effect that produces one
-\ concrete type.
+\ Builds a zero-input effect that produces one concrete
+\ type.
 : ev-type-output-spec {: type | left right -- spec :}
   4 ev-vec-new -> left
   4 ev-vec-new -> right
   type right ev-vec-push-implicit-sym
   left right ev-spec-new dup ev-spec-max-pos drop ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Forward declaration seeding from source text
 
-: ev-generic-placeholder-spec {: inputs outputs | left right -- spec :}
+: ev-generic-placeholder-spec {: inputs outputs | left right
+  -- spec :}
   inputs 4 ev-max ev-vec-new -> left
   outputs 4 ev-max ev-vec-new -> right
-  inputs 0 ?do s" x" ev-scopy left ev-vec-push-implicit-sym loop
-  outputs 0 ?do s" x" ev-scopy right ev-vec-push-implicit-sym
+  inputs 0 ?do s" x" ev-scopy left ev-vec-push-implicit-sym
+  loop
+  outputs 0 ?do s" x" ev-scopy right
+  ev-vec-push-implicit-sym
     loop
   left right ev-spec-new dup ev-spec-max-pos drop ;
 
-: ev-local-doc-counts {: text | sc inputs outputs left-side? done tok -- inputs outputs :}
+: ev-local-doc-counts {: text | sc inputs outputs left-side?
+  done tok -- inputs outputs :}
   s" <locals-doc>" ev-scopy text ev-sc-new -> sc
   0 -> inputs
   0 -> outputs
@@ -3874,7 +4095,8 @@ variable ev-ese.seqvec
 : ev-forward-next-prog-word {: sc -- word|0 :}
   0 0 sc ev-sc-next-program-word ;
 
-: ev-documented-definition-placeholder {: sc ts ss | preview tok spec body inputs outputs -- spec|0 :}
+: ev-documented-definition-placeholder {: sc ts ss | preview
+  tok spec body inputs outputs -- spec|0 :}
   sc ev-sc-clone -> preview
   preview ev-forward-next-prog-word -> tok
   tok 0= if
@@ -3882,11 +4104,13 @@ variable ev-ese.seqvec
   else
     tok ev-word-text@ ss ev-ss-word@ -> spec
     tok spec ev-local-declaration? if
-      spec ev-spec.parse-string + @ preview ev-sc-parse-until -> body
+      spec ev-spec.parse-string + @ preview
+      ev-sc-parse-until -> body
       body 0= if
         0
       else
-        body ev-word-text@ ev-local-doc-counts -> outputs -> inputs
+        body ev-word-text@ ev-local-doc-counts -> outputs
+      -> inputs
         inputs outputs ev-generic-placeholder-spec
       then
     else
@@ -3898,18 +4122,22 @@ variable ev-ese.seqvec
     then
   then ;
 
-: ev-forward-placeholder {: name defspec sc ts ss | placeholder -- spec|0 :}
+: ev-forward-placeholder {: name defspec sc ts ss |
+  placeholder -- spec|0 :}
   0 -> placeholder
   name ev-word-text@ ss ev-ss-word@ 0= if
     defspec ev-spec.define-mode + @ ev-define.colon = if
       sc ts ss ev-documented-definition-placeholder
         to placeholder
     else
-      defspec ev-spec.define-mode + @ ev-define.constant = if
-        0 defspec ev-spec-left-count ev-generic-placeholder-spec
+      defspec ev-spec.define-mode + @ ev-define.constant =
+      if
+        0 defspec ev-spec-left-count
+      ev-generic-placeholder-spec
           to placeholder
       else
-        defspec ev-spec.define-mode + @ ev-define.variable = if
+        defspec ev-spec.define-mode + @ ev-define.variable =
+      if
           0 defspec ev-spec-right-count
             ev-generic-placeholder-spec to placeholder
         then
@@ -3934,7 +4162,8 @@ variable ev-ese.seqvec
     0
   then ;
 
-: ev-definition-close-token? {: tok spec terminator -- flag :}
+: ev-definition-close-token? {: tok spec terminator -- flag
+  :}
   spec ev-definition-end-spec? if
     true
   else
@@ -3952,11 +4181,13 @@ variable ev-ese.seqvec
   else
     spec ev-spec-consumes-until? if
       sc ev-sc-skip-whitespace
-      spec ev-spec.parse-string + @ sc ev-sc-parse-until drop
+      spec ev-spec.parse-string + @ sc ev-sc-parse-until
+      drop
     then
   then ;
 
-: ev-skip-forward-definition-body {: sc defspec ss | terminator nested done tok spec --  :}
+: ev-skip-forward-definition-body {: sc defspec ss |
+  terminator nested done tok spec -- :}
   defspec ev-definition-terminator -> terminator
   0 -> nested
   false -> done
@@ -3997,7 +4228,8 @@ variable ev-ese.seqvec
     then
   repeat ;
 
-: ev-seed-forward-definitions {: name text ts ss | sc done tok spec defname placeholder --  :}
+: ev-seed-forward-definitions {: name text ts ss | sc done
+  tok spec defname placeholder -- :}
   name text ev-sc-new -> sc
   false -> done
   begin done 0= while
@@ -4010,7 +4242,8 @@ variable ev-ese.seqvec
         spec ev-spec-defines-word? if
           sc ev-forward-next-prog-word -> defname
           defname 0<> if
-            defname spec sc ts ss ev-forward-placeholder -> placeholder
+            defname spec sc ts ss ev-forward-placeholder
+      -> placeholder
             placeholder 0<> if
               defname ev-word-text@ placeholder ss
                 ev-ss-set-word
@@ -4028,7 +4261,7 @@ variable ev-ese.seqvec
     then
   repeat ;
 
-\ Adds a hidden bookkeeping effect to the top-level program
+\ Adds a hidden bookkeeping effect to the top-level
 \ sequence.
 : ev-prog-add-hidden {: label span spec prog --  :}
   ev-sempty prog ev-prog.words + @ ev-vec-push
@@ -4043,13 +4276,18 @@ variable ev-ese.seqvec
 
 \ Handles ':' at top level: read the new word name, compile
 \ its body, then register the result.
-: ev-parse-definition {: token spec sc ts ss | name documented docspec savedlocals savedlocalpos savedlocalseed savedlocalseedindex end-role code badtok badspec defspec --  :}
-  spec ev-spec-left-count 0<> spec ev-spec-right-count 0<> or if
+: ev-parse-definition {: token spec sc ts ss | name
+  documented docspec savedlocals savedlocalpos
+  savedlocalseed savedlocalseedindex end-role code badtok
+  badspec defspec -- :}
+  spec ev-spec-left-count 0<> spec ev-spec-right-count 0<>
+  or if
     s" Colon definition word must have stack effect ( -- )"
       ev-scopy 0 token ev-word-span@ ev-error-msg
   then
   sc token ss ev-next-defined-name -> name
-  sc ts ss ev-documented-definition-placeholder -> documented
+  sc ts ss ev-documented-definition-placeholder
+  -> documented
   documented 0<> if
     documented name ev-word-span@ name ev-word-text@
       ev-spec-with-origin -> docspec
@@ -4083,7 +4321,8 @@ variable ev-ese.seqvec
     code ev-error# = if
       ev-report-current-diagnostic
       ev-current-program-token @ -> badtok
-      badtok if badtok ev-word-text@ ss ev-ss-word@ else 0 then
+      badtok if badtok ev-word-text@ ss ev-ss-word@ else 0
+      then
         -> badspec
       sc badtok badspec ss ev-recover-definition
       exit
@@ -4096,12 +4335,16 @@ variable ev-ese.seqvec
 
 \ Handles top-level CONSTANT-like words by consuming one
 \ runtime value and defining a zero-argument word.
-: ev-parse-top-level-constant {: token spec sc ts ss prog | name opname defspan prefix right top expected constspec --  :}
+: ev-parse-top-level-constant {: token spec sc ts ss prog |
+  name opname defspan prefix right top expected constspec --
+  :}
   sc token ss ev-next-defined-name -> name
   token ev-word-text@ ev-sspace ev-scat2 name ev-word-text@
     ev-scat2 -> opname
-  token ev-word-span@ name ev-word-span@ ev-span-cover -> defspan
-  spec ev-spec-left-count 1 <> spec ev-spec-right-count 0<> or
+  token ev-word-span@ name ev-word-span@ ev-span-cover
+  -> defspan
+  spec ev-spec-left-count 1 <> spec ev-spec-right-count 0<>
+  or
     if
     token ev-word-text@ ev-sspace ev-scat2
     s" must have defining shape ( x -- )" ev-scopy ev-scat2
@@ -4117,7 +4360,8 @@ variable ev-ese.seqvec
   then
   right ev-vec-last@ -> top
   0 spec ev-spec.left + @ ev-vec@ -> expected
-  top ev-sym.type + @ expected ev-sym.type + @ ts ev-ts-relation
+  top ev-sym.type + @ expected ev-sym.type + @ ts
+  ev-ts-relation
     0= if
     opname ev-sspace ev-scat2
     s" expects a value comparable with " ev-scopy ev-scat2
@@ -4136,10 +4380,13 @@ variable ev-ese.seqvec
 
 \ Handles top-level VARIABLE-like words by defining a
 \ zero-input runtime word.
-: ev-parse-top-level-variable {: token spec sc ts ss | name defspan varspec --  :}
+: ev-parse-top-level-variable {: token spec sc ts ss | name
+  defspan varspec -- :}
   sc token ss ev-next-defined-name -> name
-  token ev-word-span@ name ev-word-span@ ev-span-cover -> defspan
-  spec ev-spec-left-count 0<> spec ev-spec-right-count 1 <> or
+  token ev-word-span@ name ev-word-span@ ev-span-cover
+  -> defspan
+  spec ev-spec-left-count 0<> spec ev-spec-right-count 1 <>
+  or
     if
     token ev-word-text@ ev-sspace ev-scat2
     s" must have defining shape ( -- y )" ev-scopy ev-scat2
@@ -4161,7 +4408,8 @@ variable ev-pacw.ts
 : ev-prog-add-checked-worker ( -- )
   ev-pacw.prog @ ev-pacw.ts @ ev-prog-current-effect drop ;
 
-: ev-prog-add-checked-word {: word span spec prog ts | code --  :}
+: ev-prog-add-checked-word {: word span spec prog ts | code
+  -- :}
   word span spec prog ev-prog-add-word
   prog ev-pacw.prog !
   ts ev-pacw.ts !
@@ -4187,6 +4435,8 @@ variable ev-pacw.ts
   loop
   out ;
 
+\ Prints the normalized input, per-word effects, and output
+\ for an analyzed program.
 : ev-annotate. {: prog specs final | words word --  :}
   ." > " final ev-spec.left + @ ev-sym-vec>sptr ev-s.
   cr
@@ -4205,7 +4455,8 @@ variable ev-pacw.ts
   ." < " final ev-spec.right + @ ev-sym-vec>sptr ev-s.
   cr ;
 
-: ev-parse-program-token {: tok spec sc ts ss prog | rspec mode span --  :}
+: ev-parse-program-token {: tok spec sc ts ss prog | rspec
+  mode span -- :}
   spec 0= if
     tok 0 ts ss ev-resolve-runtime-spec -> rspec
     tok ev-word-text@ tok ev-word-span@ rspec prog ts
@@ -4213,7 +4464,8 @@ variable ev-pacw.ts
     exit
   then
   spec ev-spec-allowed-interpret? 0= if
-    s" Word not supported in interpretation state" ev-scopy 0
+    s" Word not supported in interpretation state" ev-scopy
+    0
       tok ev-word-span@ ev-error-msg
   then
   spec ev-spec-is-immediate? 0= if
@@ -4235,7 +4487,8 @@ variable ev-pacw.ts
         ev-word-span@ ev-error-msg
     then then then
   else spec ev-spec-is-control? if
-    s" Unexpected control word in top-level program" ev-scopy 0
+    s" Unexpected control word in top-level program"
+    ev-scopy 0
       tok ev-word-span@ ev-error-msg
   else
     tok spec sc ev-consume-parser-input -> span
@@ -4261,7 +4514,8 @@ variable ev-ppt.prog
 
 \ Outer interpreter for program text: execute top-level
 \ defining words immediately and collect runtime effects.
-: ev-parse-program {: name text ts ss | sc prog done tok spec code -- prog :}
+: ev-parse-program {: name text ts ss | sc prog done tok
+  spec code -- prog :}
   name text ts ss ev-seed-forward-definitions
   name text ev-sc-new -> sc
   sc ev-sc.lines + @ ev-current-source-lines !
@@ -4292,7 +4546,7 @@ variable ev-ppt.prog
   repeat
   prog ;
 
-\ --------------------------------------------------------------
+\ ----------------------------------------------------------
 \ Native CLI entrypoint
 
 0 cells constant ev-cfg.types
@@ -4367,13 +4621,13 @@ variable ev-ppt.prog
     cfg ev-cfg.prog + @ ev-s@ ev-file>sptr
   then ;
 
-\ Parses the VFX process arguments, overriding the Forth-2012
-\ demonstration inputs when requested.
+\ Parses VFX process arguments and overrides demonstration
+\ inputs when requested.
 : ev-parse-args {: | cfg i a -- :} ( -- cfg )
   ev-cfg-new -> cfg
   1 -> i
-  \ When loaded from the VFX operating-system command line, skip the
-  \ `include vfx-evaluator.fth` loader pair before evaluator options.
+  \ Skip the `include vfx-evaluator.fth` loader pair when
+  \ processing VFX operating-system arguments.
   argc 2 > if
     1 ev-arg ev-scopy s" INCLUDE" ev-key= if 3 -> i then
   then
@@ -4407,24 +4661,15 @@ variable ev-ppt.prog
       i 1+ to i
     then then then
   repeat
-  cfg ev-cfg.types + @ 0= if
-    s" Missing required --types file. " ev-scopy ev-args-usage
-      ev-scat2 0 0 ev-error-msg
-  then
-  cfg ev-cfg.specs + @ 0= if
-    s" Missing required --specs file. " ev-scopy ev-args-usage
-      ev-scat2 0 0 ev-error-msg
-  then
-  cfg ev-cfg.prog + @ 0= cfg ev-cfg.words + @ ev-vec-count@ 0=
-    and if
-    s" Missing program source. " ev-scopy ev-args-usage ev-scat2
-      0 0 ev-error-msg
-  then
   cfg ;
+
+: ev-print-program {: prog -- :}
+  ." Program: " prog ev-prog-words>sptr ev-s. cr ;
 
 \ Native CLI entrypoint: load the files, parse the program,
 \ evaluate it, and print the annotation.
-: ev-run-native {: | cfg ts ss prog-name prog-text prog final-specs final -- :} ( -- )
+: ev-run-native {: | cfg ts ss prog-name prog-text prog
+  final-specs final -- :} ( -- )
   0 ev-current-diagnostic !
   0 ev-diagnostic-count !
   0 ev-current-program-token !
@@ -4456,7 +4701,7 @@ variable ev-ppt.prog
   then
   ." Program text:" cr
   prog ev-prog.text + @ ev-s. cr
-  ." Program: " prog ev-prog-words>sptr ev-s. cr
+  prog ev-print-program
   prog final-specs final ev-annotate.
   \ Leave one blank line after the newline-terminated
   \ annotation.
