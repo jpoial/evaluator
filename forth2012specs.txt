@@ -1,0 +1,278 @@
+\ Standard-like strict demo specification set for the evaluator.
+\ Format:
+\   word [parse mode ["<arg>"]] [define [mode]] [control mode]
+\        [state mode] ( inputs -- outputs )
+\   literal kind ( -- outputs )
+
+\ Core stack words
+OVER ( x[2] x[1] -- x[2] x[1] x[2] )
+SWAP ( x[2] x[1] -- x[1] x[2] )
+DUP ( x[1] -- x[1] x[1] )
+DROP ( x -- )
+ROT ( x[3] x[2] x[1] -- x[2] x[1] x[3] )
+2DROP ( x[2] x[1] -- )
+2DUP ( x[2] x[1] -- x[2] x[1] x[2] x[1] )
+2OVER ( x[4] x[3] x[2] x[1] -- x[4] x[3] x[2] x[1] x[4] x[3] )
+2SWAP ( x[4] x[3] x[2] x[1] -- x[2] x[1] x[4] x[3] )
+NIP ( x[2] x[1] -- x[1] )
+TUCK ( x[2] x[1] -- x[1] x[2] x[1] )
+>R ( x -- )
+R> ( -- x )
+R@ ( -- x )
+2>R ( x[2] x[1] -- )
+2R> ( -- x[2] x[1] )
+2R@ ( -- x[2] x[1] )
+
+\ Core parser and literal words
+"(" parse until ")" ( -- )
+"#" parse until eol ( -- )
+"\\" parse until eol ( -- )
+".(" parse until ")" state interpret ( -- )
+." parse until "\"" ( -- )
+ABORT" parse until "\"" ( flag -- )
+C" parse until "\"" ( -- c-addr )
+S" parse until "\"" ( -- c-addr u )
+CHAR parse word state interpret ( -- char )
+[CHAR] parse word state compile ( -- char )
+"{" parse until "}" state compile ( -- )
+' parse word state interpret ( -- xt )
+['] parse word state compile ( -- xt )
+TO parse word state compile ( x -- )
+: parse word define colon ( -- )
+; control end ( -- )
+CONSTANT parse word define ( x -- )
+2CONSTANT parse word define ( xd -- )
+VARIABLE parse word define ( -- a-addr )
+2VARIABLE parse word define ( -- a-addr )
+CREATE parse word define ( -- a-addr )
+literal integer ( -- n )
+literal double ( -- d )
+TRUE ( -- flag )
+FALSE ( -- flag )
+
+\ Structured control words and declarative control structures
+\ `parse`, `define`, and `control` imply compile-time action.
+\ `define` implies interpretation-only, and `control` implies compilation-only.
+\ The stack comment still shows what it consumes there.
+\ In `word control role`, `role` names the parser slot. `THEN` closes `FI`.
+IF control if ( flag -- )
+ELSE control else ( -- )
+FI control fi ( -- )
+THEN control fi ( -- )
+
+syntax: IF <then branch> [ELSE <else branch>] FI
+  effect:
+    IF
+    either <then branch> <else branch>
+
+BEGIN control begin ( -- )
+WHILE control while ( flag -- )
+REPEAT control repeat ( -- )
+
+syntax: BEGIN <loop prefix> WHILE <loop body> REPEAT
+  effect:
+    repeat <loop prefix> WHILE
+    repeat <loop body>
+
+AGAIN control again ( -- )
+
+syntax: BEGIN <loop body> AGAIN
+  effect:
+    repeat <loop body>
+
+UNTIL control until ( flag -- )
+
+syntax: BEGIN <loop body> UNTIL
+  effect:
+    repeat <loop body> UNTIL
+
+DO control do ( n[2] n[1] -- )
+?DO control do ( n[2] n[1] -- )
+LOOP control loop ( -- )
+I control index ( -- n )
+
+syntax: DO <loop body> LOOP
+  effect:
+    DO
+    repeat <loop body>
+
+\ Core numeric and comparison words
++ ( n n -- n )
+- ( n n -- n )
+* ( n n -- n )
+/MOD ( n n -- n n )
+*/ ( n n n -- n )
+*/MOD ( n n n -- n n )
+/ ( n n -- n )
+MOD ( n n -- n )
+1+ ( n -- n )
+1- ( n -- n )
+2* ( n -- n )
+2/ ( n -- n )
+NEGATE ( n -- n )
+ABS ( n -- n )
+MAX ( n n -- n )
+MIN ( n n -- n )
+M* ( n n -- d )
+S>D ( n -- d )
+0= ( x -- flag )
+0< ( n -- flag )
+0> ( n -- flag )
+0>= ( n -- flag )
+0<> ( x -- flag )
+= ( x x -- flag )
+<> ( x x -- flag )
+< ( n n -- flag )
+> ( n n -- flag )
+<= ( n n -- flag )
+>= ( n n -- flag )
+AND ( flag flag -- flag )
+OR ( flag flag -- flag )
+XOR ( flag flag -- flag )
+INVERT ( flag -- flag )
+U< ( u u -- flag )
+U> ( u u -- flag )
+UM* ( u u -- ud )
+UM/MOD ( ud u -- u u )
+WITHIN ( n n n -- flag )
+FM/MOD ( d n -- n n )
+SM/REM ( d n -- n n )
+LSHIFT ( x u -- x )
+RSHIFT ( x u -- x )
+
+\ Core memory, address, and character words
+@ ( a-addr -- x )
+2@ ( a-addr -- x[2] x[1] )
+HERE ( -- a-addr )
+DP ( -- a-addr )
+C@ ( c-addr -- char )
+! ( x a-addr -- )
+2! ( x[2] x[1] a-addr -- )
++! ( n a-addr -- )
+C! ( x c-addr -- )
+ALIGN ( -- )
+ALIGNED ( addr -- a-addr )
+ALLOT ( n -- )
+, ( x -- )
+BL ( -- char )
+CELL+ ( a-addr -- a-addr )
+CHAR+ ( c-addr -- c-addr )
+CELLS ( n -- n )
+CHARS ( n -- n )
+C, ( char -- )
+COUNT ( c-addr -- c-addr u )
+DEPTH ( -- n )
+ERASE ( addr u -- )
+FILL ( c-addr u char -- )
+MOVE ( addr addr u -- )
+>BODY ( xt -- a-addr )
+BASE ( -- a-addr )
+STATE ( -- a-addr )
+PAD ( -- c-addr )
+
+\ Exception and memory-allocation words
+\ `THROW` is approximated as its linear stack effect only; the evaluator does
+\ not model the standard's non-local control transfer.
+THROW ( n -- )
+ALLOCATE ( n -- a-addr ior )
+RESIZE ( a-addr n -- a-addr ior )
+\ Common system extension: Forth 2012 defines `CELL+` and `CELLS`, but not a
+\ standalone `CELL` word. Keep this for gforth compatibility.
+CELL ( -- n )
+
+\ Core I/O words
+ACCEPT ( c-addr n -- +n )
+KEY ( -- char )
+EMIT ( char -- )
+CR ( -- )
+SPACE ( -- )
+SPACES ( n -- )
+TYPE ( c-addr u -- )
+. ( n -- )
+U. ( u -- )
+DECIMAL ( -- )
+HEX ( -- )
+<# ( -- )
+\ The standard threads double-number state through pictured numeric output.
+\ The evaluator models that state more coarsely as a single stack item.
+#S ( x -- x )
+#> ( x -- c-addr u )
+
+\ Double word set
+D+ ( xd xd -- xd )
+D- ( xd xd -- xd )
+D. ( d -- )
+D0< ( d -- flag )
+D0= ( xd -- flag )
+D2* ( d -- d )
+D2/ ( d -- d )
+D< ( d d -- flag )
+D= ( xd xd -- flag )
+D>S ( d -- n )
+DABS ( d -- d )
+DMAX ( d d -- d )
+DMIN ( d d -- d )
+DNEGATE ( d -- d )
+D.R ( d n -- )
+DU< ( ud ud -- flag )
+M*/ ( d n n -- d )
+M+ ( d n -- d )
+
+\ String word set
+-TRAILING ( c-addr u -- c-addr u )
+/STRING ( c-addr u n -- c-addr u )
+BLANK ( c-addr u -- )
+CMOVE ( c-addr c-addr u -- )
+CMOVE> ( c-addr c-addr u -- )
+COMPARE ( c-addr u c-addr u -- n )
+SEARCH ( c-addr u c-addr u -- c-addr u flag )
+
+\ Search word set
+EXECUTE ( xt -- )
+FORTH-WORDLIST ( -- wid )
+GET-CURRENT ( -- wid )
+SET-CURRENT ( wid -- )
+WORDLIST ( -- wid )
+WORD ( char -- c-addr )
+ENVIRONMENT? ( c-addr u -- x flag )
+SOURCE ( -- c-addr u )
+
+\ Facility word set
+AT-XY ( u u -- )
+KEY? ( -- flag )
+PAGE ( -- )
+MS ( u -- )
+
+\ File word set
+CLOSE-FILE ( x -- ior )
+CREATE-FILE ( c-addr u fam -- fileid ior )
+DELETE-FILE ( c-addr u -- ior )
+FILE-POSITION ( x -- ud ior )
+FILE-SIZE ( x -- ud ior )
+FILE-STATUS ( c-addr u -- x ior )
+FLUSH-FILE ( fileid -- ior )
+OPEN-FILE ( c-addr u fam -- x ior )
+R/O ( -- fam )
+R/W ( -- fam )
+READ-FILE ( c-addr u x -- u ior )
+READ-LINE ( c-addr u x -- u flag ior )
+REPOSITION-FILE ( ud x -- ior )
+W/O ( -- fam )
+WRITE-FILE ( c-addr u x -- ior )
+WRITE-LINE ( c-addr u x -- ior )
+
+\ Exception helpers and common engine extras
+CATCH ( xt -- n )
+(BYE) ( -- )
+RDROP ( -- )
+argc ( -- a-addr )
+arg ( n -- c-addr u )
+
+\ Common compile-only runtime words
+EXIT state compile ( -- )
+J state compile ( -- n )
+K state compile ( -- n )
+LEAVE state compile ( -- )
+RECURSE state compile ( -- )
+UNLOOP state compile ( -- )
+
