@@ -13,13 +13,13 @@
 
 : test7 BEGIN SWAP OVER WHILE INVERT REPEAT ;
 
-: test8 BEGIN KEY 0= UNTIL ;
+: test8 BEGIN KEY BL = UNTIL ;
 
 : test9 IF @ ELSE C@ THEN ;
 
-: P INVERT HERE ! HERE ! HERE @ HERE C@ SWAP ;
+: P INVERT HERE ! DP ! DP @ DP C@ SWAP ;
 
-: Q SWAP ! HERE @ HERE ;
+: Q SWAP ! DP @ DP ;
 
 : test10 IF P ELSE Q THEN ;
 
