@@ -6,13 +6,19 @@ files into a named profile and optionally assigns profiles by source-file glob.
 Nothing in these files is executed.
 
 For a new dialect, copy the closest pair from the distribution's `profiles/`
-directory into your workspace and change the copy. Keeping the two files small at first makes errors
-easier to locate.
+directory into your workspace and change the copy. Keeping the two files small at
+first makes errors easier to locate. Editing reference copies does not change the
+bundled profiles in the installed extension.
 
 ## Project file: `.forth-evaluator.json`
 
-Run **Forth: Configure Custom Profile** to create or open this file. A minimal
-configuration is:
+Open a workspace folder, then run **Forth: Configure Custom Profile**. If the file
+does not exist at the chosen workspace root, the command asks you to select an
+existing types file and specs file and writes their paths to a new configuration.
+It does not generate profile files. If a configuration already exists, the command
+opens it without changing it.
+
+A minimal configuration is:
 
 ```json
 {
@@ -51,7 +57,8 @@ Rules:
 
 - `defaultProfile` must name an entry in `profiles`.
 - Every profile requires string-valued `types` and `specs` properties.
-- `files` is optional. The first matching glob wins.
+- `files` is optional. The first matching glob wins. Globs match source paths
+  relative to the configuration directory; use `/` as the separator.
 - Paths are resolved relative to `.forth-evaluator.json`. Absolute local paths and
   `file:` URIs are also accepted; other URI schemes are not.
 - Each profile file must be no larger than 5 MB.
@@ -60,7 +67,15 @@ Rules:
   matching `files` rule, the nearest project default, then bundled `forth2012`.
 
 VS Code validates this file automatically when the extension is installed. The
-extension searches from the source file's directory up to its workspace root.
+extension searches from the source file's directory up to its workspace root and
+uses only the nearest configuration; parent configurations are not merged. Open
+files outside a workspace do not use project configurations. A project profile
+with the same name as a bundled profile takes precedence.
+
+Choose **Automatic** in **Forth: Select Profile** (the empty-string setting) to
+allow project globs/defaults to take effect. Selecting a specific profile overrides
+those rules for the setting's scope, not only for the active editor. In a remote
+workspace, configuration and profile paths refer to the remote filesystem.
 
 ## Common text syntax
 
@@ -122,8 +137,11 @@ not matter). Relations are transitive. Add only genuine substitutability
 relations: an overly broad relation can hide a real stack error.
 
 Types that need to interact must be equal or related. For example, if `char < u`
-and `u < n`, a character can satisfy an input expecting `n`; unrelated address
-and execution-token types remain incompatible.
+and `u < n`, a character can satisfy an input expecting `n`. Composition can also
+refine a broader type to a related narrower type; it is not a one-way assignment
+check. In the bundled `forth2012` hierarchy, `a-addr < n` transitively, so `1 @`
+is accepted even though the checker cannot validate the address. Unrelated address
+and execution-token types remain incompatible, even if both are subtypes of `x`.
 
 ### `scanner`
 
@@ -201,8 +219,9 @@ VARIABLE parse word define variable ( -- a-addr )
 Supported defining modes are:
 
 - `define colon`: starts a named definition; its declared effect must be empty.
-- `define constant`: consumes exactly one cell and defines a word that returns the
-  inferred type of that value.
+- `define constant`: consumes exactly one symbolic stack item and defines a word
+  that returns its inferred type. An item may represent multiple runtime cells,
+  as with the bundled double-number types.
 - `define variable`: has no input and exactly one output; the new word returns that
   output type.
 
@@ -223,7 +242,9 @@ RECURSE state compile semantic recurse ( -- )
 - `state compile` marks a definition-only word; using it at top level is an error.
   `state interpret` marks interpretation-state behavior. `state definition` and
   `context definition` are aliases for compile, while `state outer` and
-  `context outer` are aliases for interpret.
+  `context outer` are aliases for interpret. In 0.6.1, interpretation-only words
+  are excluded from definition completions but are not diagnosed when entered
+  inside a definition; see the [confirmed analysis gap](REVIEW.md#confirmed-analysis-gap-in-061).
 - `immediate` marks an immediate word. It also keeps the word out of ordinary
   completion candidates.
 - `semantic recurse` gives a compile-state word the current definition's
@@ -314,5 +335,7 @@ being recognized automatically.
    mismatched branches, and unfinished controls.
 
 When an edited profile becomes invalid, the extension reports the error and keeps
-the last valid version. Fix the first reported profile line before interpreting
-secondary source diagnostics.
+the last valid profile for each open document that already had one. This fallback
+is not persisted across a server restart. Formatting is disabled while a profile
+error is active. Fix the first reported profile line before interpreting secondary
+source diagnostics.
