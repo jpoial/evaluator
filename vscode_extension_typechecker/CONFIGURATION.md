@@ -244,7 +244,7 @@ RECURSE state compile semantic recurse ( -- )
   `context definition` are aliases for compile, while `state outer` and
   `context outer` are aliases for interpret. In 0.6.1, interpretation-only words
   are excluded from definition completions but are not diagnosed when entered
-  inside a definition; see the [confirmed analysis gap](REVIEW.md#confirmed-analysis-gap-in-061).
+  inside a definition.
 - `immediate` marks an immediate word. It also keeps the word out of ordinary
   completion candidates.
 - `semantic recurse` gives a compile-state word the current definition's

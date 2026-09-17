@@ -9,30 +9,39 @@ The extension is self-contained: it uses VS Code's bundled Node.js runtime and
 does not require a separate Forth system, Python, Java, Node.js installation,
 network service, or Marketplace connection at run time.
 
-This directory is a **release distribution**, not a buildable extension source
-project. The installable package is in `release/`; the files in `profiles/` are
-reference copies. See [Release verification](REVIEW.md) for checks and review
-limitations.
-
 ## Install
 
 Requirements: desktop VS Code 1.96 or later on Windows, macOS, or Linux.
 
-1. Open **Extensions** in VS Code.
-2. Choose **… → Install from VSIX…**.
-3. Select `release/forth-editor-assistant-0.6.1.vsix`.
-4. Run **Forth: Open Example** from the Command Palette.
+Install **Forth Editor Assistant** from the
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=forth-evaluator.forth-editor-assistant),
+or run:
 
-You can also install from a terminal, starting in this directory
-(`vscode_extension_typechecker/`):
+```sh
+code --install-extension forth-evaluator.forth-editor-assistant
+```
+
+After installation, run **Forth: Open Example** from the Command Palette.
+
+For an offline installation from a repository checkout, choose **Extensions → … →
+Install from VSIX…** and select
+`release/forth-editor-assistant-0.6.1.vsix`, or run this command from the
+`vscode_extension_typechecker/` directory:
 
 ```sh
 code --install-extension release/forth-editor-assistant-0.6.1.vsix
 ```
 
-The `code` command must be on your PATH. To check download integrity, compare the
-package's SHA-256 hash with `release/SHA256SUMS` (see
-[verification commands](REVIEW.md#package-integrity)).
+The `code` command must be on your PATH. Verify the offline package before use:
+
+```sh
+cd release
+sha256sum --check SHA256SUMS
+```
+
+On macOS, use `shasum -a 256 -c SHA256SUMS` instead. This repository directory is
+a release distribution, not a buildable extension source project. The files in
+`profiles/` are reference copies.
 
 For WSL, SSH, or a development container, install the extension in the remote
 extension host. Browser-only vscode.dev is not supported.
@@ -109,8 +118,8 @@ A profile consists of a `types` file and a `specs` file. To use a workspace prof
 4. Select **Automatic** in **Forth: Select Profile** to use project globs/defaults.
 
 Editing this distribution's reference copies does not change the profiles inside
-the installed VSIX. See [Configuration profiles](CONFIGURATION.md) for file
-formats, examples, and authoring guidance.
+the installed VSIX. See [Configuration profiles](https://github.com/jpoial/evaluator/blob/main/vscode_extension_typechecker/CONFIGURATION.md)
+for file formats, examples, and authoring guidance.
 
 ## Useful settings
 
@@ -193,6 +202,7 @@ indicate an installation failure.
 Copyright Jaanus Pöial.
 
 Forth Editor Assistant is licensed under the
-[Apache License 2.0](LICENSE.txt). The installed package includes the same license.
-Licenses for bundled third-party components are listed in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[Apache License 2.0](https://github.com/jpoial/evaluator/blob/main/vscode_extension_typechecker/LICENSE.txt).
+The installed package includes the same license. Licenses for bundled third-party
+components are listed in
+[THIRD_PARTY_NOTICES.md](https://github.com/jpoial/evaluator/blob/main/vscode_extension_typechecker/THIRD_PARTY_NOTICES.md).
